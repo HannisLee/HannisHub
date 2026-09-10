@@ -114,7 +114,7 @@
             <form class="form" id="connection-form">
                 <input type="hidden" id="connection-id">
                 <div class="field"><label for="connection-name">名称</label><input id="connection-name" required placeholder="例如：生产 GPU 服务器"></div>
-                <div class="two"><div class="field"><label for="connection-host">地址 / 主机名</label><input id="connection-host" required placeholder="192.168.1.20"></div><div class="field"><label for="connection-port">SSH 端口</label><input id="connection-port" type="number" min="1" max="65535" value="22"></div></div>
+                <div class="two"><div class="field"><label for="connection-host">地址 / 主机名</label><input id="connection-host" required value="10.10.2." placeholder="10.10.2.X"></div><div class="field"><label for="connection-port">SSH 端口</label><input id="connection-port" type="number" min="1" max="65535" value="22"></div></div>
                 <div class="field"><label for="connection-user">用户名</label><input id="connection-user" required placeholder="ubuntu"></div>
                 <div class="field"><label for="connection-auth">认证方式</label><select id="connection-auth"><option value="key">私钥文件</option><option value="password">密码</option><option value="agent">SSH Agent</option></select></div>
                 <div class="field" id="key-field"><label for="connection-key">私钥路径 <span class="hint">可留空使用默认私钥</span></label><input id="connection-key" placeholder="留空自动尝试 ~/.ssh/id_ed25519、id_rsa 等"></div>
@@ -136,7 +136,7 @@
                 <input type="hidden" id="task-id">
                 <div class="field"><label for="task-name">任务名称</label><input id="task-name" required placeholder="例如：每日清理临时文件"></div>
                 <div class="field"><label for="task-connection">目标服务器</label><select id="task-connection" required><option value="">请先添加服务器连接</option></select></div>
-                <div class="two"><div class="field"><label for="task-schedule">执行周期</label><select id="task-schedule"><option value="once">单次</option><option value="daily">每天</option><option value="weekly">每周</option></select></div><div class="field"><label for="task-time">执行时间（服务器时区）</label><input id="task-time" type="time" value="09:00" required></div></div>
+                <div class="two"><div class="field"><label for="task-schedule">执行周期</label><select id="task-schedule"><option value="once">单次</option><option value="daily">每天</option><option value="weekly">每周</option></select></div><div class="field"><label for="task-time">执行时间（服务器时区）</label><input id="task-time" type="time" value="09:00" required><div class="hint">选择服务器后自动填充远端当前时间，可再向后调整。</div></div></div>
                 <div class="field" id="task-date-field"><label for="task-date">开始日期（服务器时区）</label><input id="task-date" type="date" required><div class="hint" id="task-date-hint">每天/每周任务从这一天开始执行；单次任务将在这一天执行。</div></div>
                 <div class="field" id="task-weekday-field"><label>每周执行日</label><div class="weekdays" id="weekdays"><button type="button" class="day selected" data-day="0">一</button><button type="button" class="day selected" data-day="1">二</button><button type="button" class="day selected" data-day="2">三</button><button type="button" class="day selected" data-day="3">四</button><button type="button" class="day selected" data-day="4">五</button><button type="button" class="day" data-day="5">六</button><button type="button" class="day" data-day="6">日</button></div></div>
                 <div class="field"><label for="task-command">终端命令</label><textarea class="task-command-input" id="task-command" required placeholder="例如：cd /opt/app && ./backup.sh"></textarea><div class="hint">支持空行和行尾反斜杠续行，命令会原样传到远端执行。</div></div>
@@ -190,6 +190,11 @@
         const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
         const values = Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, part.value]));
         return `${values.year}-${values.month}-${values.day}`;
+    }
+    function timeInTimezone(epoch, timezone) {
+        const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timezone || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(Number(epoch) * 1000));
+        const values = Object.fromEntries(parts.filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+        return `${values.hour}:${values.minute}`;
     }
     function selectedConnectionTimezone() { return connectionById($("task-connection").value)?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone; }
     function updateTaskDateLabel() {
@@ -258,13 +263,28 @@
     function editTask(id) { const item = state.tasks.find(task => task.id === id); if (!item) return; $("task-id").value = item.id; $("task-name").value = item.name || ""; $("task-connection").value = item.connection_id || ""; $("task-schedule").value = item.schedule_type || "once"; $("task-time").value = item.run_time || "09:00"; $("task-date").value = item.run_date || todayInTimezone(item.timezone); $("task-command").value = item.command || ""; $("task-log-file").value = item.log_file || ""; $("task-enabled").checked = item.enabled !== false; document.querySelectorAll(".day").forEach(node => node.classList.toggle("selected", (item.weekdays || []).includes(Number(node.dataset.day)))); $("task-form-title").textContent = "编辑定时任务"; $("cancel-task").classList.remove("hidden"); setStatus("task-form-status", ""); toggleScheduleFields(); window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
     function toggleScheduleFields() { const type = $("task-schedule").value; $("task-weekday-field").classList.toggle("hidden", type !== "weekly"); updateTaskDateLabel(); }
     async function loadTasks() { try { const data = await api("GET", "/api/tasks"); state.tasks = data.tasks || []; renderTasks(); } catch (error) { toast(error.message, true); } }
+    async function fillTimeFromServer(id) {
+        if ($("task-id").value) return;
+        try {
+            const data = await api("GET", `/api/connections/${encodeURIComponent(id)}/time`);
+            const connection = connectionById(id);
+            if (connection && data.connection) Object.assign(connection, data.connection);
+            const timezone = data.time?.timezone || data.connection?.timezone || connection?.timezone || "UTC";
+            $("task-date").value = todayInTimezone(timezone);
+            $("task-time").value = timeInTimezone(data.time?.server_epoch, timezone);
+            toast(`已填充服务器当前时间：${data.time.server_time}`);
+            renderConnections();
+        } catch (error) {
+            toast(`读取服务器当前时间失败：${error.message}`, true);
+        }
+    }
     async function saveTask(event) { event.preventDefault(); const id = $("task-id").value; const body = { name: $("task-name").value.trim(), connection_id: $("task-connection").value, schedule_type: $("task-schedule").value, run_time: $("task-time").value, run_date: $("task-date").value, weekdays: selectedDays(), command: $("task-command").value, log_file: $("task-log-file").value.trim(), enabled: $("task-enabled").checked }; try { await api(id ? "PUT" : "POST", id ? `/api/tasks/${encodeURIComponent(id)}` : "/api/tasks", body); toast("定时任务已保存"); resetTaskForm(); await loadTasks(); } catch (error) { setStatus("task-form-status", error.message, "error"); toast(error.message, true); } }
     async function runTask(id) { try { await api("POST", `/api/tasks/${encodeURIComponent(id)}/run`); toast("任务已派发，正在连接服务器"); await loadTasks(); setTimeout(loadTasks, 1800); } catch (error) { toast(error.message, true); } }
     async function viewTaskLog(id) { const area = $("task-log-" + id); if (!area) return; if (!area.classList.contains("hidden")) { area.classList.add("hidden"); return; } area.classList.remove("hidden"); area.textContent = "正在读取远程日志…"; try { const data = await api("GET", `/api/tasks/${encodeURIComponent(id)}/log`); area.textContent = data.logs || "日志文件为空"; } catch (error) { area.textContent = `读取失败：${error.message}`; } }
     async function deleteTask(id) { const item = state.tasks.find(task => task.id === id); if (!item || !confirm(`确定删除“${item.name}”吗？`)) return; try { await api("DELETE", `/api/tasks/${encodeURIComponent(id)}`); toast("定时任务已删除"); await loadTasks(); } catch (error) { toast(error.message, true); } }
 
     document.addEventListener("DOMContentLoaded", () => {
-        $("connection-form").addEventListener("submit", saveConnection); $("task-form").addEventListener("submit", saveTask); $("connection-auth").addEventListener("change", toggleAuthFields); $("task-schedule").addEventListener("change", toggleScheduleFields); $("task-connection").addEventListener("change", () => { if (!$("task-id").value) $("task-date").value = todayInTimezone(selectedConnectionTimezone()); }); $("cancel-connection").addEventListener("click", resetConnectionForm); $("cancel-task").addEventListener("click", resetTaskForm); $("reset-task").addEventListener("click", resetTaskForm); $("refresh-connections").addEventListener("click", loadConnections); $("refresh-tasks").addEventListener("click", loadTasks);
+        $("connection-form").addEventListener("submit", saveConnection); $("task-form").addEventListener("submit", saveTask); $("connection-auth").addEventListener("change", toggleAuthFields); $("task-schedule").addEventListener("change", toggleScheduleFields); $("task-connection").addEventListener("change", event => { if ($("task-id").value || !event.target.value) return; $("task-date").value = todayInTimezone(selectedConnectionTimezone()); fillTimeFromServer(event.target.value); }); $("cancel-connection").addEventListener("click", resetConnectionForm); $("cancel-task").addEventListener("click", resetTaskForm); $("reset-task").addEventListener("click", resetTaskForm); $("refresh-connections").addEventListener("click", loadConnections); $("refresh-tasks").addEventListener("click", loadTasks);
         $("test-form-connection").addEventListener("click", async () => { const id = $("connection-id").value; if (!id) { setStatus("connection-form-status", "请先保存连接，再测试", "error"); return; } await testConnection(id); });
         $("weekdays").addEventListener("click", event => { const button = event.target.closest(".day"); if (button) button.classList.toggle("selected"); });
         document.addEventListener("click", event => { const button = event.target.closest("[data-action]"); if (!button) return; const id = button.dataset.id; const action = button.dataset.action; if (action === "edit-connection") editConnection(id); if (action === "delete-connection") deleteConnection(id); if (action === "test-connection" || action === "read-time") testConnection(id); if (action === "install-key") installPublicKey(id); if (action === "edit-task") editTask(id); if (action === "delete-task") deleteTask(id); if (action === "run-task") runTask(id); if (action === "view-task-log") viewTaskLog(id); });
