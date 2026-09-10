@@ -146,6 +146,21 @@ def _connection(connection_id: str) -> dict:
     return item
 
 
+def _detect_command_cwd(command: str) -> str:
+    """识别命令开头的 cd 目录，用于读取相对路径日志。"""
+    match = re.search(r"(?m)^\s*cd\s+(?P<path>'[^']*'|\"(?:\\.|[^\"])*\"|[^\s;&]+)", command)
+    if not match:
+        return ""
+    try:
+        tokens = shlex.split(match.group("path"))
+    except ValueError:
+        return ""
+    path = tokens[0] if len(tokens) == 1 else ""
+    if not path or any(char in path for char in ("$", "`", "\n", "\r")):
+        return ""
+    return path
+
+
 def _key_path(item: dict) -> str:
     return str(Path(str(item.get("private_key_path") or "")).expanduser())
 
@@ -283,15 +298,18 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
     old = old or {}
     data = {**old, **(payload or {})}
     name = str(data.get("name") or "").strip()
-    command = str(data.get("command") or "").strip()
+    command = str(data.get("command") or "")
     connection_id = str(data.get("connection_id") or "").strip()
-    schedule_type = str(data.get("schedule_type") or "daily").strip().lower()
+    schedule_type = str(data.get("schedule_type") or "once").strip().lower()
     if not name:
         raise HTTPException(status_code=400, detail="任务名称不能为空")
     if not command:
         raise HTTPException(status_code=400, detail="执行命令不能为空")
     if len(command) > 12000:
         raise HTTPException(status_code=400, detail="执行命令不能超过 12000 个字符")
+    log_file = str(data.get("log_file") or "").strip()
+    if len(log_file) > 2000 or any(char in log_file for char in ("\x00", "\n", "\r")):
+        raise HTTPException(status_code=400, detail="日志文件路径无效")
     if connection_id not in _read_settings()["connections"]:
         raise HTTPException(status_code=400, detail="任务关联的服务器不存在")
     if schedule_type not in {"daily", "weekly", "once"}:
@@ -329,6 +347,8 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         "last_exit_code": old.get("last_exit_code"),
         "next_run_at": old.get("next_run_at"),
         "scheduled_timezone": old.get("scheduled_timezone"),
+        "log_file": log_file,
+        "log_cwd": _detect_command_cwd(command),
     }
     if not old or any(key in (payload or {}) for key in ("connection_id", "schedule_type", "run_time", "run_date", "weekdays", "enabled")):
         result["next_run_at"] = None
@@ -640,6 +660,37 @@ async def run_task_now(task_id: str):
     if not _launch_task(task, manual=True):
         raise HTTPException(status_code=409, detail="任务已经在执行")
     return JSONResponse({"ok": True, "message": "任务已立即派发", "task": _task_public(task, settings["connections"])})
+
+
+@app.get("/api/tasks/{task_id}/log")
+async def get_task_log(task_id: str):
+    """读取任务命令末尾重定向日志的最后 200 行。"""
+    settings = _read_settings()
+    task = settings["tasks"].get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+    log_file = str(task.get("log_file") or "")
+    if not log_file:
+        raise HTTPException(status_code=400, detail="尚未填写远程日志文件路径")
+    connection = settings["connections"].get(task.get("connection_id"))
+    if not connection:
+        raise HTTPException(status_code=400, detail="任务关联的服务器连接不存在")
+    read_command = f"tail -n 200 -- {shlex.quote(log_file)}"
+    if task.get("log_cwd"):
+        read_command = f"cd {shlex.quote(str(task['log_cwd']))} && {read_command}"
+    try:
+        code, output, error = await asyncio.to_thread(_run_remote, connection, read_command)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"读取远程日志失败：{str(exc)[:1000]}") from exc
+    if code != 0:
+        raise HTTPException(status_code=502, detail=f"读取远程日志失败：{(error or output).strip()[-1000:]}")
+    return JSONResponse({
+        "ok": True,
+        "task_id": task_id,
+        "log_file": log_file,
+        "log_cwd": task.get("log_cwd") or "",
+        "logs": output,
+    })
 
 
 if __name__ == "__main__":
