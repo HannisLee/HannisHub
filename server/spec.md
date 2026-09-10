@@ -25,6 +25,7 @@
 | PUT | `/api/connections/{connection_id}` | 修改 SSH 连接 |
 | DELETE | `/api/connections/{connection_id}` | 删除连接；仍有关联任务时拒绝 |
 | POST | `/api/connections/{connection_id}/test` | 测试 SSH 连接并读取服务器时间/时区 |
+| POST | `/api/connections/{connection_id}/install-key` | 使用当前密码安装本机公钥，验证成功后切换为免密连接 |
 | GET | `/api/connections/{connection_id}/time` | 读取并更新服务器时间/时区 |
 | GET | `/api/tasks` | 获取定时任务和最近执行结果 |
 | POST | `/api/tasks` | 新增每天、每周或单次任务 |

@@ -26,6 +26,7 @@ except ImportError:  # 保留系统 ssh 降级路径，方便临时使用
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.json"
+MANAGED_KEY_DIR = APP_DIR / "data" / "ssh"
 DEFAULT_SETTINGS = {"connections": {}, "tasks": {}}
 SETTINGS_LOCK = threading.RLock()
 TASK_LOCK = threading.RLock()
@@ -88,6 +89,7 @@ def _connection_public(item: dict) -> dict:
     result.pop("password", None)
     result["password_configured"] = bool(item.get("password"))
     result["private_key_configured"] = bool(item.get("private_key_path"))
+    result["key_installed"] = bool(item.get("key_installed"))
     return result
 
 
@@ -136,6 +138,8 @@ def _normalize_connection(payload: dict, old: Optional[dict] = None) -> dict:
         "last_test_message": old.get("last_test_message"),
         "server_time": old.get("server_time"),
         "server_epoch": old.get("server_epoch"),
+        "key_installed": bool(old.get("key_installed")),
+        "key_installed_at": old.get("key_installed_at"),
     }
 
 
@@ -238,6 +242,76 @@ def _run_remote(item: dict, command: str) -> tuple[int, str, str]:
     if paramiko is not None:
         return _run_with_paramiko(item, command)
     return _run_with_system_ssh(item, command)
+
+
+def _managed_key_paths(connection_id: str) -> tuple[Path, Path]:
+    """返回本项目为连接生成的私钥和公钥路径。"""
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", connection_id)
+    private_path = MANAGED_KEY_DIR / safe_id
+    return private_path, Path(f"{private_path}.pub")
+
+
+def _ensure_managed_keypair(connection_id: str) -> tuple[Path, str]:
+    """生成一对项目专用 Ed25519 密钥，并返回公钥文本。"""
+    private_path, public_path = _managed_key_paths(connection_id)
+    if private_path.exists() or public_path.exists():
+        if private_path.is_file() and public_path.is_file():
+            return private_path, public_path.read_text(encoding="utf-8").strip()
+        raise RuntimeError("本地管理密钥文件不完整，请检查 server/data/ssh")
+    if not shutil_which("ssh-keygen"):
+        raise RuntimeError("当前环境没有 ssh-keygen，无法生成免密登录密钥")
+    MANAGED_KEY_DIR.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(private_path), "-N", "", "-C", f"llamamanager-{connection_id}"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if result.returncode != 0 or not private_path.is_file() or not public_path.is_file():
+        raise RuntimeError((result.stderr or result.stdout or "生成 SSH 密钥失败").strip()[-1000:])
+    private_path.chmod(0o600)
+    return private_path, public_path.read_text(encoding="utf-8").strip()
+
+
+def _install_public_key_sync(connection_id: str) -> dict:
+    """使用密码连接安装项目公钥，并验证之后切换为公钥认证。"""
+    item = _connection(connection_id)
+    if item.get("auth_type") != "password" or not item.get("password"):
+        raise RuntimeError("只有已保存密码的连接可以添加公钥")
+    private_path, public_key = _ensure_managed_keypair(connection_id)
+    if not public_key:
+        raise RuntimeError("本地公钥内容为空")
+    remote_command = (
+        "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; "
+        f"grep -Fqx {shlex.quote(public_key)} ~/.ssh/authorized_keys || "
+        f"printf '%s\\n' {shlex.quote(public_key)} >> ~/.ssh/authorized_keys; "
+        "chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
+    )
+    code, output, error = _run_remote(item, remote_command)
+    if code != 0:
+        raise RuntimeError((error or output or f"远端安装公钥退出码 {code}").strip()[-1000:])
+    candidate = dict(item)
+    candidate.update({"auth_type": "key", "private_key_path": str(private_path), "password": ""})
+    info = _remote_time(candidate)
+    settings = _read_settings()
+    saved = dict(settings["connections"][connection_id])
+    saved.update({
+        "auth_type": "key",
+        "private_key_path": str(private_path),
+        "password": "",
+        "key_installed": True,
+        "key_installed_at": _now_iso(),
+        "last_test_at": _now_iso(),
+        "last_test_ok": True,
+        "last_test_message": f"公钥已安装，免密连接成功，服务器时间：{info['server_time']}",
+        **info,
+    })
+    settings["connections"][connection_id] = saved
+    for task in settings["tasks"].values():
+        if task.get("connection_id") == connection_id and task.get("id") not in TASK_RUNS:
+            _refresh_next_run(task, saved)
+    _write_settings(settings)
+    return {"ok": True, "connection": _connection_public(saved), "time": info}
 
 
 def _remote_time(item: dict) -> dict:
@@ -595,6 +669,16 @@ async def test_connection(connection_id: str):
             settings["connections"][connection_id] = item
             _write_settings(settings)
         raise HTTPException(status_code=502, detail=f"连接失败：{str(exc)[:1000]}") from exc
+
+
+@app.post("/api/connections/{connection_id}/install-key")
+async def install_connection_key(connection_id: str):
+    """使用密码登录远端，安装本机公钥并切换为免密连接。"""
+    _connection(connection_id)
+    try:
+        return JSONResponse(await asyncio.to_thread(_install_public_key_sync, connection_id))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"添加公钥失败：{str(exc)[:1000]}") from exc
 
 
 @app.get("/api/connections/{connection_id}/time")

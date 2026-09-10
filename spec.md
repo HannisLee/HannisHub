@@ -457,6 +457,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | GET/POST | `/api/connections` | 查询/新增 SSH 服务器连接 |
 | PUT/DELETE | `/api/connections/{connection_id}` | 修改/删除 SSH 服务器连接 |
 | POST | `/api/connections/{connection_id}/test` | 测试连接并读取远端时间和时区 |
+| POST | `/api/connections/{connection_id}/install-key` | 使用密码连接安装本机公钥，验证成功后切换为免密连接 |
 | GET | `/api/connections/{connection_id}/time` | 读取服务器时间 |
 | GET/POST | `/api/tasks` | 查询/新增定时任务 |
 | PUT/DELETE | `/api/tasks/{task_id}` | 修改/删除定时任务 |
