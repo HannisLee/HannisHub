@@ -462,4 +462,4 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | PUT/DELETE | `/api/tasks/{task_id}` | 修改/删除定时任务 |
 | POST | `/api/tasks/{task_id}/run` | 立即执行一次定时任务 |
 
-详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。
+外层服务会自动挂载 `server.app`，因此部署外层 8081 后直接访问 `/server` 即可，页面 API 使用 `/server/api/...`；不需要另行暴露服务器管理端口。详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。

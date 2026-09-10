@@ -5,6 +5,7 @@ LlamaManager - 轻量级 llama.cpp Web 管理工具
 
 import asyncio
 import csv
+import importlib
 import json
 import math
 import os
@@ -93,6 +94,30 @@ _asr_task_semaphore = threading.Semaphore(ASR_MAX_CONCURRENT_TASKS)
 _asr_background_tasks: set[asyncio.Task] = set()
 
 app = FastAPI(title="LlamaManager")
+
+# 独立服务器管理子项目挂载到外层服务，沿用外层暴露的 8081 端口。
+_server_app_module = importlib.import_module("server.app")
+
+
+@app.get("/server", include_in_schema=False)
+async def server_management_page():
+    """使用外层端口直接返回独立服务器管理页面。"""
+    return FileResponse(APP_DIR / "server" / "index.html")
+
+
+app.mount("/server", _server_app_module.app)
+
+
+@app.on_event("startup")
+async def start_server_management_scheduler():
+    """外层服务启动时一并启动服务器管理调度器。"""
+    await _server_app_module.start_scheduler()
+
+
+@app.on_event("shutdown")
+async def stop_server_management_scheduler():
+    """外层服务退出时停止服务器管理调度器。"""
+    await _server_app_module.stop_scheduler()
 
 # ── 反向代理 ────────────────────────────────────────────
 _proxy_client: Optional[httpx.AsyncClient] = None

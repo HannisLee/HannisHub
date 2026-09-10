@@ -2,7 +2,7 @@
 
 ## 项目边界
 
-`server/` 是独立运行的 FastAPI 子项目，不依赖外层 LlamaManager 的进程管理、配置或页面。启动后 `/` 重定向到 `/server`，页面使用原生 HTML/CSS/JavaScript，数据只写入本目录的 `settings.json`。
+`server/` 是可独立运行、也可挂载到外层 LlamaManager 的 FastAPI 子项目，不依赖外层的进程管理、配置或页面。挂载后由外层 `/server` 提供页面和 `/server/api` 接口；单独启动时也兼容 `/server` 地址。页面使用原生 HTML/CSS/JavaScript，数据只写入本目录的 `settings.json`。
 
 ## 连接与远程执行
 

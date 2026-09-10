@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 try:
@@ -450,21 +450,46 @@ async def _scheduler_loop():
         await asyncio.sleep(15)
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
+async def start_scheduler():
+    """启动定时任务调度器，供独立运行和外层应用挂载时共同使用。"""
     global SCHEDULER_TASK
-    SCHEDULER_TASK = asyncio.create_task(_scheduler_loop())
-    yield
-    if SCHEDULER_TASK:
+    if SCHEDULER_TASK is None or SCHEDULER_TASK.done():
+        SCHEDULER_TASK = asyncio.create_task(_scheduler_loop())
+
+
+async def stop_scheduler():
+    """停止定时任务调度器。"""
+    global SCHEDULER_TASK
+    if SCHEDULER_TASK is not None:
         SCHEDULER_TASK.cancel()
         await asyncio.gather(SCHEDULER_TASK, return_exceptions=True)
+        SCHEDULER_TASK = None
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await start_scheduler()
+    yield
+    await stop_scheduler()
 
 
 app = FastAPI(title="LlamaManager Server", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def standalone_api_prefix(request: Request, call_next):
+    """让独立运行时的 /server/api 请求也能复用挂载模式的页面脚本。"""
+    path = request.scope.get("path", "")
+    if path == "/server/api" or path.startswith("/server/api/"):
+        request.scope["path"] = path.removeprefix("/server")
+        request.scope["raw_path"] = request.scope["path"].encode("utf-8")
+    return await call_next(request)
+
+
 @app.get("/")
-async def home():
+async def home(request: Request):
+    if request.scope.get("root_path") == "/server":
+        return FileResponse(APP_DIR / "index.html")
     return RedirectResponse(url="/server")
 
 
