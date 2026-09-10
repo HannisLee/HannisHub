@@ -271,6 +271,10 @@ def _test_connection_sync(connection_id: str) -> dict:
     saved["last_test_ok"] = True
     saved["last_test_message"] = f"连接成功，服务器时间：{info['server_time']}"
     settings["connections"][connection_id] = saved
+    # 连接首次测试或时区变化后，立即重算该服务器所有未执行任务的下一次时间。
+    for task in settings["tasks"].values():
+        if task.get("connection_id") == connection_id and task.get("id") not in TASK_RUNS:
+            _refresh_next_run(task, saved)
     _write_settings(settings)
     return {"ok": True, "connection": _connection_public(saved), "time": info}
 
@@ -322,6 +326,7 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         "last_output": old.get("last_output") or "",
         "last_exit_code": old.get("last_exit_code"),
         "next_run_at": old.get("next_run_at"),
+        "scheduled_timezone": old.get("scheduled_timezone"),
     }
     if not old or any(key in (payload or {}) for key in ("connection_id", "schedule_type", "run_time", "run_date", "weekdays", "enabled")):
         result["next_run_at"] = None
@@ -361,6 +366,7 @@ def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[
 
 def _refresh_next_run(task: dict, connection: dict, now: Optional[datetime] = None):
     now = now or datetime.now(timezone.utc)
+    task["scheduled_timezone"] = _safe_timezone(connection.get("timezone") or "UTC")
     next_local = _scheduled_local(task, connection, now)
     task["next_run_at"] = next_local.astimezone(timezone.utc).isoformat() if next_local else None
 
@@ -427,7 +433,8 @@ async def _scheduler_loop():
                 connection = settings["connections"].get(task.get("connection_id"))
                 if not connection or not task.get("enabled"):
                     continue
-                if not task.get("next_run_at"):
+                current_timezone = _safe_timezone(connection.get("timezone") or "UTC")
+                if not task.get("next_run_at") or task.get("scheduled_timezone") != current_timezone:
                     _refresh_next_run(task, connection, now)
                     settings["tasks"][task_id] = task
                     changed = True

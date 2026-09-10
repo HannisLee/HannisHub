@@ -34,4 +34,4 @@
 
 ## 配置结构
 
-`settings.json` 顶层包含 `connections` 和 `tasks` 两个对象。连接中的 `password` 只供后端使用；任务中的 `next_run_at` 统一保存为 UTC ISO 时间，展示和计算时转换为目标服务器时区。
+`settings.json` 顶层包含 `connections` 和 `tasks` 两个对象。连接中的 `password` 只供后端使用；任务中的 `next_run_at` 统一保存为 UTC ISO 时间，展示和计算时转换为目标服务器时区。连接测试更新时区后，关联任务会立即重算 `next_run_at`；调度器还会通过任务的 `scheduled_timezone` 字段检测时区变化。
