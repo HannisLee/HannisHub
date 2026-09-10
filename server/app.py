@@ -300,14 +300,16 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
     if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", run_time):
         raise HTTPException(status_code=400, detail="执行时间格式必须为 HH:MM")
     weekdays = sorted({int(day) for day in (data.get("weekdays") or []) if str(day).isdigit() and 0 <= int(day) <= 6})
+    connection = _read_settings()["connections"][connection_id]
     run_date = str(data.get("run_date") or "").strip()
+    if not run_date:
+        run_date = datetime.now(_task_timezone({"connection_id": connection_id}, connection)).date().isoformat()
     if schedule_type == "weekly" and not weekdays:
         raise HTTPException(status_code=400, detail="每周任务至少选择一天")
-    if schedule_type == "once":
-        try:
-            date.fromisoformat(run_date)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="单次任务需要有效的执行日期")
+    try:
+        date.fromisoformat(run_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="任务需要有效的开始/执行日期")
     result = {
         "id": str(old.get("id") or data.get("id") or f"task_{uuid.uuid4().hex[:12]}"),
         "name": name[:120],
@@ -315,7 +317,7 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         "command": command,
         "schedule_type": schedule_type,
         "run_time": run_time,
-        "run_date": run_date if schedule_type == "once" else "",
+        "run_date": run_date,
         "weekdays": weekdays if schedule_type == "weekly" else [],
         "enabled": bool(data.get("enabled", True)),
         "created_at": old.get("created_at") or time.time(),
@@ -354,8 +356,10 @@ def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[
     if task["schedule_type"] == "once":
         target = datetime.combine(date.fromisoformat(task["run_date"]), dt_time(hour, minute), tzinfo=tz)
         return target if target > after.astimezone(tz) else None
+    start_date = date.fromisoformat(task["run_date"]) if task.get("run_date") else local_after.date()
+    first_date = max(local_after.date(), start_date)
     for offset in range(0, 8):
-        current_date = local_after.date() + timedelta(days=offset)
+        current_date = first_date + timedelta(days=offset)
         if task["schedule_type"] == "weekly" and current_date.weekday() not in task["weekdays"]:
             continue
         candidate = datetime.combine(current_date, dt_time(hour, minute), tzinfo=tz)
@@ -367,6 +371,8 @@ def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[
 def _refresh_next_run(task: dict, connection: dict, now: Optional[datetime] = None):
     now = now or datetime.now(timezone.utc)
     task["scheduled_timezone"] = _safe_timezone(connection.get("timezone") or "UTC")
+    if task.get("schedule_type") != "once" and not task.get("run_date"):
+        task["run_date"] = now.astimezone(_task_timezone(task, connection)).date().isoformat()
     next_local = _scheduled_local(task, connection, now)
     task["next_run_at"] = next_local.astimezone(timezone.utc).isoformat() if next_local else None
 
