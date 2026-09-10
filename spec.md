@@ -446,3 +446,20 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 - PID 1 永远不会被 kill
 - settings.json 使用原子写入防止损坏
 - 管理后台绑定 `0.0.0.0:8081`，README 中提醒公网暴露风险
+
+## 独立服务器管理子项目
+
+`server/` 是与本地模型管理页面相互独立的 FastAPI 子项目，提供 `/server` 页面和单独的 `server/settings.json`。它使用 Paramiko（缺少时可降级到系统 `ssh`/`sshpass`）管理 SSH 服务器连接，在测试连接时读取远端时间和 IANA 时区，并按目标服务器时区执行每天、每周或单次定时任务。新增接口如下：
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/health` | 服务器管理子项目健康检查 |
+| GET/POST | `/api/connections` | 查询/新增 SSH 服务器连接 |
+| PUT/DELETE | `/api/connections/{connection_id}` | 修改/删除 SSH 服务器连接 |
+| POST | `/api/connections/{connection_id}/test` | 测试连接并读取远端时间和时区 |
+| GET | `/api/connections/{connection_id}/time` | 读取服务器时间 |
+| GET/POST | `/api/tasks` | 查询/新增定时任务 |
+| PUT/DELETE | `/api/tasks/{task_id}` | 修改/删除定时任务 |
+| POST | `/api/tasks/{task_id}/run` | 立即执行一次定时任务 |
+
+详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。
