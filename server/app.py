@@ -116,8 +116,6 @@ def _normalize_connection(payload: dict, old: Optional[dict] = None) -> dict:
     if password is None:
         password = old.get("password", "")
     key_path = str(data.get("private_key_path") or old.get("private_key_path") or "").strip()
-    if auth_type == "key" and not key_path and not old.get("private_key_path"):
-        raise HTTPException(status_code=400, detail="私钥认证需要填写私钥路径")
     if auth_type == "password" and not str(password or "").strip():
         raise HTTPException(status_code=400, detail="密码认证需要填写密码")
     return {
@@ -172,9 +170,15 @@ def _run_with_paramiko(item: dict, command: str) -> tuple[int, str, str]:
         kwargs["allow_agent"] = False
         kwargs["look_for_keys"] = False
     elif item["auth_type"] == "key":
-        kwargs["key_filename"] = _key_path(item)
-        kwargs["allow_agent"] = False
-        kwargs["look_for_keys"] = False
+        key_path = _key_path(item)
+        if key_path:
+            kwargs["key_filename"] = key_path
+            kwargs["allow_agent"] = False
+            kwargs["look_for_keys"] = False
+        else:
+            # 留空时沿用 OpenSSH/Paramiko 的默认私钥搜索规则。
+            kwargs["allow_agent"] = True
+            kwargs["look_for_keys"] = True
     try:
         client.connect(**kwargs)
         stdin, stdout, stderr = client.exec_command(command, timeout=30)
