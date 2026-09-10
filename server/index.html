@@ -85,6 +85,10 @@
         .toast { position: fixed; right: 20px; bottom: 20px; z-index: 5; max-width: min(420px, calc(100vw - 40px)); padding: 12px 15px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #1b2942; box-shadow: 0 12px 30px #0008; }
         .toast.error { border-color: #8b3447; background: #391c2a; }
         .footer-note { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+        .task-form-panel,
+        .task-list-panel { grid-column: 1 / -1; }
+        .task-command-input { min-height: 230px; }
+        .task-log-file-input { min-height: 48px; font-size: 15px; }
         @media (max-width: 850px) {
             .grid { grid-template-columns: 1fr; }
             .panel-wide, .footer-note { grid-column: auto; }
@@ -126,7 +130,7 @@
             <div class="list" id="connection-list"><div class="empty">正在读取服务器连接…</div></div>
         </section>
 
-        <section class="panel">
+        <section class="panel task-form-panel">
             <div class="panel-head"><h2 id="task-form-title">新增定时任务</h2><button class="btn ghost small hidden" id="cancel-task">取消编辑</button></div>
             <form class="form" id="task-form">
                 <input type="hidden" id="task-id">
@@ -135,15 +139,15 @@
                 <div class="two"><div class="field"><label for="task-schedule">执行周期</label><select id="task-schedule"><option value="once">单次</option><option value="daily">每天</option><option value="weekly">每周</option></select></div><div class="field"><label for="task-time">执行时间（服务器时区）</label><input id="task-time" type="time" value="09:00" required></div></div>
                 <div class="field" id="task-date-field"><label for="task-date">开始日期（服务器时区）</label><input id="task-date" type="date" required><div class="hint" id="task-date-hint">每天/每周任务从这一天开始执行；单次任务将在这一天执行。</div></div>
                 <div class="field" id="task-weekday-field"><label>每周执行日</label><div class="weekdays" id="weekdays"><button type="button" class="day selected" data-day="0">一</button><button type="button" class="day selected" data-day="1">二</button><button type="button" class="day selected" data-day="2">三</button><button type="button" class="day selected" data-day="3">四</button><button type="button" class="day selected" data-day="4">五</button><button type="button" class="day" data-day="5">六</button><button type="button" class="day" data-day="6">日</button></div></div>
-                <div class="field"><label for="task-command">终端命令</label><textarea id="task-command" required placeholder="例如：cd /opt/app && ./backup.sh"></textarea><div class="hint">支持空行和行尾反斜杠续行，命令会原样传到远端执行。</div></div>
-                <div class="field"><label for="task-log-file">远程日志文件路径 <span class="hint">手动指定，可留空</span></label><input id="task-log-file" placeholder="例如：/home/han.li/project/LIHAN/task/task.log"><div class="hint">建议填写绝对路径；填写相对路径时，会结合命令中的 <code>cd</code> 目录读取。</div></div>
+                <div class="field"><label for="task-command">终端命令</label><textarea class="task-command-input" id="task-command" required placeholder="例如：cd /opt/app && ./backup.sh"></textarea><div class="hint">支持空行和行尾反斜杠续行，命令会原样传到远端执行。</div></div>
+                <div class="field"><label for="task-log-file">远程日志文件路径 <span class="hint">手动指定，可留空</span></label><input class="task-log-file-input" id="task-log-file" placeholder="例如：/home/han.li/project/LIHAN/task/task.log"><div class="hint">建议填写绝对路径；填写相对路径时，会结合命令中的 <code>cd</code> 目录读取。</div></div>
                 <label class="hint"><input id="task-enabled" type="checkbox" checked> 创建后启用任务</label>
                 <div class="actions"><button class="btn primary" type="submit" id="save-task">保存任务</button><button class="btn ghost" type="button" id="reset-task">清空</button></div>
                 <div class="form-status" id="task-form-status"></div>
             </form>
         </section>
 
-        <section class="panel">
+        <section class="panel task-list-panel">
             <div class="panel-head"><div><h2>定时任务</h2><div class="hint">调度器每 15 秒检查一次，任务按目标服务器时区执行</div></div><button class="btn ghost small" id="refresh-tasks">刷新</button></div>
             <div class="list" id="task-list"><div class="empty">正在读取定时任务…</div></div>
         </section>
