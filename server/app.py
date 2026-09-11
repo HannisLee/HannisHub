@@ -34,7 +34,7 @@ TASK_RUNS: set[str] = set()
 SCHEDULER_TASK: Optional[asyncio.Task] = None
 TASK_DISPATCH_MARKER = "__LLAMAMANAGER_TASK_DISPATCHED__"
 CODEX_EXECUTORS = {"codex", "codexc"}
-CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 def _read_settings() -> dict:
