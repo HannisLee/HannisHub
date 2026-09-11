@@ -405,22 +405,27 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         raise HTTPException(status_code=400, detail="日志文件路径无效")
     if connection_id not in _read_settings()["connections"]:
         raise HTTPException(status_code=400, detail="任务关联的服务器不存在")
-    if schedule_type not in {"daily", "weekly", "once"}:
-        raise HTTPException(status_code=400, detail="任务类型只能是每天、每周或单次")
+    if schedule_type not in {"immediate", "daily", "weekly", "once"}:
+        raise HTTPException(status_code=400, detail="任务类型只能是立刻发射、每天、每周或单次")
     run_time = str(data.get("run_time") or "").strip()
-    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", run_time):
-        raise HTTPException(status_code=400, detail="执行时间格式必须为 HH:MM")
     weekdays = sorted({int(day) for day in (data.get("weekdays") or []) if str(day).isdigit() and 0 <= int(day) <= 6})
     connection = _read_settings()["connections"][connection_id]
     run_date = str(data.get("run_date") or "").strip()
-    if not run_date:
-        run_date = datetime.now(_task_timezone({"connection_id": connection_id}, connection)).date().isoformat()
-    if schedule_type == "weekly" and not weekdays:
-        raise HTTPException(status_code=400, detail="每周任务至少选择一天")
-    try:
-        date.fromisoformat(run_date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="任务需要有效的开始/执行日期")
+    if schedule_type == "immediate":
+        run_time = ""
+        run_date = ""
+        weekdays = []
+    else:
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", run_time):
+            raise HTTPException(status_code=400, detail="执行时间格式必须为 HH:MM")
+        if not run_date:
+            run_date = datetime.now(_task_timezone({"connection_id": connection_id}, connection)).date().isoformat()
+        if schedule_type == "weekly" and not weekdays:
+            raise HTTPException(status_code=400, detail="每周任务至少选择一天")
+        try:
+            date.fromisoformat(run_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="任务需要有效的开始/执行日期")
     result = {
         "id": str(old.get("id") or data.get("id") or f"task_{uuid.uuid4().hex[:12]}"),
         "name": name[:120],
@@ -463,6 +468,8 @@ def _task_timezone(task: dict, connection: dict) -> ZoneInfo:
 
 def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[datetime]:
     """计算 after 之后的下一次服务器本地时间。"""
+    if task["schedule_type"] == "immediate":
+        return None
     tz = _task_timezone(task, connection)
     local_after = after.astimezone(tz)
     hour, minute = (int(part) for part in task["run_time"].split(":"))
@@ -484,6 +491,9 @@ def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[
 def _refresh_next_run(task: dict, connection: dict, now: Optional[datetime] = None):
     now = now or datetime.now(timezone.utc)
     task["scheduled_timezone"] = _safe_timezone(connection.get("timezone") or "UTC")
+    if task.get("schedule_type") == "immediate":
+        task["next_run_at"] = None
+        return
     if task.get("schedule_type") != "once" and not task.get("run_date"):
         task["run_date"] = now.astimezone(_task_timezone(task, connection)).date().isoformat()
     next_local = _scheduled_local(task, connection, now)
@@ -551,6 +561,12 @@ async def _scheduler_loop():
                 task = dict(raw_task)
                 connection = settings["connections"].get(task.get("connection_id"))
                 if not connection or not task.get("enabled"):
+                    continue
+                if task.get("schedule_type") == "immediate":
+                    if task.get("next_run_at") is not None:
+                        task["next_run_at"] = None
+                        settings["tasks"][task_id] = task
+                        changed = True
                     continue
                 current_timezone = _safe_timezone(connection.get("timezone") or "UTC")
                 if not task.get("next_run_at") or task.get("scheduled_timezone") != current_timezone:
@@ -724,6 +740,8 @@ async def create_task(body: dict):
     _refresh_next_run(task, settings["connections"][task["connection_id"]])
     settings["tasks"][task["id"]] = task
     _write_settings(settings)
+    if task["schedule_type"] == "immediate" and task.get("enabled"):
+        _launch_task(task, manual=True)
     return JSONResponse({"ok": True, "task": _task_public(task, settings["connections"])})
 
 
@@ -739,6 +757,8 @@ async def update_task(task_id: str, body: dict):
     _refresh_next_run(task, settings["connections"][task["connection_id"]])
     settings["tasks"][task_id] = task
     _write_settings(settings)
+    if task["schedule_type"] == "immediate" and task.get("enabled"):
+        _launch_task(task, manual=True)
     return JSONResponse({"ok": True, "task": _task_public(task, settings["connections"])})
 
 

@@ -113,6 +113,28 @@
     </header>
 
     <main class="grid">
+        <section class="panel task-form-panel">
+            <div class="panel-head"><h2 id="task-form-title">新增定时任务</h2><button class="btn ghost small hidden" id="cancel-task">取消编辑</button></div>
+            <form class="form" id="task-form">
+                <input type="hidden" id="task-id">
+                <div class="field"><label for="task-name">任务名称</label><input id="task-name" required placeholder="例如：每日清理临时文件"></div>
+                <div class="field"><label for="task-connection">目标服务器</label><select id="task-connection" required><option value="">请先添加服务器连接</option></select></div>
+                <div class="two"><div class="field"><label for="task-schedule">执行周期</label><select id="task-schedule"><option value="once">单次</option><option value="immediate">立刻发射</option><option value="daily">每天</option><option value="weekly">每周</option></select><div class="hint" id="task-schedule-hint">单次任务在指定日期和时间发送。</div></div><div class="field" id="task-time-field"><label for="task-time">执行时间（服务器时区）</label><input id="task-time" type="time" value="09:00" required><div class="hint">选择服务器后自动填充远端当前时间，可再向后调整。</div></div></div>
+                <div class="field" id="task-date-field"><label for="task-date">开始日期（服务器时区）</label><input id="task-date" type="date" required><div class="hint" id="task-date-hint">每天/每周任务从这一天开始执行；单次任务将在这一天执行。</div></div>
+                <div class="field" id="task-weekday-field"><label>每周执行日</label><div class="weekdays" id="weekdays"><button type="button" class="day selected" data-day="0">一</button><button type="button" class="day selected" data-day="1">二</button><button type="button" class="day selected" data-day="2">三</button><button type="button" class="day selected" data-day="3">四</button><button type="button" class="day selected" data-day="4">五</button><button type="button" class="day" data-day="5">六</button><button type="button" class="day" data-day="6">日</button></div></div>
+                <div class="field"><label for="task-command">终端命令</label><textarea class="task-command-input" id="task-command" required placeholder="例如：cd /opt/app && ./backup.sh"></textarea><div class="hint">支持空行和行尾反斜杠续行，命令会原样传到远端后台执行；发送确认后不等待命令结束。</div></div>
+                <div class="field"><label for="task-log-file">远程日志文件路径 <span class="hint">手动指定，可留空</span></label><input class="task-log-file-input" id="task-log-file" placeholder="例如：/home/han.li/project/LIHAN/task/task.log"><div class="hint">建议填写绝对路径；填写相对路径时，会结合命令中的 <code>cd</code> 目录读取。</div></div>
+                <label class="hint"><input id="task-enabled" type="checkbox" checked> 创建后启用任务</label>
+                <div class="actions"><button class="btn primary" type="submit" id="save-task">保存任务</button><button class="btn ghost" type="button" id="reset-task">清空</button></div>
+                <div class="form-status" id="task-form-status"></div>
+            </form>
+        </section>
+
+        <section class="panel task-list-panel">
+            <div class="panel-head"><div><h2>定时任务</h2><div class="hint">调度器每 15 秒检查一次；立刻发射任务保存后立即发送</div></div><button class="btn ghost small" id="refresh-tasks">刷新</button></div>
+            <div class="list" id="task-list"><div class="empty">正在读取定时任务…</div></div>
+        </section>
+
         <section class="panel">
             <div class="panel-head"><h2 id="connection-form-title">添加服务器连接</h2><button class="btn ghost small hidden" id="cancel-connection">取消编辑</button></div>
             <form class="form" id="connection-form">
@@ -132,28 +154,6 @@
         <section class="panel">
             <div class="panel-head"><div><h2>服务器连接</h2><div class="hint">测试成功后会缓存远端时间和时区</div></div><button class="btn ghost small" id="refresh-connections">刷新</button></div>
             <div class="list" id="connection-list"><div class="empty">正在读取服务器连接…</div></div>
-        </section>
-
-        <section class="panel task-form-panel">
-            <div class="panel-head"><h2 id="task-form-title">新增定时任务</h2><button class="btn ghost small hidden" id="cancel-task">取消编辑</button></div>
-            <form class="form" id="task-form">
-                <input type="hidden" id="task-id">
-                <div class="field"><label for="task-name">任务名称</label><input id="task-name" required placeholder="例如：每日清理临时文件"></div>
-                <div class="field"><label for="task-connection">目标服务器</label><select id="task-connection" required><option value="">请先添加服务器连接</option></select></div>
-                <div class="two"><div class="field"><label for="task-schedule">执行周期</label><select id="task-schedule"><option value="once">单次</option><option value="daily">每天</option><option value="weekly">每周</option></select></div><div class="field"><label for="task-time">执行时间（服务器时区）</label><input id="task-time" type="time" value="09:00" required><div class="hint">选择服务器后自动填充远端当前时间，可再向后调整。</div></div></div>
-                <div class="field" id="task-date-field"><label for="task-date">开始日期（服务器时区）</label><input id="task-date" type="date" required><div class="hint" id="task-date-hint">每天/每周任务从这一天开始执行；单次任务将在这一天执行。</div></div>
-                <div class="field" id="task-weekday-field"><label>每周执行日</label><div class="weekdays" id="weekdays"><button type="button" class="day selected" data-day="0">一</button><button type="button" class="day selected" data-day="1">二</button><button type="button" class="day selected" data-day="2">三</button><button type="button" class="day selected" data-day="3">四</button><button type="button" class="day selected" data-day="4">五</button><button type="button" class="day" data-day="5">六</button><button type="button" class="day" data-day="6">日</button></div></div>
-                <div class="field"><label for="task-command">终端命令</label><textarea class="task-command-input" id="task-command" required placeholder="例如：cd /opt/app && ./backup.sh"></textarea><div class="hint">支持空行和行尾反斜杠续行，命令会原样传到远端后台执行；发送确认后不等待命令结束。</div></div>
-                <div class="field"><label for="task-log-file">远程日志文件路径 <span class="hint">手动指定，可留空</span></label><input class="task-log-file-input" id="task-log-file" placeholder="例如：/home/han.li/project/LIHAN/task/task.log"><div class="hint">建议填写绝对路径；填写相对路径时，会结合命令中的 <code>cd</code> 目录读取。</div></div>
-                <label class="hint"><input id="task-enabled" type="checkbox" checked> 创建后启用任务</label>
-                <div class="actions"><button class="btn primary" type="submit" id="save-task">保存任务</button><button class="btn ghost" type="button" id="reset-task">清空</button></div>
-                <div class="form-status" id="task-form-status"></div>
-            </form>
-        </section>
-
-        <section class="panel task-list-panel">
-            <div class="panel-head"><div><h2>定时任务</h2><div class="hint">调度器每 15 秒检查一次，任务按目标服务器时区执行</div></div><button class="btn ghost small" id="refresh-tasks">刷新</button></div>
-            <div class="list" id="task-list"><div class="empty">正在读取定时任务…</div></div>
         </section>
         <div class="footer-note">提示：密码仅保存在本机 server/settings.json，接口不会返回原始密码。生产环境建议使用 SSH 私钥或 Agent，并限制本管理页的访问范围。</div>
     </main>
@@ -202,7 +202,9 @@
     }
     function selectedConnectionTimezone() { return connectionById($("task-connection").value)?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone; }
     function updateTaskDateLabel() {
-        const once = $("task-schedule").value === "once";
+        const type = $("task-schedule").value;
+        const once = type === "once";
+        $("task-schedule-hint").textContent = type === "immediate" ? "保存任务后立即派发一次，不需要设置日期和时间。" : once ? "单次任务在指定日期和时间发送。" : "任务从开始日期起按周期发送。";
         $("task-date-field").querySelector("label").textContent = once ? "执行日期（服务器时区）" : "开始日期（服务器时区）";
         $("task-date-hint").textContent = once ? "任务将在这一天的指定时间执行。" : "每天/每周任务从这一天开始执行。";
     }
@@ -210,7 +212,7 @@
 
     function renderConnections() {
         const node = $("connection-list");
-        if (!state.connections.length) { node.innerHTML = '<div class="empty">还没有服务器连接，先在左侧添加一台。</div>'; updateConnectionOptions(); return; }
+        if (!state.connections.length) { node.innerHTML = '<div class="empty">还没有服务器连接，先在下方添加一台。</div>'; updateConnectionOptions(); return; }
         node.innerHTML = state.connections.map(item => {
             const testBadge = item.last_test_ok === true ? '<span class="badge ok">连接正常</span>' : item.last_test_ok === false ? '<span class="badge bad">连接失败</span>' : '<span class="badge">未测试</span>';
             const time = item.server_time ? `${esc(item.server_time)} · ${esc(item.timezone || "UTC")}` : "尚未读取服务器时间";
@@ -256,14 +258,15 @@
         if (!state.tasks.length) { node.innerHTML = '<div class="empty">还没有定时任务。</div>'; return; }
         node.innerHTML = state.tasks.map(item => {
             const status = item.running ? '<span class="badge running">发送中</span>' : item.last_status === "success" ? '<span class="badge ok">已发送</span>' : item.last_status === "error" ? '<span class="badge bad">发送失败</span>' : '<span class="badge">等待执行</span>';
-            const schedule = item.schedule_type === "daily" ? `每天 ${item.run_time}` : item.schedule_type === "weekly" ? `每周 ${item.weekdays.map(day => "一二三四五六日"[day]).join("、")} ${item.run_time}` : `单次 ${item.run_date} ${item.run_time}`;
+            const schedule = item.schedule_type === "immediate" ? "立刻发射（创建后立即发送）" : item.schedule_type === "daily" ? `每天 ${item.run_time}` : item.schedule_type === "weekly" ? `每周 ${item.weekdays.map(day => "一二三四五六日"[day]).join("、")} ${item.run_time}` : `单次 ${item.run_date} ${item.run_time}`;
             const log = item.log_file ? `<div class="hint" style="margin-top:6px">日志：<code>${esc(item.log_file)}</code>${item.log_cwd ? ` · 工作目录 <code>${esc(item.log_cwd)}</code>` : ""}</div><details class="task-log" data-task-log="${esc(item.id)}"><summary>查看文件末尾 100 行</summary><div class="item-output task-log-content">展开后读取远程日志…</div></details>` : "";
-            return `<article class="item"><div class="item-top"><div class="item-title"><h3>${esc(item.name)}</h3><div class="address"><code>${esc(item.connection_name)}</code> · ${esc(item.timezone || "UTC")}</div></div><div>${item.enabled ? status : '<span class="badge">已停用</span>'}</div></div><div class="meta"><span>计划：${esc(schedule)}</span><span>下次：${esc(formatDate(item.next_run_at, item.timezone))}</span>${item.last_run_at ? `<span>上次：${esc(formatLocalTime(item.last_run_at))}</span>` : ""}</div><div class="hint" style="margin-top:6px">命令：<code>${esc(item.command)}</code></div>${item.last_message ? `<div class="hint" style="margin-top:5px">${esc(item.last_message)}</div>` : ""}${log}<div class="actions" style="margin-top:11px"><button class="btn success small" data-action="run-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>立即发送</button><button class="btn ghost small" data-action="edit-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>编辑</button><button class="btn danger small" data-action="delete-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>删除</button></div></article>`;
+            const nextRun = item.schedule_type === "immediate" ? "不再安排" : formatDate(item.next_run_at, item.timezone);
+            return `<article class="item"><div class="item-top"><div class="item-title"><h3>${esc(item.name)}</h3><div class="address"><code>${esc(item.connection_name)}</code> · ${esc(item.timezone || "UTC")}</div></div><div>${item.enabled ? status : '<span class="badge">已停用</span>'}</div></div><div class="meta"><span>计划：${esc(schedule)}</span><span>下次：${esc(nextRun)}</span>${item.last_run_at ? `<span>上次：${esc(formatLocalTime(item.last_run_at))}</span>` : ""}</div><div class="hint" style="margin-top:6px">命令：<code>${esc(item.command)}</code></div>${item.last_message ? `<div class="hint" style="margin-top:5px">${esc(item.last_message)}</div>` : ""}${log}<div class="actions" style="margin-top:11px"><button class="btn success small" data-action="run-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>立即发送</button><button class="btn ghost small" data-action="edit-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>编辑</button><button class="btn danger small" data-action="delete-task" data-id="${esc(item.id)}" ${item.running ? "disabled" : ""}>删除</button></div></article>`;
         }).join("");
     }
     function resetTaskForm() { $("task-form").reset(); $("task-id").value = ""; $("task-time").value = "09:00"; $("task-date").value = todayInTimezone(selectedConnectionTimezone()); $("task-enabled").checked = true; $("task-schedule").value = "once"; document.querySelectorAll(".day").forEach((node, index) => node.classList.toggle("selected", index < 5)); $("task-form-title").textContent = "新增定时任务"; $("cancel-task").classList.add("hidden"); setStatus("task-form-status", ""); toggleScheduleFields(); }
     function editTask(id) { const item = state.tasks.find(task => task.id === id); if (!item) return; $("task-id").value = item.id; $("task-name").value = item.name || ""; $("task-connection").value = item.connection_id || ""; $("task-schedule").value = item.schedule_type || "once"; $("task-time").value = item.run_time || "09:00"; $("task-date").value = item.run_date || todayInTimezone(item.timezone); $("task-command").value = item.command || ""; $("task-log-file").value = item.log_file || ""; $("task-enabled").checked = item.enabled !== false; document.querySelectorAll(".day").forEach(node => node.classList.toggle("selected", (item.weekdays || []).includes(Number(node.dataset.day)))); $("task-form-title").textContent = "编辑定时任务"; $("cancel-task").classList.remove("hidden"); setStatus("task-form-status", ""); toggleScheduleFields(); window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
-    function toggleScheduleFields() { const type = $("task-schedule").value; $("task-weekday-field").classList.toggle("hidden", type !== "weekly"); updateTaskDateLabel(); }
+    function toggleScheduleFields() { const type = $("task-schedule").value; const immediate = type === "immediate"; $("task-time-field").classList.toggle("hidden", immediate); $("task-date-field").classList.toggle("hidden", immediate); $("task-weekday-field").classList.toggle("hidden", type !== "weekly"); $("task-time").required = !immediate; $("task-date").required = !immediate; updateTaskDateLabel(); }
     async function loadTasks() { try { const data = await api("GET", "/api/tasks"); state.tasks = data.tasks || []; renderTasks(); } catch (error) { toast(error.message, true); } }
     async function fillTimeFromServer(id) {
         if ($("task-id").value) return;
@@ -280,7 +283,7 @@
             toast(`读取服务器当前时间失败：${error.message}`, true);
         }
     }
-    async function saveTask(event) { event.preventDefault(); const id = $("task-id").value; const body = { name: $("task-name").value.trim(), connection_id: $("task-connection").value, schedule_type: $("task-schedule").value, run_time: $("task-time").value, run_date: $("task-date").value, weekdays: selectedDays(), command: $("task-command").value, log_file: $("task-log-file").value.trim(), enabled: $("task-enabled").checked }; try { await api(id ? "PUT" : "POST", id ? `/api/tasks/${encodeURIComponent(id)}` : "/api/tasks", body); toast("定时任务已保存"); resetTaskForm(); await loadTasks(); } catch (error) { setStatus("task-form-status", error.message, "error"); toast(error.message, true); } }
+    async function saveTask(event) { event.preventDefault(); const id = $("task-id").value; const immediate = $("task-schedule").value === "immediate"; const body = { name: $("task-name").value.trim(), connection_id: $("task-connection").value, schedule_type: $("task-schedule").value, run_time: immediate ? "" : $("task-time").value, run_date: immediate ? "" : $("task-date").value, weekdays: immediate ? [] : selectedDays(), command: $("task-command").value, log_file: $("task-log-file").value.trim(), enabled: $("task-enabled").checked }; try { await api(id ? "PUT" : "POST", id ? `/api/tasks/${encodeURIComponent(id)}` : "/api/tasks", body); toast(immediate ? "任务已保存并立即发送" : "定时任务已保存"); resetTaskForm(); await loadTasks(); } catch (error) { setStatus("task-form-status", error.message, "error"); toast(error.message, true); } }
     async function runTask(id) { try { await api("POST", `/api/tasks/${encodeURIComponent(id)}/run`); toast("任务已成功发送到远端后台"); await loadTasks(); } catch (error) { toast(error.message, true); } }
     async function loadTaskLog(id, area) { area.textContent = "正在读取远程日志末尾 100 行…"; try { const data = await api("GET", `/api/tasks/${encodeURIComponent(id)}/log`); area.textContent = data.logs || "日志文件为空"; } catch (error) { area.textContent = `读取失败：${error.message}`; } }
     async function deleteTask(id) { const item = state.tasks.find(task => task.id === id); if (!item || !confirm(`确定删除“${item.name}”吗？`)) return; try { await api("DELETE", `/api/tasks/${encodeURIComponent(id)}`); toast("定时任务已删除"); await loadTasks(); } catch (error) { toast(error.message, true); } }
