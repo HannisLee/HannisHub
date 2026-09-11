@@ -3,9 +3,10 @@ __pycache__/
 .venv/
 logs/*.log
 logs/
-data/asr_history/
-data/asr_jobs/
+llama_manager/data/asr_history/
+llama_manager/data/asr_jobs/
 .claude/
 nohup.out
 *.bak
 settings.json
+settings.json.tmp

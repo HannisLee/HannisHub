@@ -3,3 +3,7 @@ uvicorn[standard]
 psutil
 huggingface_hub
 httpx
+pwdlib[argon2]
+itsdangerous
+tqdm
+paramiko>=3.4

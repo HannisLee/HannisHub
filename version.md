@@ -464,3 +464,16 @@
 - 任务日志接口改为读取手动指定远程日志文件末尾 100 行
 - 任务页面移除发送输出展示，改为可折叠查看远程日志末尾 100 行
 - 同步更新服务器管理架构文档和使用说明
+
+### v0.1.51 — 2026-09-11
+
+- 新增综合管理站 Hub 架构，根应用统一负责登录、会话、服务挂载与生命周期管理
+- 新增 `auth.py`，使用 Argon2id 管理管理员密码，并通过 HttpOnly 签名 Cookie 保存会话
+- 登录接口加入简单的失败次数限制，降低暴力破解风险
+- 新增根目录 `index.html` 服务列表页与 `login.html` 登录/首次初始化页
+- 将原 LlamaManager 后端、页面、图标、配置与数据迁移到 `llama_manager/` 子目录
+- Hub 将 LlamaManager 挂载到 `/llama-manager`，将 Server 挂载到 `/server`
+- LlamaManager 前端 API 与页面跳转自动适配 `/llama-manager` 前缀
+- 根目录新增 `/api/auth/*` 与 `/api/services` 接口，并在 `spec.md` 中同步记录
+- `requirements.txt` 补充 `pwdlib[argon2]`、`itsdangerous`、`tqdm`、`paramiko`
+- 更新 `README.md`、项目结构与安全说明，`run.sh` 改为创建子服务日志目录

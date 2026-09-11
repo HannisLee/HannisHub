@@ -1,24 +1,29 @@
-# LlamaManager
+# LlamaManager Hub
 
-一个极简的 llama.cpp Web 管理工具，通过单页面 WebUI 管理本机 llama-server 进程。
+一个本地综合管理站，当前包含两个子服务：
+
+- **LlamaManager**：本机模型、GPU、受管进程与 ASR 服务管理
+- **Server**：SSH 服务器连接、远端时间与定时任务管理
 
 ## 功能
 
-- 扫描指定目录下的 GGUF 模型文件
-- 从 Hugging Face 下载 GGUF 模型
-- 选择模型并设置启动参数
-- 一键启动 / 停止 / 重启 llama-server
-- 实时查看运行状态和日志
-- 端口被占用时自动 kill 占用进程（保护 SSH 等关键端口）
+- 单管理员登录，首次启动自动进入初始化页面
+- 服务列表首页，集中进入各个子服务
+- LlamaManager：
+  - 扫描指定目录下的 GGUF 模型文件
+  - 从 Hugging Face 下载模型
+  - 注册并管理本机服务进程
+  - 查看 GPU 状态、历史与进程日志
+- Server：
+  - 管理 SSH 服务器连接
+  - 读取远端时间与时区
+  - 创建并调度远端终端命令任务
 
 ## 环境搭建
 
 ```bash
-# 创建 conda 环境
 conda create -n llama-manager python=3.12 -y
 conda activate llama-manager
-
-# 安装依赖
 pip install -r requirements.txt
 ```
 
@@ -29,24 +34,35 @@ conda activate llama-manager
 bash run.sh
 ```
 
-管理后台访问地址: http://localhost:8081
+访问地址：<http://localhost:8081>
+
+首次启动会要求初始化管理员账号；之后使用该账号登录。
+
+## 目录结构
+
+```text
+LlamaManager/
+├── app.py              # Hub 入口，负责登录、会话与子服务挂载
+├── auth.py             # 登录、密码哈希与会话中间件
+├── index.html          # Hub 服务列表页面
+├── login.html          # 登录 / 首次初始化页面
+├── llama_manager/      # LlamaManager 子服务
+├── server/             # Server 子服务
+├── requirements.txt    # Python 依赖
+└── run.sh              # 启动脚本
+```
 
 ## 配置
 
-所有配置保存在 `settings.json`，也可通过 WebUI 修改。
+- 根目录 `settings.json`：Hub 登录与会话配置
+- `llama_manager/settings.json`：LlamaManager 子服务配置
+- `server/settings.json`：Server 子服务配置
 
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `llama_server_path` | — | llama-server 二进制路径 |
-| `model_dir` | — | GGUF 模型存放目录（递归扫描） |
-| `host` | `0.0.0.0` | llama-server 监听地址 |
-| `port` | `8083` | llama-server 监听端口 |
-| `extra_args` | `""` | 额外启动参数（如 `-c 4096 --n-gpu-layers 99`） |
-| `auto_kill_port` | `true` | 端口占用时自动 kill |
-| `protected_ports` | `[22]` | 受保护端口（不会被 kill） |
+所有配置均使用 JSON 文件，不引入数据库。
 
 ## 安全提示
 
 - 管理后台默认绑定 `0.0.0.0:8081`，可被同一网络内其他设备访问
-- 如需公网部署，请自行配置防火墙或反向代理认证
-- `protected_ports` 默认包含 `22`，防止误杀 SSH 连接
+- 登录会话使用 HttpOnly Cookie，密码使用 Argon2id 哈希存储
+- 登录接口内置简单防暴力破解限制
+- 如需公网部署，建议继续在前置反向代理上启用 HTTPS

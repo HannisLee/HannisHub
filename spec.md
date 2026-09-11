@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-LlamaManager 是一个本地多模型服务管理工具，通过单页面 WebUI 管理任意本机启动命令的运行、停止与重启，支持从 Hugging Face 下载模型，并提供多 GPU 监控与 GPU 进程列表展示。
+LlamaManager Hub 是一个本地综合管理站。根应用负责统一登录、会话管理和子服务挂载；当前包含 LlamaManager 与 Server 两个子服务。LlamaManager 子服务通过单页面 WebUI 管理任意本机启动命令的运行、停止与重启，支持从 Hugging Face 下载模型，并提供多 GPU 监控与 GPU 进程列表展示。Server 子服务管理 SSH 服务器连接、远端时间与定时任务。
 
 ## 技术栈
 
@@ -13,30 +13,76 @@ LlamaManager 是一个本地多模型服务管理工具，通过单页面 WebUI 
 | 进程管理 | subprocess + psutil |
 | GPU 监控 | nvidia-smi + psutil |
 | 模型下载 | huggingface_hub Python API（`hf_hub_download` 单文件 / `snapshot_download` 全量） |
-| 配置存储 | settings.json（无数据库） |
+| 配置存储 | 根目录与各子服务分别使用 settings.json（无数据库） |
 | 运行环境 | conda 环境 `llama-manager` |
 
 ## 项目结构
 
 ```
 LlamaManager/
-├── app.py              # FastAPI 后端主程序
-├── index.html          # 单页面 WebUI
-├── settings.json       # 持久化配置与运行状态
-├── requirements.txt    # Python 依赖
-├── run.sh              # 启动脚本
-├── logs/               # 日志目录
-│   ├── llama-server.log    # llama-server 输出日志
-│   ├── download.log        # 旧版下载任务日志
-│   └── downloads/          # 多下载任务独立日志
-├── spec.md             # 本文件，架构文档
-├── version.md          # 版本变更记录
-├── MEMORY.md           # 项目长期运行与兼容性记忆
-├── CLAUDE.md           # Claude Code 项目指令
-└── README.md           # 使用说明
+├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
+├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
+├── index.html                # Hub 服务列表页面
+├── login.html                # 登录 / 首次初始化页面
+├── settings.json             # Hub 登录与会话配置
+├── requirements.txt          # Python 依赖
+├── run.sh                    # 启动脚本
+├── llama_manager/            # LlamaManager 子服务
+│   ├── app.py                # 子服务 FastAPI 后端
+│   ├── index.html            # 子服务单页面 WebUI
+│   ├── settings.json         # 子服务配置与运行状态
+│   ├── data/                 # ASR 历史与任务数据
+│   └── logs/                 # 子服务运行日志
+├── server/                   # Server 子服务
+│   ├── app.py                # SSH 与定时任务后端
+│   ├── index.html            # Server 单页面 WebUI
+│   ├── settings.json         # Server 子服务配置
+│   └── data/ssh/             # 项目生成的 SSH 私钥
+├── spec.md                   # 本文件，架构文档
+├── version.md                # 版本变更记录
+├── MEMORY.md                 # 项目长期运行与兼容性记忆
+├── CLAUDE.md                 # Claude Code 项目指令
+└── README.md                 # 使用说明
 ```
 
-## 后端架构（app.py）
+## 综合管理站架构（Hub）
+
+根应用 `app.py` 是综合管理站入口，负责：
+
+- 挂载 LlamaManager 子服务到 `/llama-manager`
+- 挂载 Server 子服务到 `/server`
+- 统一拦截未登录请求，保护 Hub 页面、子服务页面和所有子服务 API
+- 统一管理 Server 子服务的调度器生命周期
+- 提供服务列表、登录、登出和密码修改 API
+
+### Hub 页面
+
+- `/`：登录后展示当前可用服务卡片，点击卡片进入对应子服务
+- `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
+
+### Hub API
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/api/health` | Hub 健康检查 |
+| GET | `/api/services` | 返回当前可用子服务列表 |
+| GET | `/api/auth/status` | 查询登录状态与管理员初始化状态 |
+| POST | `/api/auth/setup` | 首次启动时初始化管理员账号 |
+| POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
+| POST | `/api/auth/logout` | 退出登录并清空会话 |
+| POST | `/api/auth/password` | 修改管理员密码 |
+
+### 登录与会话
+
+- 管理员用户名与密码哈希保存在根目录 `settings.json.auth`
+- 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
+- 会话使用 Starlette `SessionMiddleware` 与 `itsdangerous` 签名 Cookie
+- Cookie 名称为 `llamamanager_session`，默认有效期 12 小时
+- `AuthMiddleware` 统一保护除登录、健康检查和图标以外的请求
+- 登录接口内置简单防暴力破解：同一客户端 5 分钟内最多 5 次失败
+- 浏览器页面未登录时重定向到 `/login?next=...`，API 请求返回 `401` JSON
+
+## LlamaManager 子服务后端架构（llama_manager/app.py）
 
 ### 全局状态
 
@@ -97,6 +143,8 @@ _download_lock   # 下载任务状态读写锁
 | `_stop_process_internal(pid, clear_log)` | 停止指定或全部受管命令服务进程 |
 
 ### API 端点
+
+以下路径为 `llama_manager/app.py` 子应用内部路径；通过 Hub 访问时需要在路径前加上 `/llama-manager` 前缀，例如 `/api/settings` 对应 `/llama-manager/api/settings`。
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -263,7 +311,7 @@ _download_lock   # 下载任务状态读写锁
 - PID 1（init）不会被 kill
 - terminate → 等待 3 秒 → kill
 
-## 前端架构（index.html）
+## LlamaManager 子服务前端架构（llama_manager/index.html）
 
 ### 页面布局
 
@@ -341,7 +389,18 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 ## 配置文件
 
-### settings.json
+### 根目录 settings.json
+
+根目录 `settings.json` 只保存 Hub 登录与会话配置，不保存子服务业务配置：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `auth.username` | string | `""` | 管理员用户名；为空表示尚未初始化 |
+| `auth.password_hash` | string | `""` | Argon2id 密码哈希；永不通过 API 返回 |
+| `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
+| `auth.session_max_age_seconds` | number | `43200` | 会话有效期，默认 12 小时 |
+
+### llama_manager/settings.json
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -357,7 +416,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 ### 内部状态结构
 
-`settings.json.model_params`（已废弃，启动时自动迁移为 llama 注册项后清空）曾按模型路径独立存储启动参数：
+`llama_manager/settings.json.model_params`（已废弃，启动时自动迁移为 llama 注册项后清空）曾按模型路径独立存储启动参数：
 
 ```json
 {
@@ -368,7 +427,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 }
 ```
 
-`settings.json.custom_services` 保存用户注册的服务，按 `service_type` 区分 llama.cpp 与 vLLM（字段为两类超集，无关项为 null）：
+`llama_manager/settings.json.custom_services` 保存用户注册的服务，按 `service_type` 区分 llama.cpp 与 vLLM（字段为两类超集，无关项为 null）：
 
 ```json
 {
@@ -399,7 +458,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 }
 ```
 
-`settings.json.managed_processes` 保存 LlamaManager 启动过的受管进程记录：
+`llama_manager/settings.json.managed_processes` 保存 LlamaManager 启动过的受管进程记录：
 
 ```json
 {
@@ -420,7 +479,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 }
 ```
 
-`settings.json.gpu_history` 保存 GPU util 采样：
+`llama_manager/settings.json.gpu_history` 保存 GPU util 采样：
 
 ```json
 {
@@ -437,14 +496,16 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 旧版 `model_params.json`、`last_launch.json`、`custom_services.json`、`managed_processes.json`、`gpu_history.json` 会在应用启动时自动迁移到 `settings.json` 并删除。
 
-此外，旧版按模型路径记忆的 `settings.json.model_params` 会在应用启动时自动迁移为 `custom_services` 中的 llama.cpp 注册项（name 取模型文件名；幂等：同 model 路径已存在则跳过），迁移完成后清空 `model_params`。
+此外，旧版按模型路径记忆的 `llama_manager/settings.json.model_params` 会在应用启动时自动迁移为 `custom_services` 中的 llama.cpp 注册项（name 取模型文件名；幂等：同 model 路径已存在则跳过），迁移完成后清空 `model_params`。
 
 ## 安全设计
 
 - extra_args 经过 shlex 解析和危险字符过滤（`|><;&`$()#`）
 - protected_ports 防止误杀 SSH（端口 22）
 - PID 1 永远不会被 kill
-- settings.json 使用原子写入防止损坏
+- 子服务与 Hub 的 settings.json 均使用原子写入防止损坏
+- Hub 使用 Argon2id 保存管理员密码，不保存明文
+- Hub 使用 HttpOnly 签名 Cookie 保存会话，`AuthMiddleware` 统一保护页面和 API
 - 管理后台绑定 `0.0.0.0:8081`，README 中提醒公网暴露风险
 
 ## 独立服务器管理子项目

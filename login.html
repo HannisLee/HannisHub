@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · LlamaManager Hub</title>
+  <link rel="icon" href="/icon.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: rgba(255,255,255,.06);
+      --border: rgba(255,255,255,.13);
+      --text: #eef2ff;
+      --muted: #a5b4cf;
+      --accent: #7aa2ff;
+      --danger: #ff7b93;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 20%, rgba(122,162,255,.22), transparent 32%),
+        radial-gradient(circle at 80% 80%, rgba(99,214,255,.14), transparent 30%),
+        var(--bg);
+    }
+    .card {
+      width: min(420px, 100%);
+      padding: 34px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: linear-gradient(150deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+      box-shadow: 0 24px 70px rgba(0,0,0,.30);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      margin-bottom: 28px;
+    }
+    .brand img {
+      width: 44px;
+      height: 44px;
+      border-radius: 13px;
+      background: rgba(255,255,255,.08);
+    }
+    .brand h1 { margin: 0; font-size: 21px; }
+    .brand small { display: block; margin-top: 3px; color: var(--muted); }
+    label {
+      display: block;
+      margin: 16px 0 7px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: rgba(0,0,0,.20);
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    .button {
+      width: 100%;
+      margin-top: 24px;
+      padding: 13px;
+      border: 0;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #7aa2ff, #5578f5);
+      color: white;
+      font-size: 15px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .button:disabled { opacity: .6; cursor: not-allowed; }
+    .message {
+      min-height: 20px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .message.error { color: var(--danger); }
+    .hint {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <img src="/icon.png" alt="LlamaManager">
+      <div>
+        <h1 id="title">管理员登录</h1>
+        <small id="subtitle">LlamaManager Hub</small>
+      </div>
+    </div>
+
+    <form id="form">
+      <label for="username">用户名</label>
+      <input id="username" name="username" autocomplete="username" required>
+
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+      <div id="confirm-wrap" style="display:none">
+        <label for="confirm">确认密码</label>
+        <input id="confirm" name="confirm" type="password" autocomplete="new-password">
+      </div>
+
+      <button class="button" id="submit" type="submit">登录</button>
+      <div class="message" id="message">正在读取登录状态...</div>
+    </form>
+
+    <div class="hint">会话使用 HttpOnly Cookie 保存，密码使用 Argon2id 哈希存储。</div>
+  </main>
+
+  <script>
+    const form = document.getElementById("form");
+    const title = document.getElementById("title");
+    const subtitle = document.getElementById("subtitle");
+    const usernameInput = document.getElementById("username");
+    const passwordInput = document.getElementById("password");
+    const confirmWrap = document.getElementById("confirm-wrap");
+    const confirmInput = document.getElementById("confirm");
+    const submitButton = document.getElementById("submit");
+    const message = document.getElementById("message");
+    let setupMode = false;
+
+    function safeNext() {
+      const next = new URLSearchParams(window.location.search).get("next") || "/";
+      if (!next.startsWith("/") || next.startsWith("//")) return "/";
+      return next;
+    }
+
+    function setMessage(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? "message error" : "message";
+    }
+
+    async function loadStatus() {
+      try {
+        const response = await fetch("/api/auth/status");
+        const data = await response.json();
+        if (data.authenticated) {
+          window.location.replace(safeNext());
+          return;
+        }
+        setupMode = !data.configured;
+        title.textContent = setupMode ? "初始化管理员" : "管理员登录";
+        subtitle.textContent = setupMode ? "首次使用，请创建管理员账号" : "LlamaManager Hub";
+        confirmWrap.style.display = setupMode ? "block" : "none";
+        submitButton.textContent = setupMode ? "创建并进入" : "登录";
+        passwordInput.autocomplete = setupMode ? "new-password" : "current-password";
+        setMessage(setupMode ? "请设置管理员用户名和密码" : "请输入管理员账号");
+      } catch (error) {
+        setMessage("无法读取登录状态", true);
+      }
+    }
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (setupMode && password !== confirmInput.value) {
+        setMessage("两次输入的密码不一致", true);
+        return;
+      }
+      submitButton.disabled = true;
+      setMessage(setupMode ? "正在创建管理员..." : "正在登录...");
+      try {
+        const response = await fetch(setupMode ? "/api/auth/setup" : "/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(setupMode ? { username, password } : { username, password }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "请求失败");
+        window.location.replace(safeNext());
+      } catch (error) {
+        setMessage(error.message || "登录失败", true);
+        submitButton.disabled = false;
+      }
+    });
+
+    loadStatus();
+  </script>
+</body>
+</html>
