@@ -141,8 +141,8 @@
                 <input type="hidden" id="connection-id">
                 <div class="field"><label for="connection-name">名称</label><input id="connection-name" required placeholder="例如：生产 GPU 服务器"></div>
                 <div class="two"><div class="field"><label for="connection-host">地址 / 主机名</label><input id="connection-host" required value="10.10.2." placeholder="10.10.2.X"></div><div class="field"><label for="connection-port">SSH 端口</label><input id="connection-port" type="number" min="1" max="65535" value="22"></div></div>
-                <div class="field"><label for="connection-user">用户名</label><input id="connection-user" required placeholder="ubuntu"></div>
-                <div class="field"><label for="connection-auth">认证方式</label><select id="connection-auth"><option value="key">私钥文件</option><option value="password">密码</option><option value="agent">SSH Agent</option></select></div>
+                <div class="field"><label for="connection-user">用户名</label><input id="connection-user" required value="han.li" placeholder="han.li"></div>
+                <div class="field"><label for="connection-auth">认证方式</label><select id="connection-auth"><option value="password" selected>密码</option><option value="key">私钥文件</option><option value="agent">SSH Agent</option></select></div>
                 <div class="field" id="key-field"><label for="connection-key">私钥路径 <span class="hint">可留空使用默认私钥</span></label><input id="connection-key" placeholder="留空自动尝试 ~/.ssh/id_ed25519、id_rsa 等"></div>
                 <div class="field hidden" id="password-field"><label for="connection-password">密码 <span class="hint">（编辑时留空表示保持不变）</span></label><input id="connection-password" type="password" autocomplete="new-password"></div>
                 <div class="field"><label for="connection-timezone">服务器时区 <span class="hint">留空则测试连接时自动读取</span></label><input id="connection-timezone" placeholder="Asia/Shanghai"></div>
@@ -228,7 +228,7 @@
         if (state.connections.some(item => item.id === current)) select.value = current;
     }
     function resetConnectionForm() {
-        $("connection-form").reset(); $("connection-id").value = ""; $("connection-port").value = "22"; $("connection-auth").value = "key";
+        $("connection-form").reset(); $("connection-id").value = ""; $("connection-port").value = "22"; $("connection-user").value = "han.li"; $("connection-auth").value = "password";
         $("connection-form-title").textContent = "添加服务器连接"; $("cancel-connection").classList.add("hidden"); setStatus("connection-form-status", ""); toggleAuthFields();
     }
     function editConnection(id) {
