@@ -33,6 +33,8 @@ TASK_LOCK = threading.RLock()
 TASK_RUNS: set[str] = set()
 SCHEDULER_TASK: Optional[asyncio.Task] = None
 TASK_DISPATCH_MARKER = "__LLAMAMANAGER_TASK_DISPATCHED__"
+CODEX_EXECUTORS = {"codex", "codexc"}
+CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 
 
 def _read_settings() -> dict:
@@ -263,6 +265,34 @@ def _dispatch_remote(item: dict, command: str) -> tuple[int, str, str]:
     return 0, "", ""
 
 
+def _build_codex_command(
+    project_dir: str,
+    executor: str,
+    model: str,
+    reasoning_effort: str,
+    prompt_source: str,
+    prompt: str,
+    prompt_file: str,
+    output_file: str,
+) -> str:
+    """根据 Codex CLI 字段生成完整的远端终端命令。"""
+    if prompt_source == "file":
+        prompt_arg = f'"$(cat -- {shlex.quote(prompt_file)})"'
+    else:
+        prompt_arg = shlex.quote(prompt)
+    config = shlex.quote(f'model_reasoning_effort="{reasoning_effort}"')
+    return "\n".join(
+        [
+            f"cd {shlex.quote(project_dir)} && \\",
+            f"{shlex.quote(executor)} exec \\",
+            f"  -m {shlex.quote(model)} \\",
+            f"  -c {config} \\",
+            f"  {prompt_arg} \\",
+            f"  > {shlex.quote(output_file)} 2>&1",
+        ]
+    )
+
+
 def _managed_key_paths(connection_id: str) -> tuple[Path, Path]:
     """返回本项目为连接生成的私钥和公钥路径。"""
     safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", connection_id)
@@ -391,22 +421,69 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
     old = old or {}
     data = {**old, **(payload or {})}
     name = str(data.get("name") or "").strip()
-    command = str(data.get("command") or "")
     connection_id = str(data.get("connection_id") or "").strip()
     schedule_type = str(data.get("schedule_type") or "once").strip().lower()
+    execution_mode = str(data.get("execution_mode") or "terminal").strip().lower()
     if not name:
         raise HTTPException(status_code=400, detail="任务名称不能为空")
-    if not command:
-        raise HTTPException(status_code=400, detail="执行命令不能为空")
-    if len(command) > 12000:
-        raise HTTPException(status_code=400, detail="执行命令不能超过 12000 个字符")
-    log_file = str(data.get("log_file") or "").strip()
-    if len(log_file) > 2000 or any(char in log_file for char in ("\x00", "\n", "\r")):
-        raise HTTPException(status_code=400, detail="日志文件路径无效")
     if connection_id not in _read_settings()["connections"]:
         raise HTTPException(status_code=400, detail="任务关联的服务器不存在")
+    if execution_mode not in {"codex", "terminal"}:
+        raise HTTPException(status_code=400, detail="执行方式只能是 Codex CLI 或完整终端命令")
     if schedule_type not in {"immediate", "daily", "weekly", "once"}:
         raise HTTPException(status_code=400, detail="任务类型只能是立刻发射、每天、每周或单次")
+    command = str(data.get("command") or "")
+    project_dir = str(data.get("project_dir") or "").strip()
+    executor = str(data.get("executor") or "codex").strip().lower()
+    model = str(data.get("model") or "").strip()
+    reasoning_effort = str(data.get("reasoning_effort") or "xhigh").strip().lower()
+    prompt_source = str(data.get("prompt_source") or "direct").strip().lower()
+    prompt = str(data.get("prompt") or "")
+    prompt_file = str(data.get("prompt_file") or "").strip()
+    output_file = str(data.get("output_file") or "").strip()
+    log_file = str(data.get("log_file") or "").strip()
+    if execution_mode == "terminal":
+        if not command:
+            raise HTTPException(status_code=400, detail="执行命令不能为空")
+        if len(command) > 12000:
+            raise HTTPException(status_code=400, detail="执行命令不能超过 12000 个字符")
+        if len(log_file) > 2000 or any(char in log_file for char in ("\x00", "\n", "\r")):
+            raise HTTPException(status_code=400, detail="日志文件路径无效")
+        project_dir = ""
+        executor = ""
+        model = ""
+        reasoning_effort = ""
+        prompt_source = ""
+        prompt = ""
+        prompt_file = ""
+        output_file = ""
+        log_cwd = _detect_command_cwd(command)
+    else:
+        if not project_dir or len(project_dir) > 2000 or any(char in project_dir for char in ("\x00", "\n", "\r")):
+            raise HTTPException(status_code=400, detail="项目目录无效")
+        if executor not in CODEX_EXECUTORS:
+            raise HTTPException(status_code=400, detail="执行端只能是 codex 或 codexc")
+        if not model or len(model) > 200:
+            raise HTTPException(status_code=400, detail="Codex 模型不能为空且不能超过 200 个字符")
+        if reasoning_effort not in CODEX_REASONING_EFFORTS:
+            raise HTTPException(status_code=400, detail="推理强度不受支持")
+        if prompt_source not in {"direct", "file"}:
+            raise HTTPException(status_code=400, detail="提示词来源只能是直接输入或文件路径")
+        if prompt_source == "direct":
+            if not prompt or len(prompt) > 8000:
+                raise HTTPException(status_code=400, detail="直接输入的提示词不能为空且不能超过 8000 个字符")
+            prompt_file = ""
+        else:
+            if not prompt_file or len(prompt_file) > 2000 or any(char in prompt_file for char in ("\x00", "\n", "\r")):
+                raise HTTPException(status_code=400, detail="提示词文件路径无效")
+            prompt = ""
+        if not output_file or len(output_file) > 2000 or any(char in output_file for char in ("\x00", "\n", "\r")):
+            raise HTTPException(status_code=400, detail="输出日志路径无效")
+        command = _build_codex_command(project_dir, executor, model, reasoning_effort, prompt_source, prompt, prompt_file, output_file)
+        if len(command) > 12000:
+            raise HTTPException(status_code=400, detail="生成的 Codex 命令不能超过 12000 个字符")
+        log_file = output_file
+        log_cwd = project_dir
     run_time = str(data.get("run_time") or "").strip()
     weekdays = sorted({int(day) for day in (data.get("weekdays") or []) if str(day).isdigit() and 0 <= int(day) <= 6})
     connection = _read_settings()["connections"][connection_id]
@@ -430,6 +507,15 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         "id": str(old.get("id") or data.get("id") or f"task_{uuid.uuid4().hex[:12]}"),
         "name": name[:120],
         "connection_id": connection_id,
+        "execution_mode": execution_mode,
+        "project_dir": project_dir,
+        "executor": executor,
+        "model": model,
+        "reasoning_effort": reasoning_effort,
+        "prompt_source": prompt_source,
+        "prompt": prompt,
+        "prompt_file": prompt_file,
+        "output_file": output_file,
         "command": command,
         "schedule_type": schedule_type,
         "run_time": run_time,
@@ -446,7 +532,7 @@ def _validate_task(payload: dict, old: Optional[dict] = None) -> dict:
         "next_run_at": old.get("next_run_at"),
         "scheduled_timezone": old.get("scheduled_timezone"),
         "log_file": log_file,
-        "log_cwd": _detect_command_cwd(command),
+        "log_cwd": log_cwd,
     }
     if not old or any(key in (payload or {}) for key in ("connection_id", "schedule_type", "run_time", "run_date", "weekdays", "enabled")):
         result["next_run_at"] = None
