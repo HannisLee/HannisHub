@@ -37,6 +37,18 @@ CODEX_EXECUTORS = {"codex", "codexc"}
 CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 
+def _is_instant_task(task: dict) -> bool:
+    """判断任务是否没有时间计划，由保存或手动操作触发。"""
+    return task.get("schedule_type") == "immediate" or (
+        task.get("schedule_type") == "once" and not task.get("run_time") and not task.get("run_date")
+    )
+
+
+def _is_immediate_task(task: dict) -> bool:
+    """判断任务是否需要在保存后自动派发。"""
+    return task.get("schedule_type") == "immediate"
+
+
 def _read_settings() -> dict:
     """读取本地 JSON 配置，损坏或不存在时使用空配置。"""
     with SETTINGS_LOCK:
@@ -554,7 +566,7 @@ def _task_timezone(task: dict, connection: dict) -> ZoneInfo:
 
 def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[datetime]:
     """计算 after 之后的下一次服务器本地时间。"""
-    if task["schedule_type"] == "immediate":
+    if _is_instant_task(task):
         return None
     tz = _task_timezone(task, connection)
     local_after = after.astimezone(tz)
@@ -577,7 +589,7 @@ def _scheduled_local(task: dict, connection: dict, after: datetime) -> Optional[
 def _refresh_next_run(task: dict, connection: dict, now: Optional[datetime] = None):
     now = now or datetime.now(timezone.utc)
     task["scheduled_timezone"] = _safe_timezone(connection.get("timezone") or "UTC")
-    if task.get("schedule_type") == "immediate":
+    if _is_instant_task(task):
         task["next_run_at"] = None
         return
     if task.get("schedule_type") != "once" and not task.get("run_date"):
@@ -648,7 +660,7 @@ async def _scheduler_loop():
                 connection = settings["connections"].get(task.get("connection_id"))
                 if not connection or not task.get("enabled"):
                     continue
-                if task.get("schedule_type") == "immediate":
+                if _is_instant_task(task):
                     if task.get("next_run_at") is not None:
                         task["next_run_at"] = None
                         settings["tasks"][task_id] = task
@@ -826,7 +838,7 @@ async def create_task(body: dict):
     _refresh_next_run(task, settings["connections"][task["connection_id"]])
     settings["tasks"][task["id"]] = task
     _write_settings(settings)
-    if task["schedule_type"] == "immediate" and task.get("enabled"):
+    if _is_immediate_task(task) and task.get("enabled"):
         _launch_task(task, manual=True)
     return JSONResponse({"ok": True, "task": _task_public(task, settings["connections"])})
 
@@ -843,7 +855,7 @@ async def update_task(task_id: str, body: dict):
     _refresh_next_run(task, settings["connections"][task["connection_id"]])
     settings["tasks"][task_id] = task
     _write_settings(settings)
-    if task["schedule_type"] == "immediate" and task.get("enabled"):
+    if _is_immediate_task(task) and task.get("enabled"):
         _launch_task(task, manual=True)
     return JSONResponse({"ok": True, "task": _task_public(task, settings["connections"])})
 

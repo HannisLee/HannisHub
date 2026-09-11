@@ -510,7 +510,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 ## 独立服务器管理子项目
 
-`server/` 是与本地模型管理页面相互独立的 FastAPI 子项目，提供 `/server` 页面和单独的 `server/settings.json`。它使用 Paramiko（缺少时可降级到系统 `ssh`/`sshpass`）管理 SSH 服务器连接，在测试连接时读取远端时间和 IANA 时区，并按目标服务器时区执行立刻发射、每天、每周或单次任务。定时任务支持 Codex CLI 参数化方式和完整终端命令方式，前者自动生成完整命令并将输出路径绑定到日志读取路径；立刻发射任务保存后立即派发一次，不进入后续调度。新增接口如下：
+`server/` 是与本地模型管理页面相互独立的 FastAPI 子项目，提供 `/server` 页面和单独的 `server/settings.json`。它使用 Paramiko（缺少时可降级到系统 `ssh`/`sshpass`）管理 SSH 服务器连接，在测试连接时读取远端时间和 IANA 时区，并按目标服务器时区执行立刻发射或单次任务。定时任务支持 Codex CLI 参数化方式和完整终端命令方式，前者自动生成完整命令并将输出路径绑定到日志读取路径；立刻发射任务保存后立即派发一次，不进入后续调度，单次任务按指定日期和时间派发一次。服务端兼容已有的每天/每周任务配置，但页面不再提供新增入口。新增接口如下：
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -520,7 +520,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | POST | `/api/connections/{connection_id}/test` | 测试连接并读取远端时间和时区 |
 | POST | `/api/connections/{connection_id}/install-key` | 使用密码连接安装本机公钥，验证成功后切换为免密连接 |
 | GET | `/api/connections/{connection_id}/time` | 读取服务器时间 |
-| GET/POST | `/api/tasks` | 查询/新增任务；支持立刻发射、每天、每周或单次周期 |
+| GET/POST | `/api/tasks` | 查询/新增任务；新增任务支持立刻发射或单次周期 |
 | PUT/DELETE | `/api/tasks/{task_id}` | 修改/删除定时任务 |
 | POST | `/api/tasks/{task_id}/run` | 立即执行一次定时任务 |
 | GET | `/api/tasks/{task_id}/log` | 读取任务手动指定的远程日志文件最后 100 行；任务发送确认后不等待远程命令结束 |
