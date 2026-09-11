@@ -32,6 +32,7 @@ SETTINGS_LOCK = threading.RLock()
 TASK_LOCK = threading.RLock()
 TASK_RUNS: set[str] = set()
 SCHEDULER_TASK: Optional[asyncio.Task] = None
+TASK_DISPATCH_MARKER = "__LLAMAMANAGER_TASK_DISPATCHED__"
 
 
 def _read_settings() -> dict:
@@ -242,6 +243,24 @@ def _run_remote(item: dict, command: str) -> tuple[int, str, str]:
     if paramiko is not None:
         return _run_with_paramiko(item, command)
     return _run_with_system_ssh(item, command)
+
+
+def _background_task_command(command: str) -> str:
+    """包装任务命令，让远端后台执行并立即返回发送确认。"""
+    return (
+        f"nohup sh -c {shlex.quote(command)} </dev/null >/dev/null 2>&1 & "
+        f"printf '%s\\n' {shlex.quote(TASK_DISPATCH_MARKER)}"
+    )
+
+
+def _dispatch_remote(item: dict, command: str) -> tuple[int, str, str]:
+    """通过 SSH 启动远端后台任务，只等待 SSH 发送确认。"""
+    code, output, error = _run_remote(item, _background_task_command(command))
+    if code != 0:
+        return code, output, error
+    if TASK_DISPATCH_MARKER not in output.splitlines():
+        return 1, output, "远端未返回任务发送确认"
+    return 0, "", ""
 
 
 def _managed_key_paths(connection_id: str) -> tuple[Path, Path]:
@@ -482,13 +501,13 @@ def _execute_task_sync(task_id: str, connection_id: str) -> tuple[int, str, str]
     connection = _read_settings()["connections"].get(connection_id)
     if not task or not connection:
         raise RuntimeError("任务或服务器连接不存在")
-    return _run_remote(connection, task["command"])
+    return _dispatch_remote(connection, task["command"])
 
 
 async def _execute_task(task_id: str, connection_id: str, scheduled_at: Optional[str] = None):
     try:
         code, output, error = await asyncio.to_thread(_execute_task_sync, task_id, connection_id)
-        message = "执行成功" if code == 0 else f"远端命令退出码 {code}"
+        message = "已成功发送，远程任务在后台执行" if code == 0 else f"发送失败，SSH/远端返回码 {code}"
         if error.strip():
             message += f"：{error.strip()[-1000:]}"
         status = "success" if code == 0 else "error"
@@ -496,14 +515,14 @@ async def _execute_task(task_id: str, connection_id: str, scheduled_at: Optional
         if task:
             task.update({
                 "last_run_at": _now_iso(), "last_status": status, "last_message": message,
-                "last_output": (output + ("\n" + error if error else "")).strip()[-6000:],
-                "last_exit_code": code,
+                "last_output": "" if code == 0 else (output + ("\n" + error if error else "")).strip()[-6000:],
+                "last_exit_code": code if code != 0 else None,
             })
             _save_task(task)
     except Exception as exc:
         task = _read_settings()["tasks"].get(task_id)
         if task:
-            task.update({"last_run_at": _now_iso(), "last_status": "error", "last_message": str(exc)[:1200], "last_output": "", "last_exit_code": None})
+            task.update({"last_run_at": _now_iso(), "last_status": "error", "last_message": f"发送失败：{str(exc)[:1100]}", "last_output": "", "last_exit_code": None})
             _save_task(task)
     finally:
         TASK_RUNS.discard(task_id)
@@ -748,7 +767,7 @@ async def run_task_now(task_id: str):
 
 @app.get("/api/tasks/{task_id}/log")
 async def get_task_log(task_id: str):
-    """读取任务命令末尾重定向日志的最后 200 行。"""
+    """读取任务手动指定远程日志文件的最后 100 行。"""
     settings = _read_settings()
     task = settings["tasks"].get(task_id)
     if not task:
@@ -759,7 +778,7 @@ async def get_task_log(task_id: str):
     connection = settings["connections"].get(task.get("connection_id"))
     if not connection:
         raise HTTPException(status_code=400, detail="任务关联的服务器连接不存在")
-    read_command = f"tail -n 200 -- {shlex.quote(log_file)}"
+    read_command = f"tail -n 100 -- {shlex.quote(log_file)}"
     if task.get("log_cwd"):
         read_command = f"cd {shlex.quote(str(task['log_cwd']))} && {read_command}"
     try:
