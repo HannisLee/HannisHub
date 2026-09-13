@@ -1983,7 +1983,7 @@ async function initAsrPage() {
     function uploadAsrFile(file, jobId) {
         return new Promise((resolve, reject) => {
             const request = new XMLHttpRequest();
-            request.open("POST", "/api/asr/transcriptions");
+            request.open("POST", `${SERVICE_BASE}/api/asr/transcriptions`);
             request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
             request.setRequestHeader("X-Audio-Filename", encodeURIComponent(file.name));
             request.upload.addEventListener("progress", event => {
