@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>在线提示词输入 · LlamaManager</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0b1220;
+            --panel: #121c2f;
+            --line: #2b3a55;
+            --text: #e9f0fb;
+            --muted: #91a2bd;
+            --blue: #4e9cff;
+            --green: #4fd27a;
+            --red: #ff6b7d;
+            --orange: #ffb454;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            background: radial-gradient(circle at top right, #172a4d 0, transparent 34%), var(--bg);
+            font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        button, textarea { font: inherit; }
+        button { cursor: pointer; }
+        .shell { max-width: 1040px; margin: 0 auto; padding: 28px 22px 60px; }
+        .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
+        .eyebrow { color: var(--blue); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
+        h1 { margin: 4px 0 3px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
+        .subtitle { margin: 0; color: var(--muted); }
+        .home-link { color: var(--muted); text-decoration: none; }
+        .home-link:hover { color: var(--text); }
+        .panel { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: rgba(18, 28, 47, .92); box-shadow: 0 16px 40px rgba(0, 0, 0, .16); margin-bottom: 18px; }
+        .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
+        h2 { margin: 0; font-size: 18px; }
+        .hint { color: var(--muted); font-size: 13px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .btn { padding: 9px 14px; border: 1px solid transparent; border-radius: 8px; color: white; background: #31415e; }
+        .btn:hover { filter: brightness(1.13); }
+        .btn:disabled { cursor: wait; opacity: .55; }
+        .primary { background: #216ed0; }
+        .success { background: #258c50; }
+        .danger { background: #a9364b; }
+        .ghost { border-color: var(--line); background: transparent; color: var(--muted); }
+        .small { padding: 5px 9px; font-size: 12px; }
+        textarea {
+            width: 100%;
+            min-height: 520px;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            color: var(--text);
+            background: #0d1728;
+            outline: none;
+            resize: vertical;
+            font-family: "SF Mono", Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.65;
+        }
+        textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(78, 156, 255, .12); }
+        .editor-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+        .status { min-height: 22px; color: var(--muted); font-size: 13px; }
+        .status.error { color: var(--red); }
+        .status.ok { color: var(--green); }
+        .list { display: grid; gap: 10px; }
+        .empty { padding: 28px 10px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+        .item { border: 1px solid var(--line); border-radius: 12px; background: rgba(23, 36, 58, .62); overflow: hidden; }
+        .item.open { border-color: rgba(78, 156, 255, .45); }
+        .item-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px; border: 0; background: transparent; color: var(--text); text-align: left; }
+        .item-head:hover { background: rgba(37, 53, 84, .42); }
+        .chevron { color: var(--muted); transition: transform .18s ease; flex: 0 0 auto; }
+        .item.open .chevron { transform: rotate(90deg); }
+        .item-title { flex: 1 1 auto; min-width: 0; }
+        .item-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+        .item-time { color: var(--muted); font-size: 12px; }
+        .item-body { display: none; padding: 0 14px 14px; }
+        .item.open .item-body { display: block; }
+        .preview {
+            max-height: 300px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #0d1728;
+            color: #c9d8f1;
+            font-family: "SF Mono", Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: rgba(37, 140, 80, .92); color: #071a10; box-shadow: 0 12px 30px rgba(0, 0, 0, .25); opacity: 0; pointer-events: none; transition: .2s ease; }
+        .toast.show { opacity: 1; }
+        .toast.error { background: rgba(169, 54, 75, .94); color: #fff; }
+        @media (max-width: 640px) {
+            .shell { padding: 20px 14px 50px; }
+            .topbar { align-items: flex-start; flex-direction: column; }
+            textarea { min-height: 420px; }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <div class="topbar">
+            <div>
+                <div class="eyebrow">Prompt Service</div>
+                <h1>在线提示词输入</h1>
+                <p class="subtitle">快速编辑、复制并归档你的提示词</p>
+            </div>
+            <a class="home-link" href="/">返回 Hub</a>
+        </div>
+
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>当前提示词</h2>
+                    <div class="hint">复制当前内容，或归档到下方历史记录</div>
+                </div>
+                <div class="actions">
+                    <button class="btn primary" type="button" id="copy-btn">复制</button>
+                    <button class="btn success" type="button" id="archive-btn">归档</button>
+                </div>
+            </div>
+            <textarea id="prompt-input" spellcheck="false" placeholder="在这里输入或粘贴你的提示词..."></textarea>
+            <div class="editor-meta">
+                <span id="char-count">0 字符</span>
+                <span id="autosave-state">未保存</span>
+            </div>
+            <div class="status" id="editor-status"></div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>归档列表</h2>
+                    <div class="hint">点击条目展开，可复制、恢复或删除</div>
+                </div>
+                <button class="btn ghost small" type="button" id="refresh-btn">刷新</button>
+            </div>
+            <div class="list" id="prompt-list"><div class="empty">正在读取归档提示词…</div></div>
+        </section>
+    </main>
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const input = $("prompt-input");
+        const list = $("prompt-list");
+        const editorStatus = $("editor-status");
+        const charCount = $("char-count");
+        const autosaveState = $("autosave-state");
+        const API_PREFIX = window.location.pathname === "/prompt" || window.location.pathname.startsWith("/prompt/")
+            ? "/prompt/api"
+            : "/api";
+
+        function esc(value) {
+            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+        function toast(message, error = false) {
+            const node = $("toast");
+            node.textContent = message;
+            node.className = `toast${error ? " error" : ""}`;
+            requestAnimationFrame(() => node.classList.add("show"));
+            clearTimeout(toast.timer);
+            toast.timer = setTimeout(() => node.className = "toast", 2400);
+        }
+        function setStatus(message, type = "") {
+            editorStatus.textContent = message;
+            editorStatus.className = `status ${type}`;
+            clearTimeout(setStatus.timer);
+            if (message) setStatus.timer = setTimeout(() => { editorStatus.textContent = ""; editorStatus.className = "status"; }, 3600);
+        }
+        function updateCount() {
+            charCount.textContent = `${input.value.length.toLocaleString("zh-CN")} 字符`;
+        }
+        async function api(method, path, body) {
+            const options = { method, headers: { "Content-Type": "application/json" } };
+            if (body !== undefined) options.body = JSON.stringify(body);
+            const response = await fetch(API_PREFIX + path, options);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || "请求失败");
+            return data;
+        }
+        async function copyText(text, successMessage = "已复制到剪贴板") {
+            if (!text.trim()) {
+                toast("当前提示词为空", true);
+                return false;
+            }
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const helper = document.createElement("textarea");
+                    helper.value = text;
+                    helper.style.position = "fixed";
+                    helper.style.opacity = "0";
+                    document.body.appendChild(helper);
+                    helper.select();
+                    const ok = document.execCommand("copy");
+                    helper.remove();
+                    if (!ok) throw new Error("copy failed");
+                }
+                toast(successMessage);
+                return true;
+            } catch (error) {
+                toast("复制失败，请手动选择文本复制", true);
+                return false;
+            }
+        }
+        function formatTime(value) {
+            if (!value) return "未知时间";
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? "未知时间" : date.toLocaleString("zh-CN", { hour12: false });
+        }
+        function titleOf(item) {
+            const firstLine = item.content.split(/\r?\n/).find(line => line.trim());
+            const text = (firstLine || item.content).trim();
+            return text.length > 80 ? text.slice(0, 80) + "…" : (text || "空提示词");
+        }
+        function saveDraft() {
+            localStorage.setItem("llamamanager_prompt_draft", input.value);
+            autosaveState.textContent = "已自动暂存";
+            clearTimeout(saveDraft.timer);
+            saveDraft.timer = setTimeout(() => { autosaveState.textContent = "已自动暂存"; }, 0);
+        }
+        function restoreDraft() {
+            input.value = localStorage.getItem("llamamanager_prompt_draft") || "";
+            updateCount();
+        }
+        function renderList(items) {
+            if (!items.length) {
+                list.innerHTML = `<div class="empty">暂无归档提示词</div>`;
+                return;
+            }
+            list.innerHTML = items.map(item => `
+                <article class="item" data-id="${esc(item.id)}">
+                    <button class="item-head" type="button">
+                        <span class="chevron">▶</span>
+                        <span class="item-title">
+                            <span class="item-title-text">${esc(titleOf(item))}</span>
+                            <span class="item-time">${esc(formatTime(item.updated_at))} · ${item.content.length.toLocaleString("zh-CN")} 字符</span>
+                        </span>
+                    </button>
+                    <div class="item-body">
+                        <div class="preview">${esc(item.content)}</div>
+                        <div class="actions" style="margin-top:10px">
+                            <button class="btn primary small" type="button" data-action="copy">复制</button>
+                            <button class="btn small" type="button" data-action="restore">恢复到输入框</button>
+                            <button class="btn danger small" type="button" data-action="delete">删除</button>
+                        </div>
+                    </div>
+                </article>
+            `).join("");
+        }
+        async function loadPrompts() {
+            try {
+                const data = await api("GET", "/prompts");
+                renderList(Array.isArray(data.prompts) ? data.prompts : []);
+            } catch (error) {
+                list.innerHTML = `<div class="empty">读取失败：${esc(error.message)}</div>`;
+            }
+        }
+
+        $("copy-btn").addEventListener("click", () => copyText(input.value, "当前提示词已复制"));
+        $("archive-btn").addEventListener("click", async () => {
+            const value = input.value;
+            if (!value.trim()) {
+                setStatus("提示词为空，不能归档", "error");
+                return;
+            }
+            $("archive-btn").disabled = true;
+            try {
+                await api("POST", "/prompts", { content: value });
+                setStatus("已归档当前提示词", "ok");
+                toast("已归档当前提示词");
+                await loadPrompts();
+            } catch (error) {
+                setStatus(error.message, "error");
+                toast(error.message, true);
+            } finally {
+                $("archive-btn").disabled = false;
+            }
+        });
+        $("refresh-btn").addEventListener("click", loadPrompts);
+        list.addEventListener("click", async event => {
+            const head = event.target.closest(".item-head");
+            if (head && !event.target.closest("button[data-action]")) {
+                head.closest(".item").classList.toggle("open");
+                return;
+            }
+            const actionButton = event.target.closest("button[data-action]");
+            if (!actionButton) return;
+            const item = actionButton.closest(".item");
+            const id = item.dataset.id;
+            const content = item.querySelector(".preview").textContent;
+            const action = actionButton.dataset.action;
+            if (action === "copy") {
+                await copyText(content, "归档提示词已复制");
+            } else if (action === "restore") {
+                input.value = content;
+                updateCount();
+                saveDraft();
+                setStatus("已恢复到输入框", "ok");
+                toast("已恢复到输入框");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            } else if (action === "delete") {
+                if (!confirm("确定删除这条归档提示词？")) return;
+                actionButton.disabled = true;
+                try {
+                    await api("DELETE", `/prompts/${encodeURIComponent(id)}`);
+                    toast("已删除归档提示词");
+                    await loadPrompts();
+                } catch (error) {
+                    toast(error.message, true);
+                    actionButton.disabled = false;
+                }
+            }
+        });
+        input.addEventListener("input", () => {
+            updateCount();
+            autosaveState.textContent = "正在输入…";
+            clearTimeout(input.draftTimer);
+            input.draftTimer = setTimeout(saveDraft, 500);
+        });
+        window.addEventListener("beforeunload", saveDraft);
+
+        restoreDraft();
+        loadPrompts();
+    </script>
+</body>
+</html>

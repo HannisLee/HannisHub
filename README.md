@@ -1,9 +1,10 @@
 # LlamaManager Hub
 
-一个本地综合管理站，当前包含两个子服务：
+一个本地综合管理站，当前包含三个子服务：
 
 - **LlamaManager**：本机模型、GPU、受管进程与 ASR 服务管理
 - **Server**：SSH 服务器连接、远端时间与定时任务管理
+- **在线提示词输入**：大输入框编辑、复制并归档提示词
 
 ## 功能
 
@@ -18,6 +19,9 @@
   - 管理 SSH 服务器连接
   - 读取远端时间与时区
   - 创建并调度远端终端命令任务
+- 在线提示词输入：
+  - 大型提示词输入框，支持一键复制
+  - 归档历史提示词，可折叠查看、恢复或删除
 
 ## 环境搭建
 
@@ -48,6 +52,7 @@ LlamaManager/
 ├── login.html          # 登录 / 首次初始化页面
 ├── llama_manager/      # LlamaManager 子服务
 ├── server/             # Server 子服务
+├── prompt_service/     # 在线提示词输入子服务
 ├── requirements.txt    # Python 依赖
 └── run.sh              # 启动脚本
 ```
@@ -57,6 +62,7 @@ LlamaManager/
 - 根目录 `settings.json`：Hub 登录与会话配置
 - `llama_manager/settings.json`：LlamaManager 子服务配置
 - `server/settings.json`：Server 子服务配置
+- `prompt_service/settings.json`：在线提示词归档数据
 
 所有配置均使用 JSON 文件，不引入数据库。
 

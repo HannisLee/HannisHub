@@ -21,6 +21,7 @@ from auth import (
     record_login_failure,
 )
 import llama_manager.app as llama_manager_app
+import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -38,6 +39,13 @@ SERVICES: list[dict[str, str]] = [
         "description": "SSH 服务器连接、远端时间与定时任务管理",
         "path": "/server/",
         "icon": "🧭",
+    },
+    {
+        "id": "prompt",
+        "name": "在线提示词输入",
+        "description": "大输入框快速编辑、复制并归档提示词",
+        "path": "/prompt/",
+        "icon": "✍️",
     },
 ]
 
@@ -67,6 +75,7 @@ app.add_middleware(
 
 app.mount("/llama-manager", llama_manager_app.app)
 app.mount("/server", server_manager_app.app)
+app.mount("/prompt", prompt_service_app.app)
 
 
 @app.get("/", include_in_schema=False)

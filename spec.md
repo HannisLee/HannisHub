@@ -38,6 +38,11 @@ LlamaManager/
 │   ├── index.html            # Server 单页面 WebUI
 │   ├── settings.json         # Server 子服务配置
 │   └── data/ssh/             # 项目生成的 SSH 私钥
+├── prompt_service/           # 在线提示词输入子服务
+│   ├── app.py                # 提示词复制与归档后端
+│   ├── index.html            # 提示词单页面 WebUI
+│   ├── settings.json         # 提示词归档数据（不入库 git）
+│   └── run.sh                # 独立启动脚本（默认 8084）
 ├── spec.md                   # 本文件，架构文档
 ├── version.md                # 版本变更记录
 ├── MEMORY.md                 # 项目长期运行与兼容性记忆
@@ -51,6 +56,7 @@ LlamaManager/
 
 - 挂载 LlamaManager 子服务到 `/llama-manager`
 - 挂载 Server 子服务到 `/server`
+- 挂载在线提示词输入子服务到 `/prompt`
 - 统一拦截未登录请求，保护 Hub 页面、子服务页面和所有子服务 API
 - 统一管理 Server 子服务的调度器生命周期
 - 提供服务列表、登录、登出和密码修改 API
@@ -526,3 +532,34 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | GET | `/api/tasks/{task_id}/log` | 读取任务手动指定的远程日志文件最后 100 行；任务发送确认后不等待远程命令结束 |
 
 外层服务会自动挂载 `server.app`，因此部署外层 8081 后直接访问 `/server` 即可，页面 API 使用 `/server/api/...`；不需要另行暴露服务器管理端口。详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。
+
+## 在线提示词输入子服务（prompt_service）
+
+`prompt_service/` 是与 LlamaManager、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
+
+```json
+{
+  "prompts": [
+    {
+      "id": "prompt_xxxxxxxxxxxx",
+      "content": "提示词全文",
+      "created_at": "2026-09-22T00:00:00+00:00",
+      "updated_at": "2026-09-22T00:00:00+00:00"
+    }
+  ]
+}
+```
+
+以下路径为 `prompt_service/app.py` 子应用内部路径；通过 Hub 访问时需要加上 `/prompt` 前缀，例如 `/api/prompts` 对应 `/prompt/api/prompts`。
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | `/` | 独立运行时跳转到 `/prompt`；Hub 挂载场景直接返回页面 |
+| GET | `/prompt`、`/prompt/` | 返回在线提示词输入页面 |
+| GET | `/api/health` | 子服务健康检查 |
+| GET | `/api/prompts` | 读取归档提示词列表（按更新时间倒序） |
+| POST | `/api/prompts` | 归档新提示词，请求体 `{ "content": string }` |
+| PUT | `/api/prompts/{prompt_id}` | 更新指定归档提示词内容 |
+| DELETE | `/api/prompts/{prompt_id}` | 删除指定归档提示词 |
+
+服务端限制：提示词最长 200 万字符，最多保留 500 条归档，超出时自动删除最早记录。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。
