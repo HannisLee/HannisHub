@@ -180,7 +180,9 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
-        if path in PUBLIC_PATHS:
+        # 登录页的 Next.js 静态脚本和样式必须在未登录时可读取，
+        # 它们不包含业务数据，实际 API 与页面导航仍由下方会话判断保护。
+        if path in PUBLIC_PATHS or path.startswith("/_next/"):
             await self.app(scope, receive, send)
             return
 

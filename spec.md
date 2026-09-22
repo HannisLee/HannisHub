@@ -2,14 +2,15 @@
 
 ## 项目概述
 
-HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理和子服务挂载；当前包含模型管理与 Server 两个子服务。模型管理子服务通过单页面 WebUI 管理任意本机启动命令的运行、停止与重启，支持从 Hugging Face 下载模型，并提供多 GPU 监控与 GPU 进程列表展示。Server 子服务管理 SSH 服务器连接、远端时间与定时任务。
+HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理、子服务挂载和统一前端静态托管；当前包含模型管理、Server 与提示词三个子服务。模型管理子服务管理任意本机启动命令、Hugging Face 模型下载、多 GPU 监控、ASR 转写和进程日志；Server 子服务管理 SSH 服务器连接、远端时间与定时任务。日常界面由统一的 Next.js Dashboard 提供。
 
 ## 技术栈
 
 | 组件 | 技术 |
 |------|------|
 | 后端 | Python 3.12 + FastAPI |
-| 前端 | 原生 HTML/CSS/JS（无框架） |
+| 前端 | Next.js 16 + React 19 + TypeScript，App Router，静态导出 |
+| UI 规范 | 根目录 `design.md` 的 CSS Variables、暖黑编辑风格、统一组件 |
 | 进程管理 | subprocess + psutil |
 | GPU 监控 | nvidia-smi + psutil |
 | 模型下载 | huggingface_hub Python API（`hf_hub_download` 单文件 / `snapshot_download` 全量） |
@@ -22,31 +23,37 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
-├── index.html                # Hub 服务列表页面
-├── login.html                # 登录 / 首次初始化页面
+├── index.html                # Hub 旧版服务列表页，迁移验证期保留
+├── login.html                # Hub 旧版登录页，迁移验证期保留
+├── frontend/                 # 统一 Next.js Dashboard
+│   ├── app/                  # 总览、登录、模型、Server、提示词 App Router 页面
+│   ├── components/           # layout、ui 与各业务模块组件
+│   ├── lib/                  # API 请求、显式类型、格式化与导航
+│   ├── public/               # 前端静态资源
+│   └── out/                  # npm run build 生成的静态导出（不入库）
 ├── settings.json             # Hub 登录与会话配置
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 启动脚本
 ├── llama_manager/            # 模型管理子服务
 │   ├── app.py                # 子服务 FastAPI 后端
-│   ├── index.html            # 子服务单页面 WebUI
+│   ├── index.html            # 子服务旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # 子服务配置与运行状态
 │   ├── data/                 # ASR 历史与任务数据
 │   └── logs/                 # 子服务运行日志
 ├── server/                   # Server 子服务
 │   ├── app.py                # SSH 与定时任务后端
-│   ├── index.html            # Server 单页面 WebUI
+│   ├── index.html            # Server 旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # Server 子服务配置
 │   └── data/ssh/             # 项目生成的 SSH 私钥
 ├── prompt_service/           # 在线提示词输入子服务
 │   ├── app.py                # 提示词复制与归档后端
-│   ├── index.html            # 提示词单页面 WebUI
+│   ├── index.html            # 提示词旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # 提示词归档数据（不入库 git）
 │   └── run.sh                # 独立启动脚本（默认 8084）
 ├── spec.md                   # 本文件，架构文档
 ├── version.md                # 版本变更记录
 ├── MEMORY.md                 # 项目长期运行与兼容性记忆
-├── CLAUDE.md                 # Claude Code 项目指令
+├── AGENTS.md / CLAUDE.md     # 项目指令
 └── README.md                 # 使用说明
 ```
 
@@ -63,8 +70,40 @@ HannisHub/
 
 ### Hub 页面
 
-- `/`：登录后展示当前可用服务卡片，点击卡片进入对应子服务
+- `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
+- `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
+- `/server/connections`、`/server/tasks`：远程服务器模块页面
+- `/prompts`：提示词工作区
+
+### 统一前端静态托管
+
+`frontend/next.config.ts` 使用 `output: "export"` 与 `trailingSlash: true`。执行 `cd frontend && npm run build` 后，Next.js 将页面导出到 `frontend/out/`。Hub 启动时如果该目录存在，会在全部 API 与子服务挂载之后通过 `StaticFiles` 挂载根路径，以提供 `/_next/` 资源和其他静态文件；已导出的业务页面则在 `/server`、`/prompt` 等旧子服务挂载之前显式注册，避免被子应用的根路径抢先匹配。
+
+未构建时，`/` 与 `/login` 继续回退到根目录旧页面；新的 Dashboard 子路径会返回构建提示。旧版子服务页面仍可通过 `/llama-manager/`、`/server/`、`/prompt/` 访问。
+
+`AuthMiddleware` 对 `/_next/` 静态资源开放读取，以便未登录用户加载登录页；业务页面和全部业务 API 仍需要有效会话。
+
+## 统一 Dashboard 前端架构（frontend/）
+
+前端使用根目录唯一的 Next.js + React + TypeScript 工程，不为每个子服务建立独立 React 应用。所有界面使用 `app/globals.css` 中从 `design.md` 落地的 CSS tokens：暖黑背景、暖白文字、衬线 display 标题、无阴影低对比边框卡片、浅色主按钮、8px 间距网格和响应式侧栏。
+
+| 目录 | 职责 |
+|---|---|
+| `frontend/app/` | App Router 页面、全局样式、登录与 404 页面 |
+| `frontend/components/layout/` | 会话检查、桌面/移动侧栏、Topbar 与统一 App Shell |
+| `frontend/components/ui/` | 按钮、卡片、表单、状态、进度条与细线 SVG 图标 |
+| `frontend/components/llama/` | 模型、进程、GPU、下载、ASR、设置页面业务组件 |
+| `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
+| `frontend/components/prompts/` | 提示词编辑、分组和归档组件 |
+| `frontend/components/overview/` | 跨服务总览组件 |
+| `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
+
+API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
+
+页面复现原有的实时行为：GPU 与进程状态每 5 秒刷新，下载状态每 3 秒刷新且日志每 5 秒刷新，ASR 历史每 3 秒刷新，Server 任务每 15 秒刷新。所有页面均对加载、错误和空数据提供明确状态。
+
+GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊天”入口继续指向兼容保留的 `/llama-manager/chat/{pid}`，ASR 的入口则回到新的 `/llama/asr` 页面，从而在完整聊天迁移前不丢失原有交互能力。
 
 ### Hub API
 
@@ -317,7 +356,9 @@ _download_lock   # 下载任务状态读写锁
 - PID 1（init）不会被 kill
 - terminate → 等待 3 秒 → kill
 
-## 模型管理子服务前端架构（llama_manager/index.html）
+## 模型管理子服务旧版前端架构（llama_manager/index.html）
+
+以下内容记录迁移前页面的行为。旧文件仍被保留用于兼容与功能对照，不再作为日常入口或新增功能承载位置。
 
 ### 页面布局
 
@@ -531,11 +572,11 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | POST | `/api/tasks/{task_id}/run` | 立即执行一次定时任务 |
 | GET | `/api/tasks/{task_id}/log` | 读取任务手动指定的远程日志文件最后 100 行；任务发送确认后不等待远程命令结束 |
 
-外层服务会自动挂载 `server.app`，因此部署外层 8081 后直接访问 `/server` 即可，页面 API 使用 `/server/api/...`；不需要另行暴露服务器管理端口。详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。
+外层服务会自动挂载 `server.app`。日常使用统一 Dashboard 的 `/server/connections` 和 `/server/tasks`，页面 API 使用 `/server/api/...`；旧版 `/server/` 页面仍保留用于兼容，不需要另行暴露服务器管理端口。详细字段、调度规则和独立启动方式见 [`server/spec.md`](server/spec.md) 与 [`server/README.md`](server/README.md)。
 
 ## 在线提示词输入子服务（prompt_service）
 
-`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮。页面 API 使用相对路径 `api/...`，由浏览器基于 `/prompt/` 解析；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
+`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、原文/润色编辑、分组归档、复制、恢复和删除。旧版 `/prompt/` 页面仍保留用于兼容。归档内容保存到 `prompt_service/settings.json`，数据结构：
 
 ```json
 {

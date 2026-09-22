@@ -10,3 +10,8 @@ nohup.out
 *.bak
 settings.json
 settings.json.tmp
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+frontend/.eslintcache

@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from auth import (
@@ -25,6 +26,7 @@ import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
 ROOT_DIR = Path(__file__).resolve().parent
+FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 SERVICES: list[dict[str, str]] = [
     {
         "id": "llama-manager",
@@ -73,21 +75,86 @@ app.add_middleware(
     https_only=False,
 )
 
-app.mount("/llama-manager", llama_manager_app.app)
-app.mount("/server", server_manager_app.app)
-app.mount("/prompt", prompt_service_app.app)
+def _frontend_page(route: str) -> FileResponse | None:
+    """返回静态导出的统一前端页面；尚未构建时交由旧页面兼容。"""
+    page_path = FRONTEND_OUT_DIR / route.strip("/") / "index.html" if route.strip("/") else FRONTEND_OUT_DIR / "index.html"
+    if page_path.is_file():
+        return FileResponse(page_path)
+    return None
 
 
 @app.get("/", include_in_schema=False)
 async def index():
     """返回综合管理站服务列表页面。"""
-    return FileResponse(ROOT_DIR / "index.html")
+    return _frontend_page("") or FileResponse(ROOT_DIR / "index.html")
 
 
 @app.get("/login", include_in_schema=False)
 async def login_page():
     """返回登录 / 首次初始化页面。"""
-    return FileResponse(ROOT_DIR / "login.html")
+    return _frontend_page("login") or FileResponse(ROOT_DIR / "login.html")
+
+
+async def _new_frontend_route(route: str) -> FileResponse:
+    """返回已构建的 Next.js 页面，并给出可操作的未构建提示。"""
+    page = _frontend_page(route)
+    if page:
+        return page
+    raise HTTPException(status_code=503, detail="统一前端尚未构建，请在 frontend/ 中执行 npm run build 后重启服务")
+
+
+@app.get("/llama/models", include_in_schema=False)
+@app.get("/llama/models/", include_in_schema=False)
+async def llama_models_page():
+    return await _new_frontend_route("llama/models")
+
+
+@app.get("/llama/processes", include_in_schema=False)
+@app.get("/llama/processes/", include_in_schema=False)
+async def llama_processes_page():
+    return await _new_frontend_route("llama/processes")
+
+
+@app.get("/llama/gpu", include_in_schema=False)
+@app.get("/llama/gpu/", include_in_schema=False)
+async def llama_gpu_page():
+    return await _new_frontend_route("llama/gpu")
+
+
+@app.get("/llama/downloads", include_in_schema=False)
+@app.get("/llama/downloads/", include_in_schema=False)
+async def llama_downloads_page():
+    return await _new_frontend_route("llama/downloads")
+
+
+@app.get("/llama/asr", include_in_schema=False)
+@app.get("/llama/asr/", include_in_schema=False)
+async def llama_asr_page():
+    return await _new_frontend_route("llama/asr")
+
+
+@app.get("/llama/settings", include_in_schema=False)
+@app.get("/llama/settings/", include_in_schema=False)
+async def llama_settings_page():
+    return await _new_frontend_route("llama/settings")
+
+
+@app.get("/server/connections", include_in_schema=False)
+@app.get("/server/connections/", include_in_schema=False)
+async def server_connections_page():
+    return await _new_frontend_route("server/connections")
+
+
+@app.get("/server/tasks", include_in_schema=False)
+@app.get("/server/tasks/", include_in_schema=False)
+async def server_tasks_page():
+    return await _new_frontend_route("server/tasks")
+
+
+@app.get("/prompts", include_in_schema=False)
+@app.get("/prompts/", include_in_schema=False)
+async def prompts_page():
+    return await _new_frontend_route("prompts")
 
 
 @app.get("/icon.png", include_in_schema=False)
@@ -182,3 +249,14 @@ async def update_password(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"ok": True})
+
+
+# 统一前端页面在挂载的旧子服务之前注册，避免 /server/connections 等路由
+# 被 /server 子应用的根挂载抢先匹配。旧页面与 API 继续完整保留。
+app.mount("/llama-manager", llama_manager_app.app)
+app.mount("/server", server_manager_app.app)
+app.mount("/prompt", prompt_service_app.app)
+
+# 静态文件挂载必须在全部 API 与子服务之后，防止根路径覆盖业务路由。
+if FRONTEND_OUT_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_OUT_DIR, html=True), name="frontend")

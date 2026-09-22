@@ -554,3 +554,11 @@
 - 同步更新 Hub、登录页、模型管理页、Server 页和在线提示词页的前端标题与品牌文字
 - 更新 FastAPI 应用标题、项目文档和仓库地址说明
 - 保留 `llama_manager` 目录与 `/llama-manager` 路径，确保现有访问链接和内部模块兼容
+
+### v0.1.66 — 2026-09-23
+
+- 新增根目录唯一的 `frontend/` Next.js + React + TypeScript App Router 工程，按总览、模型管理、Server 和提示词模块拆分页面与业务组件
+- 使用 `design.md` 设计 tokens 实现统一暖黑工作台、侧栏、Topbar、表单、卡片、状态组件和响应式布局
+- 新前端直接调用既有 Hub、模型管理、Server 和提示词 API，保留实时轮询、ASR 上传、下载日志、任务调度与提示词分组能力
+- FastAPI 现托管 `frontend/out/` 静态导出，并在旧子服务挂载前注册 Dashboard 子路由；登录页可公开加载 Next 静态资源
+- 保留根目录和三个子服务的旧版 `index.html` 页面作为兼容入口，并同步更新 README、架构文档与项目指引

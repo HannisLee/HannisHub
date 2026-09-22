@@ -2,7 +2,7 @@
 
 ## 项目边界
 
-`server/` 是可独立运行、也可挂载到外层 HannisHub 的 FastAPI 子项目，不依赖外层的进程管理、配置或页面。挂载后由外层 `/server` 提供页面和 `/server/api` 接口；单独启动时也兼容 `/server` 地址。页面使用原生 HTML/CSS/JavaScript，数据只写入本目录的 `settings.json`。
+`server/` 是可独立运行、也可挂载到外层 HannisHub 的 FastAPI 子项目，不依赖外层的进程管理或配置。挂载后统一 Dashboard 通过 `/server/connections` 与 `/server/tasks` 提供页面，并使用 `/server/api` 接口；单独启动时也兼容 `/server` 地址。原生 `index.html` 继续保留用于兼容，数据只写入本目录的 `settings.json`。
 
 ## 连接与远程执行
 

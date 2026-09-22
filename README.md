@@ -1,27 +1,27 @@
 # HannisHub
 
-一个本地综合管理站，当前包含三个子服务：
-
-- **模型管理**：本机模型、GPU、受管进程与 ASR 服务管理
-- **Server**：SSH 服务器连接、远端时间与定时任务管理
-- **在线提示词输入**：大输入框编辑、复制并归档提示词
+HannisHub 是本机模型、远程服务器和提示词资产的统一管理工作台。后端继续使用 FastAPI；前端集中在根目录唯一的 Next.js + React + TypeScript 工程中，并由 FastAPI 在生产环境直接托管静态导出结果。
 
 ## 功能
 
-- 单管理员登录，首次启动自动进入初始化页面
-- 服务列表首页，集中进入各个子服务
-- 模型管理：
-  - 扫描指定目录下的 GGUF 模型文件
-  - 从 Hugging Face 下载模型
-  - 注册并管理本机服务进程
-  - 查看 GPU 状态、历史与进程日志
-- Server：
-  - 管理 SSH 服务器连接
-  - 读取远端时间与时区
-  - 创建并调度远端终端命令任务
-- 在线提示词输入：
-  - 大型提示词输入框，支持一键复制
-  - 归档历史提示词，可折叠查看、恢复或删除
+- 单管理员登录、首次初始化、会话和退出管理
+- 模型管理：GGUF 与仓库浏览、受管进程、GPU 监控、下载、ASR 转写和设置
+- Server：SSH 服务器连接、远端时间、Codex CLI 或终端任务调度
+- 提示词工作区：本地暂存、原文/润色编辑、分组归档、复制、恢复和删除
+
+## 架构
+
+```text
+浏览器
+  └─ Next.js 静态 Dashboard（frontend/out）
+       └─ 同源 API 请求
+            └─ FastAPI Hub（8081）
+                 ├─ /llama-manager/api
+                 ├─ /server/api
+                 └─ /prompt/api
+```
+
+`frontend/` 是唯一的新前端工程：App Router 页面放在 `app/`，共享布局和 UI 放在 `components/`，模型、服务器、提示词等业务组件各自使用独立子目录，API 类型与请求封装放在 `lib/`。所有视觉实现遵守根目录 [`design.md`](design.md)。
 
 ## 环境搭建
 
@@ -29,46 +29,85 @@
 conda create -n llama-manager python=3.12 -y
 conda activate llama-manager
 pip install -r requirements.txt
+
+cd frontend
+npm install
 ```
 
-## 启动
+## 开发模式
+
+终端一启动 FastAPI：
 
 ```bash
 conda activate llama-manager
 bash run.sh
 ```
 
-访问地址：<http://localhost:8081>
+终端二启动 Next.js 开发服务：
 
-首次启动会要求初始化管理员账号；之后使用该账号登录。
+```bash
+cd frontend
+npm run dev
+```
+
+访问 <http://localhost:3000>。开发服务器会把 `/api/*`、`/llama-manager/api/*`、`/server/api/*`、`/prompt/api/*` 及模型代理请求转发给 `http://127.0.0.1:8081`。如后端地址不同，可在启动前设置 `HANNISHUB_BACKEND_ORIGIN`。
+
+## 生产模式
+
+```bash
+cd frontend
+npm run build
+
+cd ..
+conda activate llama-manager
+bash run.sh
+```
+
+`npm run build` 会生成 `frontend/out/`。FastAPI 在启动时检测该目录并托管 Dashboard、`/_next/` 资源和所有已导出的页面，因此访问 <http://localhost:8081> 即可同时使用 Web UI 与 API。重新构建后需要重启 FastAPI，以重新挂载静态目录。
+
+## 页面
+
+| 页面 | 地址 | 后端 API 前缀 |
+|---|---|---|
+| 总览 | `/` | `/api`、各模块只读接口 |
+| 模型与仓库 | `/llama/models` | `/llama-manager/api` |
+| 受管进程 | `/llama/processes` | `/llama-manager/api` |
+| GPU 监控 | `/llama/gpu` | `/llama-manager/api` |
+| 下载 | `/llama/downloads` | `/llama-manager/api` |
+| ASR | `/llama/asr` | `/llama-manager/api` |
+| 模型设置 | `/llama/settings` | `/llama-manager/api` |
+| 服务器连接 | `/server/connections` | `/server/api` |
+| 远程任务 | `/server/tasks` | `/server/api` |
+| 提示词工作区 | `/prompts` | `/prompt/api` |
 
 ## 目录结构
 
 ```text
 HannisHub/
-├── app.py              # Hub 入口，负责登录、会话与子服务挂载
-├── auth.py             # 登录、密码哈希与会话中间件
-├── index.html          # Hub 服务列表页面
-├── login.html          # 登录 / 首次初始化页面
-├── llama_manager/      # 模型管理子服务
-├── server/             # Server 子服务
-├── prompt_service/     # 在线提示词输入子服务
-├── requirements.txt    # Python 依赖
-└── run.sh              # 启动脚本
+├── app.py                    # Hub、认证、子服务挂载与前端静态托管
+├── auth.py                   # 登录、密码哈希与会话中间件
+├── frontend/                 # 唯一的 Next.js 前端工程
+│   ├── app/                  # App Router 页面与全局设计 tokens
+│   ├── components/           # layout、ui、llama、server、prompts、overview
+│   ├── lib/                  # API 客户端、类型、格式化与导航
+│   └── public/               # 静态前端资源
+├── llama_manager/            # 模型管理 FastAPI 子服务与旧版页面
+├── server/                   # SSH/任务 FastAPI 子服务与旧版页面
+├── prompt_service/           # 提示词 FastAPI 子服务与旧版页面
+├── design.md                 # 强制前端设计规范
+├── spec.md                   # 架构文档
+└── run.sh                    # 固定监听 0.0.0.0:8081
 ```
 
-## 配置
+## 配置与安全
 
 - 根目录 `settings.json`：Hub 登录与会话配置
-- `llama_manager/settings.json`：模型管理子服务配置
-- `server/settings.json`：Server 子服务配置
-- `prompt_service/settings.json`：在线提示词归档数据
+- `llama_manager/settings.json`：模型管理配置和运行状态
+- `server/settings.json`：Server 配置
+- `prompt_service/settings.json`：提示词分组与归档数据
+- 所有配置均使用 JSON 文件，不引入数据库
+- 管理后台默认绑定 `0.0.0.0:8081`；如通过公网访问，应在前置反向代理启用 HTTPS
 
-所有配置均使用 JSON 文件，不引入数据库。
+## 旧版页面
 
-## 安全提示
-
-- 管理后台默认绑定 `0.0.0.0:8081`，可被同一网络内其他设备访问
-- 登录会话使用 HttpOnly Cookie，密码使用 Argon2id 哈希存储
-- 登录接口内置简单防暴力破解限制
-- 如需公网部署，建议继续在前置反向代理上启用 HTTPS
+旧版 `index.html` 暂时保留，便于迁移验证和兼容既有入口：`/llama-manager/`、`/server/`、`/prompt/`。新的日常入口是上表中的统一 Dashboard 路径。
