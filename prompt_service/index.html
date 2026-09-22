@@ -153,8 +153,9 @@
         const editorStatus = $("editor-status");
         const charCount = $("char-count");
         const autosaveState = $("autosave-state");
-        // 页面已运行在 /prompt 挂载路径下，FastAPI Mount 会去掉挂载前缀，直接请求 /api/...
-        const API_PREFIX = "/api";
+        // 使用相对路径：页面固定位于 /prompt/ 下，浏览器会解析为 /prompt/api/...
+        // Hub 挂载和独立运行两种模式都由后端提供对应路由
+        const API_PREFIX = "api";
 
         function esc(value) {
             return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 APP_DIR = Path(__file__).resolve().parent
@@ -19,6 +19,7 @@ _SETTINGS_LOCK = threading.RLock()
 DEFAULT_SETTINGS = {"prompts": []}
 
 app = FastAPI(title="LlamaManager Prompt")
+router = APIRouter()
 
 
 def _now_iso() -> str:
@@ -107,19 +108,23 @@ async def index():
     return FileResponse(APP_DIR / "index.html")
 
 
-@app.get("/api/health")
+# Hub 挂载时子应用收到 /api/...；独立运行时页面在 /prompt/ 下会请求 /prompt/api/...
+# 因此同一组 API 在文件末尾同时注册两个前缀，前端统一使用相对路径。
+
+
+@router.get("/health")
 async def health():
     """健康检查。"""
     return JSONResponse({"ok": True, "service": "prompt"})
 
 
-@app.get("/api/prompts")
+@router.get("/prompts")
 async def list_prompts():
     """读取归档提示词列表。"""
     return JSONResponse({"prompts": _sorted_prompts(), "max_count": PROMPT_MAX_COUNT})
 
 
-@app.post("/api/prompts")
+@router.post("/prompts")
 async def create_prompt(request: Request):
     """归档当前提示词。"""
     try:
@@ -144,7 +149,7 @@ async def create_prompt(request: Request):
     return JSONResponse(_public_prompt(item), status_code=201)
 
 
-@app.put("/api/prompts/{prompt_id}")
+@router.put("/prompts/{prompt_id}")
 async def update_prompt(prompt_id: str, request: Request):
     """更新归档提示词内容。"""
     try:
@@ -164,7 +169,7 @@ async def update_prompt(prompt_id: str, request: Request):
     return JSONResponse(_public_prompt(updated))
 
 
-@app.delete("/api/prompts/{prompt_id}")
+@router.delete("/prompts/{prompt_id}")
 async def delete_prompt(prompt_id: str):
     """删除归档提示词。"""
     with _SETTINGS_LOCK:
@@ -178,3 +183,8 @@ async def delete_prompt(prompt_id: str):
         ]
         _write_settings(data)
     return JSONResponse({"ok": True})
+
+
+# 统一注册 API 路由：Hub 挂载模式和独立运行模式共用同一组处理函数
+app.include_router(router, prefix="/api")
+app.include_router(router, prefix="/prompt/api")

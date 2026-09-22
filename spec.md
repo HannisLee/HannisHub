@@ -535,7 +535,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 ## 在线提示词输入子服务（prompt_service）
 
-`prompt_service/` 是与 LlamaManager、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
+`prompt_service/` 是与 LlamaManager、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮。页面 API 使用相对路径 `api/...`，由浏览器基于 `/prompt/` 解析；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
 
 ```json
 {
@@ -562,4 +562,4 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | PUT | `/api/prompts/{prompt_id}` | 更新指定归档提示词内容 |
 | DELETE | `/api/prompts/{prompt_id}` | 删除指定归档提示词 |
 
-服务端限制：提示词最长 200 万字符，最多保留 500 条归档，超出时自动删除最早记录。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。
+服务端限制：提示词最长 200 万字符，最多保留 500 条归档，超出时自动删除最早记录。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。
