@@ -1,5 +1,5 @@
 """
-LlamaManager 子服务：本机模型与受管进程管理。
+HannisHub 模型管理子服务：本机模型与受管进程管理。
 通过单页面 WebUI 管理 llama-server 及其他本机服务进程。
 """
 
@@ -92,7 +92,7 @@ ASR_MAX_CONCURRENT_TASKS = 1
 _asr_task_semaphore = threading.Semaphore(ASR_MAX_CONCURRENT_TASKS)
 _asr_background_tasks: set[asyncio.Task] = set()
 
-app = FastAPI(title="LlamaManager")
+app = FastAPI(title="HannisHub 模型管理")
 
 # ── 反向代理 ────────────────────────────────────────────
 _proxy_client: Optional[httpx.AsyncClient] = None

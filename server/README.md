@@ -1,6 +1,6 @@
-# LlamaManager Server
+# HannisHub Server
 
-独立的 SSH 服务器连接和定时任务管理子项目。它不依赖外层 LlamaManager 的 API、页面或配置，所有运行数据保存在本目录自动生成的 `settings.json` 中。
+独立的 SSH 服务器连接和定时任务管理子项目。它不依赖外层 HannisHub 的 API、页面或配置，所有运行数据保存在本目录自动生成的 `settings.json` 中。
 
 ## 启动
 
@@ -10,7 +10,7 @@ pip install -r requirements.txt
 bash run.sh
 ```
 
-单独运行时默认访问地址为 <http://localhost:8082/server>。在外层 LlamaManager 已运行的部署中，`server` 会自动挂载到外层的 `/server` 路由，因此外网直接访问外层地址的 `/server` 即可，例如 `https://models.lihan.online/server`，不需要额外暴露 8082 端口。可以通过 `SERVER_PORT` 修改独立运行端口，例如 `SERVER_PORT=8081 bash run.sh`。
+单独运行时默认访问地址为 <http://localhost:8082/server>。在外层 HannisHub 已运行的部署中，`server` 会自动挂载到外层的 `/server` 路由，因此外网直接访问外层地址的 `/server` 即可，例如 `https://models.lihan.online/server`，不需要额外暴露 8082 端口。可以通过 `SERVER_PORT` 修改独立运行端口，例如 `SERVER_PORT=8081 bash run.sh`。
 
 ## 功能
 

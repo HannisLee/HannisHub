@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LlamaManager</title>
+    <title>HannisHub · 模型管理</title>
     <link rel="icon" href="/icon.png">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -981,7 +981,7 @@
 </div>
 
 <div class="container">
-    <h1><img src="/icon.png" alt="LlamaManager" style="height:32px;vertical-align:middle;"> LlamaManager</h1>
+    <h1><img src="/icon.png" alt="HannisHub" style="height:32px;vertical-align:middle;"> HannisHub · 模型管理</h1>
 
     <!-- GPU 监控 -->
     <div class="card">
@@ -1348,11 +1348,11 @@ function deleteGenericChatSession(sessionId) {
 }
 
 function renderGenericChatPage() {
-    document.title = "通用模型对话 · LlamaManager";
+    document.title = "通用模型对话 · HannisHub";
     document.body.insertAdjacentHTML("beforeend", `
         <main class="generic-chat-page">
             <aside class="generic-chat-sidebar">
-                <div class="generic-chat-brand"><img src="/icon.png" alt="LlamaManager"> LlamaManager</div>
+                <div class="generic-chat-brand"><img src="/icon.png" alt="HannisHub"> HannisHub · 模型管理</div>
                 <button class="generic-chat-new" id="generic-chat-new"><span>＋</span> 新建对话</button>
                 <div id="generic-chat-session-list" class="generic-chat-session-list"></div>
                 <div class="generic-chat-sidebar-footer">
@@ -1712,7 +1712,7 @@ function renderAsrPage() {
     document.title = "Qwen3 ASR 音频转写";
     document.body.insertAdjacentHTML("beforeend", `
         <main class="asr-page">
-            <h1><img src="/icon.png" alt="LlamaManager" style="height:32px;vertical-align:middle;"> Qwen3 ASR 音频转写</h1>
+            <h1><img src="/icon.png" alt="HannisHub" style="height:32px;vertical-align:middle;"> HannisHub · Qwen3 ASR 音频转写</h1>
             <div class="card">
                 <h2 id="asr-service-name">正在连接服务...</h2>
                 <input type="file" id="asr-audio-file" accept="audio/*,video/*,.m4s,.mkv,.ts" multiple style="display:none;">

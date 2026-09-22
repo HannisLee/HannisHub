@@ -1,4 +1,4 @@
-# LlamaManager 项目记忆
+# HannisHub 项目记忆
 
 ## ASR 音频格式兼容
 

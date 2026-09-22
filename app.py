@@ -1,4 +1,4 @@
-"""LlamaManager Hub：综合管理站入口与登录网关。"""
+"""HannisHub：综合管理站入口与登录网关。"""
 
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,7 +28,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 SERVICES: list[dict[str, str]] = [
     {
         "id": "llama-manager",
-        "name": "LlamaManager",
+        "name": "模型管理",
         "description": "本机模型、GPU、受管进程与 ASR 服务管理",
         "path": "/llama-manager/",
         "icon": "🦙",
@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
     await server_manager_app.stop_scheduler()
 
 
-app = FastAPI(title="LlamaManager Hub", lifespan=lifespan)
+app = FastAPI(title="HannisHub", lifespan=lifespan)
 
 # 先添加 AuthMiddleware，再添加 SessionMiddleware，
 # Starlette 会把最后添加的中间件放在最外层，因此 AuthMiddleware 可以读取已解析的会话。
@@ -67,7 +67,7 @@ _auth_settings = ensure_auth_settings().get("auth", {})
 app.add_middleware(
     SessionMiddleware,
     secret_key=str(_auth_settings.get("session_secret")),
-    session_cookie="llamamanager_session",
+    session_cookie="hannishub_session",
     max_age=int(_auth_settings.get("session_max_age_seconds", 12 * 60 * 60)),
     same_site="strict",
     https_only=False,
@@ -92,7 +92,7 @@ async def login_page():
 
 @app.get("/icon.png", include_in_schema=False)
 async def icon():
-    """返回综合管理站图标，同时兼容 LlamaManager 子页面引用。"""
+    """返回 HannisHub 图标，同时兼容各子页面引用。"""
     return FileResponse(ROOT_DIR / "llama_manager" / "icon.png", media_type="image/png")
 
 

@@ -1,4 +1,4 @@
-"""LlamaManager Hub 的登录、会话与权限中间件。"""
+"""HannisHub 的登录、会话与权限中间件。"""
 
 import json
 import os

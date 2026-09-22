@@ -1,8 +1,8 @@
-# LlamaManager 架构文档
+# HannisHub 架构文档
 
 ## 项目概述
 
-LlamaManager Hub 是一个本地综合管理站。根应用负责统一登录、会话管理和子服务挂载；当前包含 LlamaManager 与 Server 两个子服务。LlamaManager 子服务通过单页面 WebUI 管理任意本机启动命令的运行、停止与重启，支持从 Hugging Face 下载模型，并提供多 GPU 监控与 GPU 进程列表展示。Server 子服务管理 SSH 服务器连接、远端时间与定时任务。
+HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理和子服务挂载；当前包含模型管理与 Server 两个子服务。模型管理子服务通过单页面 WebUI 管理任意本机启动命令的运行、停止与重启，支持从 Hugging Face 下载模型，并提供多 GPU 监控与 GPU 进程列表展示。Server 子服务管理 SSH 服务器连接、远端时间与定时任务。
 
 ## 技术栈
 
@@ -19,7 +19,7 @@ LlamaManager Hub 是一个本地综合管理站。根应用负责统一登录、
 ## 项目结构
 
 ```
-LlamaManager/
+HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
 ├── index.html                # Hub 服务列表页面
@@ -27,7 +27,7 @@ LlamaManager/
 ├── settings.json             # Hub 登录与会话配置
 ├── requirements.txt          # Python 依赖
 ├── run.sh                    # 启动脚本
-├── llama_manager/            # LlamaManager 子服务
+├── llama_manager/            # 模型管理子服务
 │   ├── app.py                # 子服务 FastAPI 后端
 │   ├── index.html            # 子服务单页面 WebUI
 │   ├── settings.json         # 子服务配置与运行状态
@@ -54,7 +54,7 @@ LlamaManager/
 
 根应用 `app.py` 是综合管理站入口，负责：
 
-- 挂载 LlamaManager 子服务到 `/llama-manager`
+- 挂载模型管理子服务到 `/llama-manager`
 - 挂载 Server 子服务到 `/server`
 - 挂载在线提示词输入子服务到 `/prompt`
 - 统一拦截未登录请求，保护 Hub 页面、子服务页面和所有子服务 API
@@ -83,12 +83,12 @@ LlamaManager/
 - 管理员用户名与密码哈希保存在根目录 `settings.json.auth`
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
 - 会话使用 Starlette `SessionMiddleware` 与 `itsdangerous` 签名 Cookie
-- Cookie 名称为 `llamamanager_session`，默认有效期 12 小时
+- Cookie 名称为 `hannishub_session`，默认有效期 12 小时
 - `AuthMiddleware` 统一保护除登录、健康检查和图标以外的请求
 - 登录接口内置简单防暴力破解：同一客户端 5 分钟内最多 5 次失败
 - 浏览器页面未登录时重定向到 `/login?next=...`，API 请求返回 `401` JSON
 
-## LlamaManager 子服务后端架构（llama_manager/app.py）
+## 模型管理子服务后端架构（llama_manager/app.py）
 
 ### 全局状态
 
@@ -302,7 +302,7 @@ _download_lock   # 下载任务状态读写锁
 1. 调用 `nvidia-smi --query-gpu=index,name,driver_version,uuid,pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits`
 2. 调用 `nvidia-smi --query-compute-apps=gpu_uuid,gpu_bus_id,pid,used_memory,process_name --format=csv,noheader,nounits`
 3. 进程归属优先按 `gpu_uuid` 映射到 GPU，失败时按 `gpu_bus_id` 映射；仍无法映射的进程行会被忽略
-4. GPU 进程 PID 会先通过 `_managed_process_pid_map()` 归属到 LlamaManager 启动的父服务 PID，兼容 `conda run` / vLLM 启动器由子进程实际占用 GPU 的情况
+4. GPU 进程 PID 会先通过 `_managed_process_pid_map()` 归属到模型管理模块启动的父服务 PID，兼容 `conda run` / vLLM 启动器由子进程实际占用 GPU 的情况
 5. GPU 进程表只保留 `_managed_processes` 中仍存活的服务，系统或其他用户进程不进入前端进程表
 6. 同一服务占用多张 GPU 时，GPU index/name 汇总展示，进程显存累加，总显存累加，GPU util/温度取最大值
 7. 如果 `nvidia-smi` 暂时没有返回该服务的 compute-apps 行，但启动时选择了 GPU，则用所选 GPU 回填 GPU name/util/total mem/temp，进程显存保持空值
@@ -317,7 +317,7 @@ _download_lock   # 下载任务状态读写锁
 - PID 1（init）不会被 kill
 - terminate → 等待 3 秒 → kill
 
-## LlamaManager 子服务前端架构（llama_manager/index.html）
+## 模型管理子服务前端架构（llama_manager/index.html）
 
 ### 页面布局
 
@@ -346,7 +346,7 @@ GPU 波形图区位于 GPU 卡片上方：
 - X 小时来自 `settings.json.gpu_history_hours`，默认 2
 - 当前硬件查询失败时，波形图仍可基于本地历史文件显示，并在页面顶部提示当前状态不可用
 
-GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字段为 GPU、GPU Name、GPU Util、PID、Used Mem、Total Mem、Temp、Model Name、Actions。Model Name 显示注册服务名（display_name，回退 model_name）；Actions 包含 Open、Stop、Restart。
+GPU 进程表只展示模型管理模块当前运行期启动的受管实例，字段为 GPU、GPU Name、GPU Util、PID、Used Mem、Total Mem、Temp、Model Name、Actions。Model Name 显示注册服务名（display_name，回退 model_name）；Actions 包含 Open、Stop、Restart。
 
 ### JavaScript 架构
 
@@ -417,7 +417,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 | `openai_api_key` | string | `""` | OpenAI 兼容 API 密钥；仅后端保存，永不通过读取设置接口返回 |
 | `model_params` | object | `{}` | （已废弃）按模型路径保存的启动参数，启动时迁移为 llama 注册项后清空 |
 | `custom_services` | object | `{}` | 用户注册的通用命令服务 |
-| `managed_processes` | object | `{"processes":[]}` | LlamaManager 启动过的受管进程记录 |
+| `managed_processes` | object | `{"processes":[]}` | 模型管理模块启动过的受管进程记录 |
 | `gpu_history` | object | `{"samples":[]}` | GPU util 历史采样 |
 
 ### 内部状态结构
@@ -464,7 +464,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 }
 ```
 
-`llama_manager/settings.json.managed_processes` 保存 LlamaManager 启动过的受管进程记录：
+`llama_manager/settings.json.managed_processes` 保存模型管理模块启动过的受管进程记录：
 
 ```json
 {
@@ -477,7 +477,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
       "port": 8083,
       "command": "llama-server -m /home/lihan/models/model.gguf --host 0.0.0.0 --port 8083",
       "command_tokens": ["llama-server", "-m", "/home/lihan/models/model.gguf", "--host", "0.0.0.0", "--port", "8083"],
-      "log_file": "/home/lihan/run/LlamaManager/logs/services/llama-model.gguf-8083-20260615-120000.log",
+      "log_file": "/home/lihan/run/HannisHub/llama_manager/logs/services/llama-model.gguf-8083-20260615-120000.log",
       "process_create_time": 1781496000.0,
       "running": true
     }
@@ -535,7 +535,7 @@ GPU 进程表只展示 LlamaManager 当前运行期启动的受管实例，字�
 
 ## 在线提示词输入子服务（prompt_service）
 
-`prompt_service/` 是与 LlamaManager、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮。页面 API 使用相对路径 `api/...`，由浏览器基于 `/prompt/` 解析；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
+`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。页面提供一个大型提示词输入框，顶部提供“复制”和“归档”按钮。页面 API 使用相对路径 `api/...`，由浏览器基于 `/prompt/` 解析；归档内容保存到 `prompt_service/settings.json`，并在下方渲染为可折叠列表，支持再次复制、恢复到输入框和删除。前端还会把未归档草稿写入浏览器 `localStorage`，避免刷新丢失当前编辑内容。数据结构：
 
 ```json
 {

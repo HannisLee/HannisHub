@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>登录 · LlamaManager Hub</title>
+  <title>登录 · HannisHub</title>
   <link rel="icon" href="/icon.png">
   <style>
     :root {
@@ -101,10 +101,10 @@
 <body>
   <main class="card">
     <div class="brand">
-      <img src="/icon.png" alt="LlamaManager">
+      <img src="/icon.png" alt="HannisHub">
       <div>
         <h1 id="title">管理员登录</h1>
-        <small id="subtitle">LlamaManager Hub</small>
+        <small id="subtitle">HannisHub</small>
       </div>
     </div>
 
@@ -160,7 +160,7 @@
         }
         setupMode = !data.configured;
         title.textContent = setupMode ? "初始化管理员" : "管理员登录";
-        subtitle.textContent = setupMode ? "首次使用，请创建管理员账号" : "LlamaManager Hub";
+        subtitle.textContent = setupMode ? "首次使用，请创建管理员账号" : "HannisHub";
         confirmWrap.style.display = setupMode ? "block" : "none";
         submitButton.textContent = setupMode ? "创建并进入" : "登录";
         passwordInput.autocomplete = setupMode ? "new-password" : "current-password";

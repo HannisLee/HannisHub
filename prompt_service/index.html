@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-store">
-    <title>在线提示词输入 · LlamaManager</title>
+    <title>在线提示词输入 · HannisHub</title>
     <style>
         :root {
             color-scheme: dark;
@@ -26,19 +26,20 @@
             background: radial-gradient(circle at top right, #172a4d 0, transparent 34%), var(--bg);
             font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
-        button, textarea { font: inherit; }
+        button, textarea, input, select { font: inherit; }
         button { cursor: pointer; }
-        .shell { max-width: 1040px; margin: 0 auto; padding: 28px 22px 60px; }
-        .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
-        .eyebrow { color: var(--blue); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
-        h1 { margin: 4px 0 3px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
-        .subtitle { margin: 0; color: var(--muted); }
-        .home-link { color: var(--muted); text-decoration: none; }
+        .shell { max-width: 1040px; margin: 0 auto; padding: 22px 22px 60px; }
+        .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+        .eyebrow { color: var(--blue); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+        /* 标题整体收敛，突出下方的提示词编辑区 */
+        h1 { margin: 3px 0 2px; font-size: clamp(19px, 2.2vw, 24px); letter-spacing: -.02em; }
+        .subtitle { margin: 0; color: var(--muted); font-size: 13px; }
+        .home-link { color: var(--muted); font-size: 13px; text-decoration: none; }
         .home-link:hover { color: var(--text); }
-        .panel { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: rgba(18, 28, 47, .92); box-shadow: 0 16px 40px rgba(0, 0, 0, .16); margin-bottom: 18px; }
-        .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; }
-        h2 { margin: 0; font-size: 18px; }
-        .hint { color: var(--muted); font-size: 13px; }
+        .panel { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: rgba(18, 28, 47, .92); box-shadow: 0 16px 40px rgba(0, 0, 0, .16); margin-bottom: 16px; }
+        .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+        h2 { margin: 0; font-size: 15px; }
+        .hint { color: var(--muted); font-size: 12px; }
         .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .btn { padding: 9px 14px; border: 1px solid transparent; border-radius: 8px; color: white; background: #31415e; }
         .btn:hover { filter: brightness(1.13); }
@@ -48,10 +49,15 @@
         .danger { background: #a9364b; }
         .ghost { border-color: var(--line); background: transparent; color: var(--muted); }
         .small { padding: 5px 9px; font-size: 12px; }
+        /* 原文 / 润色 切换按钮组，位于“复制”左侧 */
+        .mode-switch { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: #0d1728; }
+        .mode-btn { padding: 7px 13px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; }
+        .mode-btn:hover { color: var(--text); }
+        .mode-btn.active { background: #216ed0; color: #fff; }
         textarea {
             width: 100%;
-            min-height: 520px;
-            padding: 14px;
+            min-height: 620px;
+            padding: 16px;
             border: 1px solid var(--line);
             border-radius: 12px;
             color: var(--text);
@@ -59,20 +65,48 @@
             outline: none;
             resize: vertical;
             font-family: "SF Mono", Consolas, monospace;
-            font-size: 14px;
-            line-height: 1.65;
+            font-size: 15px;
+            line-height: 1.7;
         }
         textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(78, 156, 255, .12); }
-        .editor-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
-        .status { min-height: 22px; color: var(--muted); font-size: 13px; }
+        .editor-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+        .meta-group { display: inline-flex; align-items: center; gap: 6px; }
+        select {
+            padding: 5px 8px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            color: var(--text);
+            background: #0d1728;
+            outline: none;
+            font-size: 12px;
+        }
+        select:focus { border-color: var(--blue); }
+        .status { min-height: 22px; margin-top: 6px; color: var(--muted); font-size: 13px; }
         .status.error { color: var(--red); }
         .status.ok { color: var(--green); }
-        .list { display: grid; gap: 10px; }
-        .empty { padding: 28px 10px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+        .empty { padding: 26px 10px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+        /* 分组与归档条目 */
+        .groups { display: grid; gap: 12px; }
+        .group { border: 1px solid var(--line); border-radius: 14px; background: rgba(18, 28, 47, .55); }
+        .group.active { border-color: rgba(78, 156, 255, .55); }
+        .group.drop-target { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(78, 156, 255, .16); }
+        .group.dragging { opacity: .5; }
+        .group-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid rgba(43, 58, 85, .7); cursor: pointer; }
+        .group-name { font-size: 14px; font-weight: 600; }
+        .group-name-input { width: 220px; padding: 4px 8px; border: 1px solid var(--blue); border-radius: 7px; color: var(--text); background: #0d1728; outline: none; font-size: 13px; }
+        .group-count { color: var(--muted); font-size: 12px; }
+        .group-actions { margin-left: auto; display: flex; gap: 6px; }
+        .group-body { padding: 10px; display: grid; gap: 8px; }
+        .grip { padding: 2px 4px; border-radius: 6px; color: var(--muted); font-size: 15px; line-height: 1; letter-spacing: 1px; user-select: none; cursor: grab; }
+        .grip:hover { color: var(--text); background: rgba(37, 53, 84, .6); }
+        .grip:active { cursor: grabbing; }
+        .grip.locked { opacity: .22; cursor: default; background: none; color: var(--muted); }
         .item { border: 1px solid var(--line); border-radius: 12px; background: rgba(23, 36, 58, .62); overflow: hidden; }
         .item.open { border-color: rgba(78, 156, 255, .45); }
-        .item-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px; border: 0; background: transparent; color: var(--text); text-align: left; }
+        .item.dragging { opacity: .45; }
+        .item-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 6px; }
         .item-head:hover { background: rgba(37, 53, 84, .42); }
+        .item-toggle { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 4px; border: 0; background: transparent; color: var(--text); text-align: left; }
         .chevron { color: var(--muted); transition: transform .18s ease; flex: 0 0 auto; }
         .item.open .chevron { transform: rotate(90deg); }
         .item-title { flex: 1 1 auto; min-width: 0; }
@@ -98,9 +132,10 @@
         .toast.show { opacity: 1; }
         .toast.error { background: rgba(169, 54, 75, .94); color: #fff; }
         @media (max-width: 640px) {
-            .shell { padding: 20px 14px 50px; }
+            .shell { padding: 18px 14px 50px; }
             .topbar { align-items: flex-start; flex-direction: column; }
-            textarea { min-height: 420px; }
+            textarea { min-height: 460px; }
+            .group-name-input { width: 140px; }
         }
     </style>
 </head>
@@ -119,9 +154,13 @@
             <div class="panel-head">
                 <div>
                     <h2>当前提示词</h2>
-                    <div class="hint">复制当前内容，或归档到下方历史记录</div>
+                    <div class="hint">可切换原文 / 润色后复制，或归档到指定分组</div>
                 </div>
                 <div class="actions">
+                    <div class="mode-switch" id="mode-switch" role="group" aria-label="文本模式">
+                        <button class="mode-btn active" type="button" data-mode="raw" aria-pressed="true">原文</button>
+                        <button class="mode-btn" type="button" data-mode="polished" aria-pressed="false">润色</button>
+                    </div>
                     <button class="btn primary" type="button" id="copy-btn">复制</button>
                     <button class="btn success" type="button" id="archive-btn">归档</button>
                 </div>
@@ -129,6 +168,10 @@
             <textarea id="prompt-input" spellcheck="false" placeholder="在这里输入或粘贴你的提示词..."></textarea>
             <div class="editor-meta">
                 <span id="char-count">0 字符</span>
+                <span class="meta-group">
+                    <label class="hint" for="archive-group">归档到</label>
+                    <select id="archive-group"></select>
+                </span>
                 <span id="autosave-state">未保存</span>
             </div>
             <div class="status" id="editor-status"></div>
@@ -138,11 +181,19 @@
             <div class="panel-head">
                 <div>
                     <h2>归档列表</h2>
-                    <div class="hint">点击条目展开，可复制、恢复或删除</div>
+                    <div class="hint">拖动分组左侧 ⠿ 调整分组顺序，拖动条目左侧 ⠿ 移动到其他分组；无分组固定在最上方</div>
                 </div>
-                <button class="btn ghost small" type="button" id="refresh-btn">刷新</button>
+                <div class="actions">
+                    <button class="btn primary small" type="button" id="new-group-btn">新建分组</button>
+                    <button class="btn ghost small" type="button" id="refresh-btn">刷新</button>
+                </div>
             </div>
-            <div class="list" id="prompt-list"><div class="empty">正在读取归档提示词…</div></div>
+            <div class="actions" id="group-create" style="margin-bottom:10px" hidden>
+                <input class="group-name-input" id="group-name-input" type="text" maxlength="40" placeholder="例如：项目A / 训练服务器">
+                <button class="btn primary small" type="button" id="group-create-ok">创建</button>
+                <button class="btn ghost small" type="button" id="group-create-cancel">取消</button>
+            </div>
+            <div class="groups" id="prompt-list"><div class="empty">正在读取归档提示词…</div></div>
         </section>
     </main>
     <div class="toast" id="toast"></div>
@@ -154,9 +205,24 @@
         const editorStatus = $("editor-status");
         const charCount = $("char-count");
         const autosaveState = $("autosave-state");
+        const targetSelect = $("archive-group");
+        const DRAFT_KEY = "hannishub_prompt_draft";
+        const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
         // 使用相对路径：页面固定位于 /prompt/ 下，浏览器会解析为 /prompt/api/...
         // Hub 挂载和独立运行两种模式都由后端提供对应路由
         const API_PREFIX = "api";
+
+        // 页面状态：原文与润色两份缓冲，切换时互不覆盖
+        const state = {
+            mode: "raw",
+            raw: "",
+            polished: "",
+            polishedStale: true,
+            groups: [],
+            items: [],
+            activeGroup: "",
+            drag: null,
+        };
 
         function esc(value) {
             return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -175,8 +241,11 @@
             clearTimeout(setStatus.timer);
             if (message) setStatus.timer = setTimeout(() => { editorStatus.textContent = ""; editorStatus.className = "status"; }, 3600);
         }
+        function currentBuffer() {
+            return state.mode === "polished" ? state.polished : state.raw;
+        }
         function updateCount() {
-            charCount.textContent = `${input.value.length.toLocaleString("zh-CN")} 字符`;
+            charCount.textContent = `${currentBuffer().length.toLocaleString("zh-CN")} 字符`;
         }
         async function api(method, path, body) {
             const options = { method, headers: { "Content-Type": "application/json" } };
@@ -222,69 +291,243 @@
             const text = (firstLine || item.content).trim();
             return text.length > 80 ? text.slice(0, 80) + "…" : (text || "空提示词");
         }
+
+        /* ---------- 润色：本地规则整理排版，不发送任何外部请求 ----------
+           规则仅作用于代码块之外的行，避免破坏 ``` 代码块内容：
+           1. 统一换行为 \n，全角空格转半角，清理行尾空白；
+           2. 连续空行折叠为一行，去掉文首文末空行；
+           3. 标题 # 后补空格；无序列表符号统一为 "- "；有序列表统一为 "1. "。
+           需要接入大模型润色时，只需替换本函数实现。 */
+        function polishText(source) {
+            const lines = String(source ?? "").replace(/\r\n?/g, "\n").split("\n");
+            const out = [];
+            let inFence = false;
+            let blankPending = false;
+            const pushBlank = () => {
+                if (blankPending && out.length) out.push("");
+                blankPending = false;
+            };
+            for (const rawLine of lines) {
+                const trimmed = rawLine.trim();
+                const isFence = trimmed.startsWith("```") || trimmed.startsWith("~~~");
+                if (isFence) {
+                    pushBlank();
+                    inFence = !inFence;
+                    out.push(rawLine.replace(/[ \t]+$/, ""));
+                    continue;
+                }
+                if (inFence) {
+                    out.push(rawLine);
+                    continue;
+                }
+                let line = rawLine.replace(/\u3000/g, " ").replace(/[ \t]+$/, "");
+                if (!line.trim()) {
+                    blankPending = true;
+                    continue;
+                }
+                line = line.replace(/^(#{1,6})(?!#)(?![ \t])/, "$1 ");   // 标题补空格
+                line = line.replace(/^(\s*)[*•·●▪]\s+/, "$1- ");         // 无序列表统一
+                line = line.replace(/^(\s*)(\d+)[、）)]\s*/, "$1$2. ");   // 有序列表统一
+                pushBlank();
+                out.push(line);
+            }
+            while (out.length && !out[0].trim()) out.shift();
+            while (out.length && !out[out.length - 1].trim()) out.pop();
+            return out.join("\n");
+        }
+
+        function updateModeButtons() {
+            $("mode-switch").querySelectorAll(".mode-btn").forEach(button => {
+                const active = button.dataset.mode === state.mode;
+                button.classList.toggle("active", active);
+                button.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+        }
+        function setMode(mode, options = {}) {
+            if (mode === "polished" && (state.polishedStale || !state.polished)) {
+                // 原文有改动时重新生成润色稿；未改动的润色稿会保留手动编辑
+                state.polished = polishText(state.raw);
+                state.polishedStale = false;
+            }
+            state.mode = mode;
+            input.value = currentBuffer();
+            updateCount();
+            updateModeButtons();
+            if (!options.silent) {
+                input.focus();
+                setStatus(
+                    mode === "polished"
+                        ? "润色模式：已按本地规则整理排版，可直接编辑；修改原文后会重新生成"
+                        : "原文模式：显示原始输入内容",
+                    "ok",
+                );
+                saveDraftSoon();
+            }
+        }
+
+        /* ---------- 草稿暂存 ---------- */
         function saveDraft() {
-            localStorage.setItem("llamamanager_prompt_draft", input.value);
+            localStorage.setItem(DRAFT_KEY, JSON.stringify({
+                raw: state.raw,
+                polished: state.polished,
+                mode: state.mode,
+                polishedStale: state.polishedStale,
+                activeGroup: state.activeGroup,
+            }));
             autosaveState.textContent = "已自动暂存";
-            clearTimeout(saveDraft.timer);
-            saveDraft.timer = setTimeout(() => { autosaveState.textContent = "已自动暂存"; }, 0);
+        }
+        function saveDraftSoon() {
+            clearTimeout(saveDraftSoon.timer);
+            saveDraftSoon.timer = setTimeout(saveDraft, 400);
+        }
+        function clearDraft() {
+            clearTimeout(input.draftTimer);
+            clearTimeout(saveDraftSoon.timer);
+            localStorage.removeItem(DRAFT_KEY);
+            localStorage.removeItem(LEGACY_DRAFT_KEY);
+        }
+        function readDraft() {
+            const stored = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(LEGACY_DRAFT_KEY);
+            if (!stored) return null;
+            try {
+                const parsed = JSON.parse(stored);
+                if (parsed && typeof parsed === "object" && typeof parsed.raw === "string") return parsed;
+            } catch (error) {
+                // 旧版本直接存放纯文本草稿，解析失败时按原文处理
+            }
+            return { raw: stored, polished: "", mode: "raw", polishedStale: true, activeGroup: "" };
         }
         function restoreDraft() {
-            input.value = localStorage.getItem("llamamanager_prompt_draft") || "";
-            updateCount();
+            const draft = readDraft();
+            if (!draft) return;
+            state.raw = draft.raw || "";
+            state.polished = draft.polished || "";
+            state.polishedStale = draft.polishedStale !== false;
+            state.activeGroup = draft.activeGroup || "";
+            setMode(draft.mode === "polished" ? "polished" : "raw", { silent: true });
         }
-        function renderList(items) {
-            if (!items.length) {
-                list.innerHTML = `<div class="empty">暂无归档提示词</div>`;
-                return;
-            }
-            list.innerHTML = items.map(item => `
+
+        /* ---------- 分组与归档列表渲染 ---------- */
+        function groupSections() {
+            return [{ id: "", name: "无分组", system: true }]
+                .concat(state.groups.map(group => ({ id: group.id, name: group.name, system: false })));
+        }
+        function groupName(groupId) {
+            const section = groupSections().find(item => item.id === (groupId || ""));
+            return section ? section.name : "无分组";
+        }
+        function groupOptionsHtml(selectedId) {
+            return groupSections().map(section => (
+                `<option value="${esc(section.id)}"${section.id === (selectedId || "") ? " selected" : ""}>${esc(section.name)}</option>`
+            )).join("");
+        }
+        function itemHtml(item, sectionId) {
+            return `
                 <article class="item" data-id="${esc(item.id)}">
-                    <button class="item-head" type="button">
-                        <span class="chevron">▶</span>
-                        <span class="item-title">
-                            <span class="item-title-text">${esc(titleOf(item))}</span>
-                            <span class="item-time">${esc(formatTime(item.updated_at))} · ${item.content.length.toLocaleString("zh-CN")} 字符</span>
-                        </span>
-                    </button>
+                    <div class="item-head">
+                        <span class="grip" draggable="true" data-role="prompt-grip" title="拖动到其他分组">⠿</span>
+                        <button class="item-toggle" type="button" data-role="item-toggle">
+                            <span class="chevron">▶</span>
+                            <span class="item-title">
+                                <span class="item-title-text">${esc(titleOf(item))}</span>
+                                <span class="item-time">${esc(formatTime(item.updated_at))} · ${item.content.length.toLocaleString("zh-CN")} 字符</span>
+                            </span>
+                        </button>
+                    </div>
                     <div class="item-body">
                         <div class="preview">${esc(item.content)}</div>
                         <div class="actions" style="margin-top:10px">
                             <button class="btn primary small" type="button" data-action="copy">复制</button>
                             <button class="btn small" type="button" data-action="restore">恢复到输入框</button>
+                            <span class="meta-group">
+                                <span class="hint">移到</span>
+                                <select data-action="move">${groupOptionsHtml(sectionId)}</select>
+                            </span>
                             <button class="btn danger small" type="button" data-action="delete">删除</button>
                         </div>
                     </div>
                 </article>
-            `).join("");
+            `;
+        }
+        function renderList() {
+            list.innerHTML = groupSections().map(section => {
+                const items = state.items.filter(item => (item.group_id || "") === section.id);
+                const body = items.length
+                    ? items.map(item => itemHtml(item, section.id)).join("")
+                    : `<div class="empty">${section.system ? "暂无归档提示词" : "该分组暂无提示词，可把条目拖进来"}</div>`;
+                const grip = section.system
+                    ? `<span class="grip locked" title="无分组固定在最上方">⠿</span>`
+                    : `<span class="grip" draggable="true" data-role="group-grip" title="拖动调整分组上下顺序">⠿</span>`;
+                const groupActions = section.system ? "" : `
+                    <span class="group-actions">
+                        <button class="btn ghost small" type="button" data-action="rename-group">重命名</button>
+                        <button class="btn ghost small" type="button" data-action="delete-group">删除</button>
+                    </span>`;
+                return `
+                    <section class="group${section.id === state.activeGroup ? " active" : ""}" data-group-id="${esc(section.id)}" data-system="${section.system ? "1" : "0"}">
+                        <header class="group-head">
+                            ${grip}
+                            <span class="group-name" data-role="group-name">${esc(section.name)}</span>
+                            <span class="group-count">${items.length} 条</span>
+                            ${groupActions}
+                        </header>
+                        <div class="group-body">${body}</div>
+                    </section>
+                `;
+            }).join("");
+            targetSelect.innerHTML = groupOptionsHtml(state.activeGroup);
+        }
+        function setActiveGroup(groupId, options = {}) {
+            state.activeGroup = groupId || "";
+            list.querySelectorAll(".group").forEach(section => {
+                section.classList.toggle("active", section.dataset.groupId === state.activeGroup);
+            });
+            targetSelect.value = state.activeGroup;
+            if (!options.silent) saveDraftSoon();
         }
         async function loadPrompts() {
             try {
                 const data = await api("GET", "/prompts");
-                renderList(Array.isArray(data.prompts) ? data.prompts : []);
+                state.items = Array.isArray(data.prompts) ? data.prompts : [];
+                state.groups = Array.isArray(data.groups) ? data.groups : [];
+                if (state.activeGroup && !state.groups.some(group => group.id === state.activeGroup)) {
+                    // 分组已被删除时回到无分组
+                    state.activeGroup = "";
+                }
+                renderList();
             } catch (error) {
                 list.innerHTML = `<div class="empty">读取失败：${esc(error.message)}</div>`;
             }
         }
 
-        $("copy-btn").addEventListener("click", () => copyText(input.value, "当前提示词已复制"));
+        /* ---------- 顶部按钮 ---------- */
+        $("mode-switch").addEventListener("click", event => {
+            const button = event.target.closest(".mode-btn");
+            if (button) setMode(button.dataset.mode);
+        });
+        $("copy-btn").addEventListener("click", () => {
+            copyText(currentBuffer(), state.mode === "polished" ? "润色稿已复制" : "原文已复制");
+        });
         $("archive-btn").addEventListener("click", async () => {
-            const value = input.value;
+            const value = currentBuffer();
             if (!value.trim()) {
                 setStatus("提示词为空，不能归档", "error");
                 return;
             }
             $("archive-btn").disabled = true;
             try {
-                await api("POST", "/prompts", { content: value });
+                await api("POST", "/prompts", { content: value, group_id: state.activeGroup });
                 // 归档成功后清空输入框和本地草稿，方便直接输入下一条提示词。
                 // 需先取消尚未执行的草稿防抖，避免旧草稿在清空后再次写回。
-                clearTimeout(input.draftTimer);
+                state.raw = "";
+                state.polished = "";
+                state.polishedStale = true;
                 input.value = "";
-                localStorage.removeItem("llamamanager_prompt_draft");
+                clearDraft();
                 updateCount();
                 autosaveState.textContent = "输入框已清空";
-                setStatus("已归档当前提示词，输入框已清空", "ok");
-                toast("已归档当前提示词");
+                setStatus(`已归档到「${groupName(state.activeGroup)}」，输入框已清空`, "ok");
+                toast(`已归档到「${groupName(state.activeGroup)}」`);
                 await loadPrompts();
                 input.focus();
             } catch (error) {
@@ -295,41 +538,254 @@
             }
         });
         $("refresh-btn").addEventListener("click", loadPrompts);
-        list.addEventListener("click", async event => {
-            const head = event.target.closest(".item-head");
-            if (head && !event.target.closest("button[data-action]")) {
-                head.closest(".item").classList.toggle("open");
+        targetSelect.addEventListener("change", () => {
+            setActiveGroup(targetSelect.value);
+            setStatus(`后续归档将保存到「${groupName(state.activeGroup)}」`, "ok");
+        });
+
+        /* ---------- 新建 / 重命名 / 删除分组 ---------- */
+        $("new-group-btn").addEventListener("click", () => {
+            $("group-create").hidden = false;
+            $("group-name-input").value = "";
+            $("group-name-input").focus();
+        });
+        $("group-create-cancel").addEventListener("click", () => { $("group-create").hidden = true; });
+        $("group-name-input").addEventListener("keydown", event => {
+            if (event.key === "Enter") createGroup();
+            if (event.key === "Escape") $("group-create").hidden = true;
+        });
+        $("group-create-ok").addEventListener("click", createGroup);
+        async function createGroup() {
+            const name = $("group-name-input").value.trim();
+            if (!name) {
+                toast("请输入分组名称", true);
                 return;
             }
-            const actionButton = event.target.closest("button[data-action]");
-            if (!actionButton) return;
-            const item = actionButton.closest(".item");
-            const id = item.dataset.id;
-            const content = item.querySelector(".preview").textContent;
-            const action = actionButton.dataset.action;
-            if (action === "copy") {
-                await copyText(content, "归档提示词已复制");
-            } else if (action === "restore") {
-                input.value = content;
-                updateCount();
+            $("group-create-ok").disabled = true;
+            try {
+                const group = await api("POST", "/groups", { name });
+                $("group-create").hidden = true;
+                state.activeGroup = group.id;   // 新建后直接作为归档目标
+                toast(`已创建分组「${group.name}」`);
+                await loadPrompts();
                 saveDraft();
-                setStatus("已恢复到输入框", "ok");
-                toast("已恢复到输入框");
-                window.scrollTo({ top: 0, behavior: "smooth" });
-            } else if (action === "delete") {
-                if (!confirm("确定删除这条归档提示词？")) return;
-                actionButton.disabled = true;
+            } catch (error) {
+                toast(error.message, true);
+            } finally {
+                $("group-create-ok").disabled = false;
+            }
+        }
+        function startRenameGroup(section) {
+            const nameNode = section.querySelector('[data-role="group-name"]');
+            if (!nameNode) return;
+            const groupId = section.dataset.groupId;
+            const original = nameNode.textContent;
+            const edit = document.createElement("input");
+            edit.type = "text";
+            edit.className = "group-name-input";
+            edit.maxLength = 40;
+            edit.value = original;
+            nameNode.replaceWith(edit);
+            edit.focus();
+            edit.select();
+            let done = false;
+            const finish = async commit => {
+                if (done) return;
+                done = true;
+                const name = edit.value.trim();
+                if (!commit || !name || name === original) {
+                    renderList();
+                    return;
+                }
                 try {
-                    await api("DELETE", `/prompts/${encodeURIComponent(id)}`);
-                    toast("已删除归档提示词");
+                    await api("PUT", `/groups/${encodeURIComponent(groupId)}`, { name });
+                    toast("分组已重命名");
+                } catch (error) {
+                    toast(error.message, true);
+                }
+                await loadPrompts();
+            };
+            edit.addEventListener("keydown", event => {
+                if (event.key === "Enter") finish(true);
+                if (event.key === "Escape") finish(false);
+            });
+            edit.addEventListener("blur", () => finish(true));
+        }
+        async function deleteGroup(groupId) {
+            if (!confirm(`删除分组「${groupName(groupId)}」？分组内的提示词会移动到「无分组」。`)) return;
+            try {
+                const data = await api("DELETE", `/groups/${encodeURIComponent(groupId)}`);
+                toast(`分组已删除${data.moved ? `，${data.moved} 条提示词已移到无分组` : ""}`);
+                if (state.activeGroup === groupId) state.activeGroup = "";
+                await loadPrompts();
+                saveDraft();
+            } catch (error) {
+                toast(error.message, true);
+            }
+        }
+
+        /* ---------- 列表交互 ---------- */
+        list.addEventListener("click", async event => {
+            const groupSection = event.target.closest(".group");
+            const actionButton = event.target.closest("button[data-action]");
+            if (actionButton && groupSection) {
+                const action = actionButton.dataset.action;
+                if (action === "rename-group") { startRenameGroup(groupSection); return; }
+                if (action === "delete-group") { await deleteGroup(groupSection.dataset.groupId); return; }
+            }
+            const toggle = event.target.closest('[data-role="item-toggle"]');
+            if (toggle) {
+                toggle.closest(".item").classList.toggle("open");
+                return;
+            }
+            if (actionButton) {
+                const item = actionButton.closest(".item");
+                if (!item) return;
+                const id = item.dataset.id;
+                const content = item.querySelector(".preview").textContent;
+                const action = actionButton.dataset.action;
+                if (action === "copy") {
+                    await copyText(content, "归档提示词已复制");
+                } else if (action === "restore") {
+                    state.raw = content;
+                    state.polishedStale = true;
+                    setMode("raw", { silent: true });
+                    saveDraft();
+                    setStatus("已恢复到输入框", "ok");
+                    toast("已恢复到输入框");
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                } else if (action === "delete") {
+                    if (!confirm("确定删除这条归档提示词？")) return;
+                    actionButton.disabled = true;
+                    try {
+                        await api("DELETE", `/prompts/${encodeURIComponent(id)}`);
+                        toast("已删除归档提示词");
+                        await loadPrompts();
+                    } catch (error) {
+                        toast(error.message, true);
+                        actionButton.disabled = false;
+                    }
+                }
+                return;
+            }
+            // 点击分组头：把该分组设为当前归档目标
+            if (groupSection && event.target.closest(".group-head") && !event.target.closest(".grip")) {
+                setActiveGroup(groupSection.dataset.groupId);
+                setStatus(`后续归档将保存到「${groupName(state.activeGroup)}」`, "ok");
+            }
+        });
+        list.addEventListener("change", async event => {
+            const select = event.target.closest('select[data-action="move"]');
+            if (!select) return;
+            const item = select.closest(".item");
+            const groupId = select.value;
+            select.disabled = true;
+            try {
+                await api("PUT", `/prompts/${encodeURIComponent(item.dataset.id)}`, { group_id: groupId });
+                toast(`已移动到「${groupName(groupId)}」`);
+                setActiveGroup(groupId, { silent: true });
+                await loadPrompts();
+            } catch (error) {
+                toast(error.message, true);
+                select.disabled = false;
+                await loadPrompts();
+            }
+        });
+
+        /* ---------- 拖动排序 / 拖动分组 ---------- */
+        function clearDragState() {
+            state.drag = null;
+            list.querySelectorAll(".dragging").forEach(node => node.classList.remove("dragging"));
+            list.querySelectorAll(".drop-target").forEach(node => node.classList.remove("drop-target"));
+        }
+        list.addEventListener("dragstart", event => {
+            const groupSection = event.target.closest(".group");
+            const item = event.target.closest(".item");
+            if (event.target.closest('[data-role="group-grip"]') && groupSection) {
+                state.drag = { type: "group", id: groupSection.dataset.groupId };
+                groupSection.classList.add("dragging");
+            } else if (event.target.closest('[data-role="prompt-grip"]') && item) {
+                state.drag = { type: "prompt", id: item.dataset.id };
+                item.classList.add("dragging");
+            } else {
+                return;
+            }
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", state.drag.id);
+        });
+        list.addEventListener("dragover", event => {
+            if (!state.drag) return;
+            const section = event.target.closest(".group");
+            if (!section) return;
+            if (state.drag.type === "group" && section.dataset.groupId === state.drag.id) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            list.querySelectorAll(".drop-target").forEach(node => node.classList.remove("drop-target"));
+            section.classList.add("drop-target");
+        });
+        list.addEventListener("dragleave", event => {
+            if (!list.contains(event.relatedTarget)) {
+                list.querySelectorAll(".drop-target").forEach(node => node.classList.remove("drop-target"));
+            }
+        });
+        list.addEventListener("drop", async event => {
+            if (!state.drag) return;
+            const section = event.target.closest(".group");
+            if (!section) return;
+            event.preventDefault();
+            const drag = state.drag;
+            const targetGroupId = section.dataset.groupId;
+            const head = section.querySelector(".group-head");
+            const headRect = head ? head.getBoundingClientRect() : section.getBoundingClientRect();
+            const after = event.clientY > headRect.top + headRect.height / 2;
+            clearDragState();
+            if (drag.type === "prompt") {
+                const item = state.items.find(current => current.id === drag.id);
+                if (item && (item.group_id || "") === targetGroupId) {
+                    setActiveGroup(targetGroupId, { silent: true });
+                    return;
+                }
+                try {
+                    await api("PUT", `/prompts/${encodeURIComponent(drag.id)}`, { group_id: targetGroupId });
+                    toast(`已移动到「${groupName(targetGroupId)}」`);
+                    setActiveGroup(targetGroupId, { silent: true });
                     await loadPrompts();
                 } catch (error) {
                     toast(error.message, true);
-                    actionButton.disabled = false;
                 }
+                return;
+            }
+            // 分组排序：无分组固定在最上方，落到它上面表示排到最前
+            const before = state.groups.map(group => group.id).join("|");
+            const order = state.groups.map(group => group.id).filter(id => id !== drag.id);
+            let index;
+            if (!targetGroupId) {
+                index = 0;
+            } else {
+                index = order.indexOf(targetGroupId);
+                if (index < 0) index = order.length;
+                else if (after) index += 1;
+            }
+            order.splice(index, 0, drag.id);
+            if (order.join("|") === before) return;
+            try {
+                const data = await api("PUT", "/groups/order", { order });
+                state.groups = Array.isArray(data.groups) ? data.groups : state.groups;
+                renderList();
+                toast("分组顺序已更新");
+            } catch (error) {
+                toast(error.message, true);
             }
         });
+        list.addEventListener("dragend", clearDragState);
+
+        /* ---------- 输入框 ---------- */
         input.addEventListener("input", () => {
+            if (state.mode === "polished") state.polished = input.value;
+            else {
+                state.raw = input.value;
+                state.polishedStale = true;   // 原文变化后，下次切到润色会重新生成
+            }
             updateCount();
             autosaveState.textContent = "正在输入…";
             clearTimeout(input.draftTimer);

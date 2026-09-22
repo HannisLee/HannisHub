@@ -1,9 +1,9 @@
-# CLAUDE.md — LlamaManager 项目指令
+# CLAUDE.md — HannisHub 项目指令
 
 ## 项目信息
 
-- **项目名**: LlamaManager
-- **仓库**: https://github.com/HannisLee/LlamaManager
+- **项目名**: HannisHub
+- **仓库**: https://github.com/HannisLee/HannisHub
 - **架构文档**: 参见 [spec.md](spec.md)
 - **变更记录**: 参见 [version.md](version.md)
 - **环境**: conda 环境 `llama-manager`，Python 3.12

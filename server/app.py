@@ -1,4 +1,4 @@
-"""LlamaManager Server：独立的 SSH 服务器连接和定时任务管理服务。"""
+"""HannisHub Server：独立的 SSH 服务器连接和定时任务管理服务。"""
 
 import asyncio
 import json
@@ -32,7 +32,7 @@ SETTINGS_LOCK = threading.RLock()
 TASK_LOCK = threading.RLock()
 TASK_RUNS: set[str] = set()
 SCHEDULER_TASK: Optional[asyncio.Task] = None
-TASK_DISPATCH_MARKER = "__LLAMAMANAGER_TASK_DISPATCHED__"
+TASK_DISPATCH_MARKER = "__HANNISHUB_TASK_DISPATCHED__"
 CODEX_EXECUTORS = {"codex", "codexc"}
 CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
@@ -323,7 +323,7 @@ def _ensure_managed_keypair(connection_id: str) -> tuple[Path, str]:
         raise RuntimeError("当前环境没有 ssh-keygen，无法生成免密登录密钥")
     MANAGED_KEY_DIR.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(private_path), "-N", "", "-C", f"llamamanager-{connection_id}"],
+        ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(private_path), "-N", "", "-C", f"hannishub-{connection_id}"],
         capture_output=True,
         text=True,
         timeout=15,
@@ -717,7 +717,7 @@ async def lifespan(_: FastAPI):
     await stop_scheduler()
 
 
-app = FastAPI(title="LlamaManager Server", lifespan=lifespan)
+app = FastAPI(title="HannisHub Server", lifespan=lifespan)
 
 
 @app.middleware("http")
