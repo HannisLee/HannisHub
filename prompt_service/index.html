@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store">
     <title>在线提示词输入 · LlamaManager</title>
     <style>
         :root {
@@ -275,7 +276,9 @@
             $("archive-btn").disabled = true;
             try {
                 await api("POST", "/prompts", { content: value });
-                // 归档成功后清空输入框和本地草稿，方便直接输入下一条提示词
+                // 归档成功后清空输入框和本地草稿，方便直接输入下一条提示词。
+                // 需先取消尚未执行的草稿防抖，避免旧草稿在清空后再次写回。
+                clearTimeout(input.draftTimer);
                 input.value = "";
                 localStorage.removeItem("llamamanager_prompt_draft");
                 updateCount();

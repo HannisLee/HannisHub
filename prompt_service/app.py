@@ -27,6 +27,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _index_response() -> FileResponse:
+    """返回页面文件，并禁用浏览器缓存，确保发布后立即使用新前端逻辑。"""
+    return FileResponse(
+        APP_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-store, max-age=0, must-revalidate",
+        },
+    )
+
+
 def _read_settings() -> dict:
     """读取本地 JSON 配置；损坏时返回空配置。"""
     with _SETTINGS_LOCK:
@@ -97,7 +107,7 @@ def _find_prompt(prompts: list[dict], prompt_id: str) -> Optional[dict]:
 async def root(request: Request):
     """独立运行时跳转到 /prompt，Hub 挂载时返回页面。"""
     if request.url.path.rstrip("/").endswith("/prompt"):
-        return FileResponse(APP_DIR / "index.html")
+        return _index_response()
     return RedirectResponse(url="/prompt")
 
 
@@ -105,7 +115,7 @@ async def root(request: Request):
 @app.get("/prompt/")
 async def index():
     """返回在线提示词输入页面。"""
-    return FileResponse(APP_DIR / "index.html")
+    return _index_response()
 
 
 # Hub 挂载时子应用收到 /api/...；独立运行时页面在 /prompt/ 下会请求 /prompt/api/...
