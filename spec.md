@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理、子服务挂载和统一前端静态托管；当前包含模型管理、Server 与提示词三个子服务。模型管理子服务管理任意本机启动命令、Hugging Face 模型下载、多 GPU 监控、ASR 转写和进程日志；Server 子服务管理 SSH 服务器连接、远端时间与定时任务。日常界面由统一的 Next.js Dashboard 提供。
+HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理、子服务挂载和统一前端静态托管；当前包含模型管理、Server、提示词与点云查看器模块。模型管理子服务管理任意本机启动命令、Hugging Face 模型下载、多 GPU 监控、ASR 转写和进程日志；Server 子服务管理 SSH 服务器连接、远端时间与定时任务；点云查看器可在受限的本机目录范围内扫描并交互预览点云。日常界面由统一的 Next.js Dashboard 提供。
 
 ## 技术栈
 
@@ -23,6 +23,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
+├── point_cloud.py            # 点云目录配置、受限扫描与原始文件读取
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
 ├── login.html                # Hub 旧版登录页，迁移验证期保留
 ├── frontend/                 # 统一 Next.js Dashboard
@@ -75,6 +76,7 @@ HannisHub/
 - `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
+- `/point-clouds`：点云查看器，配置扫描目录、选择结果文件夹并交互预览点云
 
 ### 统一前端静态托管
 
@@ -97,6 +99,7 @@ HannisHub/
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、分组和归档组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
+| `frontend/components/point-clouds/` | 点云目录浏览、文件选择与 Three.js 交互预览组件 |
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
 
 API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
@@ -116,6 +119,10 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
+| GET | `/api/point-clouds/settings` | 读取点云查看器已配置的顶层目录；未显式配置且 `~/reproduce` 存在时以它作为默认目录 |
+| PUT | `/api/point-clouds/settings` | 保存点云查看器顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径 |
+| GET | `/api/point-clouds/datasets` | 递归扫描配置目录，按实验/结果目录归并 `.ply`、`.pcd`、`.xyz`、`.xyzn`、`.xyzrgb`、`.pts`、`.las`、`.laz` 文件 |
+| GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 返回指定顶层目录内的单个点云原始文件，供浏览器预览器读取；拒绝越界路径 |
 
 ### 登录与会话
 
@@ -126,6 +133,14 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - `AuthMiddleware` 统一保护除登录、健康检查和图标以外的请求
 - 登录接口内置简单防暴力破解：同一客户端 5 分钟内最多 5 次失败
 - 浏览器页面未登录时重定向到 `/login?next=...`，API 请求返回 `401` JSON
+
+### 点云查看器
+
+- 顶层目录保存在根目录 `settings.json.point_cloud.roots`，不使用数据库；路径保留用户输入的 `~`，每次读取时通过 `Path.expanduser()` 展开。
+- 扫描阶段会跳过版本控制、缓存、依赖和虚拟环境目录，并按文件修改时间返回结果。为了避免单个极大目录阻塞管理页，单次最多扫描 2,000 个候选点云文件、展示 800 个结果目录。
+- 对 `point_cloud`、`iteration_*`、`model`、`world`、`ply` 等通用容器目录，扫描器会向上归并，优先显示实验/结果目录名，因此实际结果目录位于文件上两级或上三级时仍可直接在列表中识别。
+- 文件读取接口只接收已配置顶层目录的索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。
+- 前端使用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`。`PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 仍会被发现和显示，但需要预先转换后再预览。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
 

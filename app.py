@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from auth import (
@@ -22,6 +23,7 @@ from auth import (
     record_login_failure,
 )
 import llama_manager.app as llama_manager_app
+from point_cloud import configured_roots, resolve_cloud_file, save_roots, scan_datasets
 import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
@@ -48,6 +50,13 @@ SERVICES: list[dict[str, str]] = [
         "description": "大输入框快速编辑、复制并归档提示词",
         "path": "/prompt/",
         "icon": "✍️",
+    },
+    {
+        "id": "point-clouds",
+        "name": "点云查看器",
+        "description": "扫描指定顶层目录并在浏览器中交互预览点云",
+        "path": "/point-clouds/",
+        "icon": "◌",
     },
 ]
 
@@ -157,6 +166,12 @@ async def prompts_page():
     return await _new_frontend_route("prompts")
 
 
+@app.get("/point-clouds", include_in_schema=False)
+@app.get("/point-clouds/", include_in_schema=False)
+async def point_clouds_page():
+    return await _new_frontend_route("point-clouds")
+
+
 @app.get("/icon.png", include_in_schema=False)
 async def icon():
     """返回 HannisHub 图标，同时兼容各子页面引用。"""
@@ -173,6 +188,34 @@ async def health():
 async def services():
     """返回当前可用的子服务列表。"""
     return JSONResponse({"services": SERVICES})
+
+
+@app.get("/api/point-clouds/settings")
+async def point_cloud_settings():
+    """返回点云查看器允许扫描的顶层目录。"""
+    return JSONResponse({"roots": configured_roots()})
+
+
+@app.put("/api/point-clouds/settings")
+async def update_point_cloud_settings(payload: dict[str, Any] = Body(...)):
+    """保存点云查看器顶层目录；目录必须存在且仅允许绝对路径或 ~/。"""
+    return JSONResponse({"roots": save_roots(payload.get("roots"))})
+
+
+@app.get("/api/point-clouds/datasets")
+async def point_cloud_datasets():
+    """扫描已配置目录，并将常见迭代层级归并成实验/结果目录。"""
+    return JSONResponse(await run_in_threadpool(scan_datasets))
+
+
+@app.get("/api/point-clouds/file")
+async def point_cloud_file(
+    root: int = Query(..., ge=0),
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """流式返回受限目录内的点云原始文件，供浏览器解析器加载。"""
+    file_path = resolve_cloud_file(root, path)
+    return FileResponse(file_path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/auth/status")

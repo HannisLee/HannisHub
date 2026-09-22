@@ -6,6 +6,38 @@ export interface ServiceSummary {
   icon?: string;
 }
 
+export interface PointCloudFile {
+  name: string;
+  relative_path: string;
+  size: number;
+  modified: number;
+  format: string;
+  viewable: boolean;
+  url: string;
+}
+
+export interface PointCloudDataset {
+  id: string;
+  name: string;
+  relative_path: string;
+  root_index: number;
+  root_path: string;
+  file_count: number;
+  total_size: number;
+  modified: number;
+  formats: string[];
+  files: PointCloudFile[];
+}
+
+export interface PointCloudDatasetsResponse {
+  roots: string[];
+  datasets: PointCloudDataset[];
+  root_errors: Array<{ path: string; message: string }>;
+  scan_truncated: boolean;
+  max_scanned_files: number;
+  scanned_file_count: number;
+}
+
 export interface ModelFile {
   name: string;
   path: string;

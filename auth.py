@@ -5,6 +5,7 @@ import os
 import secrets
 import threading
 import time
+from copy import deepcopy
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,25 @@ def change_password(current_password: str, new_password: str) -> None:
         if not stored_hash or not _PASSWORD_HASHER.verify(current_password, stored_hash):
             raise ValueError("当前密码不正确")
         auth["password_hash"] = _PASSWORD_HASHER.hash(new_password)
+        _write_settings_unlocked(data)
+
+
+def get_settings_section(name: str) -> Any:
+    """线程安全地读取根 settings.json 的一个非认证配置区段。"""
+    if name == "auth":
+        raise ValueError("认证配置不能通过通用配置接口读取")
+    with _SETTINGS_LOCK:
+        data = ensure_auth_settings()
+        return deepcopy(data.get(name))
+
+
+def update_settings_section(name: str, value: Any) -> None:
+    """线程安全地写入根 settings.json 的一个非认证配置区段。"""
+    if name == "auth":
+        raise ValueError("认证配置不能通过通用配置接口修改")
+    with _SETTINGS_LOCK:
+        data = ensure_auth_settings()
+        data[name] = deepcopy(value)
         _write_settings_unlocked(data)
 
 
