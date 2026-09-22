@@ -275,9 +275,15 @@
             $("archive-btn").disabled = true;
             try {
                 await api("POST", "/prompts", { content: value });
-                setStatus("已归档当前提示词", "ok");
+                // 归档成功后清空输入框和本地草稿，方便直接输入下一条提示词
+                input.value = "";
+                localStorage.removeItem("llamamanager_prompt_draft");
+                updateCount();
+                autosaveState.textContent = "输入框已清空";
+                setStatus("已归档当前提示词，输入框已清空", "ok");
                 toast("已归档当前提示词");
                 await loadPrompts();
+                input.focus();
             } catch (error) {
                 setStatus(error.message, "error");
                 toast(error.message, true);
