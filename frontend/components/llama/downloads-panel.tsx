@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import type { DownloadStatus, DownloadTask } from "../../lib/types";
-import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, PageHeader, ProgressBar } from "../ui/primitives";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
 
 export function DownloadsPanel() {
   const [repo, setRepo] = useState("");
@@ -13,11 +13,12 @@ export function DownloadsPanel() {
   const [status, setStatus] = useState<DownloadStatus | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [logs, setLogs] = useState("");
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function loadStatus() {
-    try { setStatus(await apiFetch<DownloadStatus>(`${API_PATHS.llama}/download/status`)); setError(""); } catch (value) { setError(errorMessage(value)); }
+    try { setStatus(await apiFetch<DownloadStatus>(`${API_PATHS.llama}/download/status`)); setError(""); } catch (value) { setError(errorMessage(value)); } finally { setLoading(false); }
   }
   const loadLogs = useCallback(async (id: string) => {
     try { const data = await apiFetch<{ logs: string }>(`${API_PATHS.llama}/download/logs${id ? `?task_id=${encodeURIComponent(id)}` : ""}`); setLogs(data.logs || ""); } catch (value) { setLogs(`读取失败：${errorMessage(value)}`); }
@@ -42,6 +43,7 @@ export function DownloadsPanel() {
   }
 
   const tasks: DownloadTask[] = status?.downloads || [];
+  if (loading && !status) return <><PageHeader kicker="模型管理 / Downloads" title="模型下载" description="从 Hugging Face 下载单个 GGUF 文件，或保留目录结构完整下载仓库。" /><LoadingState label="正在读取下载任务…" /></>;
   return <>
     <PageHeader kicker="模型管理 / Downloads" title="模型下载" description="从 Hugging Face 下载单个 GGUF 文件，或保留目录结构完整下载仓库。" />
     {error ? <ErrorState message={error} /> : null}
