@@ -241,7 +241,7 @@ export function PromptWorkspace() {
   }
 
   return (
-    <>
+    <div className="prompt-workspace">
       <PageHeader
         kicker="提示词 / Workspace"
         title="提示词工作区"
@@ -277,6 +277,6 @@ export function PromptWorkspace() {
           })}</div>}
         </Card>
       </div>
-    </>
+    </div>
   );
 }
