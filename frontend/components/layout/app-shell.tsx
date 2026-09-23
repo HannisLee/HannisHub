@@ -14,12 +14,30 @@ interface AuthStatus {
   username?: string | null;
 }
 
+interface SidebarState {
+  pathname: string;
+  collapsed: boolean;
+  menuOpen: boolean;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarState, setSidebarState] = useState<SidebarState>({ pathname, collapsed: pathname !== "/", menuOpen: false });
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [authError, setAuthError] = useState("");
+
+  const routeChanged = sidebarState.pathname !== pathname;
+  const sidebarCollapsed = routeChanged ? pathname !== "/" : sidebarState.collapsed;
+  const menuOpen = routeChanged ? false : sidebarState.menuOpen;
+
+  function updateSidebar(updater: (state: SidebarState) => SidebarState) {
+    setSidebarState(current => updater(current.pathname === pathname ? current : {
+      pathname,
+      collapsed: pathname !== "/",
+      menuOpen: false,
+    }));
+  }
 
   useEffect(() => {
     let active = true;
@@ -56,13 +74,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
 
+  function toggleNavigation() {
+    updateSidebar(current => window.matchMedia("(max-width: 767px)").matches
+      ? { ...current, menuOpen: !current.menuOpen }
+      : { ...current, collapsed: !current.collapsed });
+  }
+
   if (authError) return <div className="app-error-screen">{authError}</div>;
   if (!auth || !auth.authenticated) return <div className="app-loading-screen"><span className="loading-line" />正在载入 HannisHub…</div>;
 
+  const navigationOpen = menuOpen || !sidebarCollapsed;
+
   return (
     <div className="app-shell">
-      <div className={`shell-overlay${menuOpen ? " is-visible" : ""}`} onClick={() => setMenuOpen(false)} />
-      <aside className={`sidebar${menuOpen ? " is-open" : ""}`}>
+      <div className={`shell-overlay${menuOpen ? " is-visible" : ""}`} onClick={() => updateSidebar(current => ({ ...current, menuOpen: false }))} />
+      <aside className={`sidebar${sidebarCollapsed ? " is-collapsed" : ""}${menuOpen ? " is-open" : ""}`} id="main-sidebar">
         <div className="brand-lockup">
           <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页">HH</Link>
           <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
@@ -72,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="nav-group" key={group.label}>
               <p className="nav-group-label">{group.label}</p>
               {group.items.map(item => (
-                <Link className={`nav-item${isActivePath(pathname, item.href) ? " is-active" : ""}`} href={item.href} key={item.href} onClick={() => setMenuOpen(false)}>
+                <Link className={`nav-item${isActivePath(pathname, item.href) ? " is-active" : ""}`} href={item.href} key={item.href} onClick={() => updateSidebar(current => ({ ...current, menuOpen: false }))} title={item.label}>
                   <span className="nav-icon"><Icon name={item.icon} /></span>
                   <span>{item.label}</span>
                 </Link>
@@ -87,7 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="shell-content">
         <header className="topbar">
-          <button className="menu-toggle" type="button" onClick={() => setMenuOpen(true)} aria-label="打开导航">☰</button>
+          <button className="menu-toggle" type="button" onClick={toggleNavigation} aria-expanded={navigationOpen} aria-controls="main-sidebar" aria-label={navigationOpen ? "收起导航" : "展开导航"}>☰</button>
           <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current.label}</strong></div>
           <div className="topbar-user">
             <span className="user-name">{auth.username || "管理员"}</span>
