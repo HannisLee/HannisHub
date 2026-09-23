@@ -1,3 +1,16 @@
+export interface AiSettings {
+  openai_api_base_url: string;
+  openai_api_model: string;
+  openai_api_key_configured: boolean;
+  asr_extraction_prompt: string;
+}
+
+export interface AiConnectionTestResult {
+  ok?: boolean;
+  message: string;
+  models?: string[];
+}
+
 export interface ServiceSummary {
   id: string;
   name: string;
@@ -200,9 +213,6 @@ export interface DownloadStatus {
 export interface LlamaSettings {
   model_dir?: string;
   gpu_history_hours?: number;
-  openai_api_base_url?: string;
-  openai_api_model?: string;
-  openai_api_key_configured?: boolean;
   [key: string]: unknown;
 }
 

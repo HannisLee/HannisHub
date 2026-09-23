@@ -33,6 +33,7 @@ export const navigation: NavGroup[] = [
   },
   { label: "文件管理", items: [{ href: "/files", label: "文件浏览", icon: "files" }, { href: "/files/point-clouds", label: "点云查看器", icon: "pointcloud" }] },
   { label: "提示词", items: [{ href: "/prompts", label: "提示词工作区", icon: "prompts" }] },
+  { label: "设置", items: [{ href: "/settings", label: "AI 能力", icon: "settings" }] },
 ];
 
 export function isActivePath(pathname: string, href: string): boolean {

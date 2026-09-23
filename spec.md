@@ -23,6 +23,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
+├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
 ├── point_cloud.py            # 点云扫描归并与原始文件读取，复用文件管理目录能力
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
@@ -77,6 +78,7 @@ HannisHub/
 - `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
+- `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API、模型和 ASR 提炼提示词
 - `/files`：文件管理组件，浏览并下载默认暴露的 `~/reproduce` 目录
 - `/files/point-clouds`：点云查看器，从文件管理组件选择扫描文件夹并交互预览；`/point-clouds` 为兼容旧入口
 
@@ -100,6 +102,7 @@ HannisHub/
 | `frontend/components/llama/` | 模型、进程、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、分组和归档组件 |
+| `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
@@ -121,6 +124,9 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
+| GET | `/api/ai-settings` | 读取 AI 能力配置；API 密钥只返回是否已配置，不回显明文 |
+| PUT | `/api/ai-settings` | 保存 OpenAI 兼容 API 地址、模型、密钥与 ASR 提炼提示词到本地 `ai_settings.json` |
+| POST | `/api/ai-settings/test` | 使用已保存配置请求 OpenAI 兼容 API 的 `/models`，测试连接并返回模型列表 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
@@ -130,6 +136,14 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | GET | `/api/point-clouds/settings` | 兼容读取点云查看器可用的文件管理顶层目录 |
 | GET | `/api/point-clouds/datasets?root=<index>&scope=<relative_path>&refresh=<bool>` | 扫描指定文件夹，按实验/结果目录归并 `.ply`、`.pcd`、`.xyz`、`.xyzn`、`.xyzrgb`、`.pts`、`.las`、`.laz` 文件；默认使用 15 秒扫描缓存 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 返回指定顶层目录内的单个点云原始文件，供浏览器预览器读取；拒绝越界路径 |
+
+### AI 能力设置
+
+- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和 ASR 提炼提示词。
+- `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，仅返回 `openai_api_key_configured`。
+- 首次读取时会从旧版 `llama_manager/settings.json` 无损迁移已存在的 AI 配置；迁移只复制，不删除旧字段，便于回滚。
+- ASR 提炼和 `/api/ai-settings/test` 均通过同一份配置调用 OpenAI 兼容接口；后续需要 AI 能力的模块也应复用该模块，而不是各自保存密钥。
+- API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
 
 ### 登录与会话
 
@@ -195,6 +209,7 @@ _download_lock   # 下载任务状态读写锁
 | 函数 | 功能 |
 |------|------|
 | `_load_settings()` | 读取 settings.json，自动展开 `~` 路径 |
+| `_get_asr_extraction_prompt()` | 读取根目录 ai_settings.json 中的 ASR 提炼提示词 |
 | `_load_settings_raw()` | 读取 settings.json 原始内容，不展开路径 |
 | `_save_settings(data)` | 原子写入 settings.json（先写临时文件再 rename） |
 | `_save_settings_state(key, value)` | 保存 settings.json 中的内部状态字段 |
@@ -226,7 +241,7 @@ _download_lock   # 下载任务状态读写锁
 | GET | `/icon.png` | 返回网站图标 |
 | GET | `/api/settings` | 读取配置 |
 | POST | `/api/settings` | 保存配置 |
-| POST | `/api/openai/test` | 使用已保存密钥请求 OpenAI 兼容 API 的 `/models`，测试连接 |
+| POST | `/api/openai/test` | （兼容入口）使用统一 AI 设置测试 OpenAI 兼容 API |
 | GET | `/api/models` | 递归扫描 model_dir 下 .gguf 文件 |
 | GET | `/api/model-repositories` | 扫描 model_dir 下全量下载的仓库目录 |
 | GET | `/api/custom-services` | 读取已注册的通用命令服务列表 |
@@ -240,11 +255,11 @@ _download_lock   # 下载任务状态读写锁
 | GET | `/api/asr/history` | 返回本地 ASR 历史记录摘要（不含全文） |
 | GET | `/api/asr/history/{record_id}/text` | 读取指定本地 ASR 历史的全文 |
 | GET | `/api/asr/history/{record_id}/extraction` | 读取指定 ASR 历史已保存的信息提取结果 |
-| POST | `/api/asr/history/{record_id}/extraction` | 使用已配置 OpenAI 兼容模型提取指定转写的关键信息 |
+| POST | `/api/asr/history/{record_id}/extraction` | 使用统一 AI 设置中的模型与提示词提取指定转写的关键信息 |
 | PATCH | `/api/asr/history/{record_id}` | 修改指定 ASR 历史记录的自定义名称 |
 | DELETE | `/api/asr/history/{record_id}` | 删除已结束的 ASR 历史记录及其保存的全文 |
-| GET | `/api/asr/extraction-settings` | 读取 ASR 信息提取提示词 |
-| PUT | `/api/asr/extraction-settings` | 保存 ASR 信息提取提示词 |
+| GET | `/api/asr/extraction-settings` | （兼容入口）读取统一 AI 设置中的 ASR 提炼提示词 |
+| PUT | `/api/asr/extraction-settings` | （兼容入口）保存统一 AI 设置中的 ASR 提炼提示词 |
 | GET | `/api/asr` | 获取唯一运行中的 ASR 实例信息 |
 | POST | `/api/asr/transcriptions` | 上传一个音频，创建历史 item 并在后台队列中转写，立即返回 `202` |
 | POST | `/api/start` | 启动已注册服务（model 为 `custom:<id>` 启 vLLM，或 `llama:<id>` 启 llama.cpp） |
@@ -398,7 +413,7 @@ _download_lock   # 下载任务状态读写锁
 3. **服务日志** — 下拉框仅展示当前仍在运行的受管任务，readonly textarea 显示对应实时日志尾部
 4. **下载区** — HF 仓库ID、文件名（留空则全量下载整个仓库）、Download 按钮、强制重新下载复选框；可连续新增多个下载任务
 5. **下载任务区** — 多任务进度列表、每任务 Cancel/Logs 操作、下载日志任务下拉、Refresh 按钮、readonly textarea
-6. **设置区** — 模型下载目录、GPU 历史小时数，以及 OpenAI 兼容 API 地址、模型名称和密钥。密钥只写入后端本地 settings.json，读取设置时仅返回是否已配置；可测试 `/models` 连接并在页面显示结果、填充模型名称候选项
+6. **设置区** — 模型下载目录、GPU 历史小时数。OpenAI 兼容 API 地址、模型名称和密钥已迁移到统一前端 `/settings` 与本地 `ai_settings.json`
 
 ASR 服务的 Open 会复用同一个 `index.html`，并固定通过 `/asr` 呈现独立转写页，不加载管理后台的轮询逻辑。标准 LLM 服务的 Open 则进入 `/chat/{pid}`；该通用聊天页采用接近 llama.cpp 原版 WebUI 的沉浸式布局，左侧提供按服务 PID 隔离并保存于浏览器 `localStorage` 的对话管理（新建、切换、重命名、删除），每条消息可单独复制。它优先通过受管服务的反向代理调用 OpenAI 兼容的 `/v1/models` 和 `/v1/chat/completions`，若请求失败或未返回可显示文字则自动回退到 llama.cpp 原生的 `/apply-template` 和 `/completion` 接口，支持模型选择、系统提示词、多轮对话和流式输出，不依赖框架自带 WebUI。ASR 页自动使用唯一运行中的 ASR 实例；顶部为服务与批量拖放/点击上传区，下方为按时间倒序自动刷新的历史记录；轮询仅在记录摘要变化时重绘，且会保留页面及展开文字框的滚动位置。仅在点击已完成条目时显示全文，并支持名称修改。原文和已提取操作右侧提供复制按钮，复制当前显示的文字。历史标题和名称编辑框均支持两行展示，状态徽章固定单行。
 
@@ -477,15 +492,23 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `auth.session_max_age_seconds` | number | `43200` | 会话有效期，默认 12 小时 |
 | `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
 
+### 根目录 ai_settings.json（不入 Git）
+
+该文件由 AI 设置模块维护，包含给其他模块提供 AI 能力的敏感配置；文件本身与 `ai_settings.json.tmp` 均在 `.gitignore` 中：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `openai_api_base_url` | string | `""` | OpenAI 兼容 API 基地址，例如 `https://api.openai.com/v1` |
+| `openai_api_model` | string | `""` | AI 任务使用的模型名称 |
+| `openai_api_key` | string | `""` | OpenAI 兼容 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
+| `asr_extraction_prompt` | string | 默认提炼提示词 | ASR 转写提炼使用的 system 提示词 |
+
 ### llama_manager/settings.json
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `model_dir` | string | `~/models` | GGUF 模型目录（递归扫描） |
 | `gpu_history_hours` | number | `2` | GPU util 波形显示的历史小时数 |
-| `openai_api_base_url` | string | `""` | OpenAI 兼容 API 基地址，例如 `https://api.openai.com/v1` |
-| `openai_api_model` | string | `""` | OpenAI 兼容 API 调用时使用的模型名称 |
-| `openai_api_key` | string | `""` | OpenAI 兼容 API 密钥；仅后端保存，永不通过读取设置接口返回 |
 | `model_params` | object | `{}` | （已废弃）按模型路径保存的启动参数，启动时迁移为 llama 注册项后清空 |
 | `custom_services` | object | `{}` | 用户注册的通用命令服务 |
 | `managed_processes` | object | `{"processes":[]}` | 模型管理模块启动过的受管进程记录 |

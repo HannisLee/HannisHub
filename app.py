@@ -22,6 +22,7 @@ from auth import (
     is_login_allowed,
     record_login_failure,
 )
+import ai_settings
 import llama_manager.app as llama_manager_app
 from file_manager import (
     configured_roots,
@@ -50,6 +51,13 @@ SERVICES: list[dict[str, str]] = [
         "description": "SSH 服务器连接、远端时间与定时任务管理",
         "path": "/server/",
         "icon": "🧭",
+    },
+    {
+        "id": "ai-settings",
+        "name": "AI 设置",
+        "description": "集中配置 OpenAI 兼容接口与各模块的 AI 提示词",
+        "path": "/settings/",
+        "icon": "✦",
     },
     {
         "id": "prompt",
@@ -173,6 +181,12 @@ async def prompts_page():
     return await _new_frontend_route("prompts")
 
 
+@app.get("/settings", include_in_schema=False)
+@app.get("/settings/", include_in_schema=False)
+async def ai_settings_page():
+    return await _new_frontend_route("settings")
+
+
 @app.get("/files", include_in_schema=False)
 @app.get("/files/", include_in_schema=False)
 async def files_page():
@@ -207,6 +221,24 @@ async def health():
 async def services():
     """返回当前可用的子服务列表。"""
     return JSONResponse({"services": SERVICES})
+
+
+@app.get("/api/ai-settings")
+async def read_ai_settings():
+    """读取 AI 能力配置；密钥只返回是否已配置。"""
+    return JSONResponse(ai_settings.get_public_ai_settings())
+
+
+@app.put("/api/ai-settings")
+async def update_ai_settings(payload: dict[str, Any] = Body(...)):
+    """保存 AI 能力配置到本地 ai_settings.json。"""
+    return JSONResponse(ai_settings.save_ai_settings(payload))
+
+
+@app.post("/api/ai-settings/test")
+async def test_ai_settings_api():
+    """使用已保存配置测试 OpenAI 兼容接口。"""
+    return await llama_manager_app.test_openai_compatible_api()
 
 
 @app.get("/api/file-manager/settings")

@@ -8,6 +8,7 @@ HannisHub 是本机模型、远程服务器和提示词资产的统一管理工�
 - 模型管理：GGUF 与仓库浏览、受管进程、GPU 监控、下载、ASR 转写和设置
 - Server：SSH 服务器连接、远端时间、Codex CLI 或终端任务调度
 - 提示词工作区：本地暂存、原文/润色编辑、分组归档、复制、恢复和删除
+- AI 设置：集中管理 OpenAI 兼容接口、模型、密钥和 ASR 提炼提示词，敏感配置保存在不入 Git 的本地 JSON
 - 文件管理：默认暴露 `~/reproduce`，支持目录浏览、服务端缓存、手动同步、文件下载与点云预览
 
 ## 架构
@@ -20,7 +21,8 @@ HannisHub 是本机模型、远程服务器和提示词资产的统一管理工�
                  ├─ /llama-manager/api
                  ├─ /server/api
                  ├─ /prompt/api
-                 └─ /api/file-manager
+                 ├─ /api/file-manager
+                 └─ /api/ai-settings
 ```
 
 `frontend/` 是唯一的新前端工程：App Router 页面放在 `app/`，共享布局和 UI 放在 `components/`，模型、服务器、提示词等业务组件各自使用独立子目录，API 类型与请求封装放在 `lib/`。所有视觉实现遵守根目录 [`design.md`](design.md)。
@@ -83,6 +85,7 @@ bash run.sh
 | 提示词工作区 | `/prompts` | `/prompt/api` |
 | 文件浏览 | `/files` | `/api/file-manager` |
 | 点云查看器 | `/files/point-clouds` | `/api/file-manager`、`/api/point-clouds` |
+| AI 能力设置 | `/settings` | `/api/ai-settings` |
 
 ## 目录结构
 
@@ -90,10 +93,11 @@ bash run.sh
 HannisHub/
 ├── app.py                    # Hub、认证、子服务挂载与前端静态托管
 ├── auth.py                   # 登录、密码哈希与会话中间件
+├── ai_settings.py            # AI API、密钥与提示词的本地配置模块
 ├── file_manager.py           # 受限文件浏览、目录缓存与下载
 ├── frontend/                 # 唯一的 Next.js 前端工程
 │   ├── app/                  # App Router 页面与全局设计 tokens
-│   ├── components/           # layout、ui、llama、server、prompts、file-manager、overview
+│   ├── components/           # layout、ui、llama、server、prompts、settings、file-manager、overview
 │   ├── lib/                  # API 客户端、类型、格式化与导航
 │   └── public/               # 静态前端资源
 ├── llama_manager/            # 模型管理 FastAPI 子服务与旧版页面
@@ -107,6 +111,7 @@ HannisHub/
 ## 配置与安全
 
 - 根目录 `settings.json`：Hub 登录与会话配置，以及默认 `~/reproduce` 的文件管理暴露范围
+- 根目录 `ai_settings.json`：AI API、密钥与提示词；已加入 `.gitignore`，不会提交到 GitHub
 - `llama_manager/settings.json`：模型管理配置和运行状态
 - `server/settings.json`：Server 配置
 - `prompt_service/settings.json`：提示词分组与归档数据

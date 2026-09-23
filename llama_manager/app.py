@@ -19,7 +19,9 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional
-from urllib.parse import unquote, urlparse
+
+import ai_settings
+from urllib.parse import unquote
 
 import httpx
 import psutil
@@ -41,6 +43,12 @@ CUSTOM_SERVICES_KEY = "custom_services"
 MANAGED_PROCESS_RECORDS_KEY = "managed_processes"
 OPENAI_API_BASE_URL_KEY = "openai_api_base_url"
 OPENAI_API_KEY_KEY = "openai_api_key"
+AI_SETTINGS_KEYS = {
+    OPENAI_API_BASE_URL_KEY,
+    OPENAI_API_KEY_KEY,
+    "openai_api_model",
+    "asr_extraction_prompt",
+}
 INTERNAL_SETTINGS_KEYS = {
     MODEL_PARAMS_KEY,
     GPU_HISTORY_KEY,
@@ -157,9 +165,8 @@ def _load_public_settings() -> dict:
     }
     public_settings = {
         key: value for key, value in settings.items()
-        if key not in INTERNAL_SETTINGS_KEYS | legacy_keys | {OPENAI_API_KEY_KEY}
+        if key not in INTERNAL_SETTINGS_KEYS | legacy_keys | AI_SETTINGS_KEYS
     }
-    public_settings["openai_api_key_configured"] = bool(settings.get(OPENAI_API_KEY_KEY))
     return public_settings
 
 
@@ -188,22 +195,7 @@ def _save_settings(data: dict) -> dict:
             "model_dir": str(data.get("model_dir") or "").strip(),
             "gpu_history_hours": data.get("gpu_history_hours", 2),
         })
-        if OPENAI_API_BASE_URL_KEY in data:
-            api_base_url = str(data.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/")
-            if api_base_url:
-                parsed_url = urlparse(api_base_url)
-                if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-                    raise ValueError("OpenAI 兼容 API 地址必须是有效的 http 或 https 地址")
-            existing[OPENAI_API_BASE_URL_KEY] = api_base_url
-        if "openai_api_model" in data:
-            existing["openai_api_model"] = str(data.get("openai_api_model") or "").strip()
-
-        if data.get("clear_openai_api_key"):
-            existing.pop(OPENAI_API_KEY_KEY, None)
-        else:
-            api_key = data.get(OPENAI_API_KEY_KEY)
-            if isinstance(api_key, str) and api_key.strip():
-                existing[OPENAI_API_KEY_KEY] = api_key.strip()
+        # AI 连接与提示词已迁移到根目录 ai_settings.json，由统一设置模块管理。
         # 新版服务由每条启动命令自包含，不再保留 llama.cpp 单实例配置。
         for key in (
             "llama_server_path", "host", "port", "extra_args", "log_file",
@@ -2123,23 +2115,13 @@ def _read_asr_history_text_file(record: dict, field: str, missing_detail: str) -
 
 
 def _get_asr_extraction_prompt() -> str:
-    """读取 ASR 信息提取提示词，未设置时使用默认提示词。"""
-    prompt = str(_load_settings_raw().get(ASR_EXTRACTION_PROMPT_KEY) or "").strip()
-    return prompt or ASR_DEFAULT_EXTRACTION_PROMPT
+    """读取统一 AI 设置中的 ASR 信息提取提示词。"""
+    return ai_settings.get_asr_extraction_prompt()
 
 
 def _save_asr_extraction_prompt(prompt: str) -> str:
-    """保存 ASR 信息提取提示词。"""
-    value = str(prompt or "").strip()
-    if not value:
-        raise HTTPException(status_code=400, detail="提取提示词不能为空")
-    if len(value) > 4000:
-        raise HTTPException(status_code=400, detail="提取提示词不能超过 4000 个字符")
-    with _settings_lock:
-        settings = _load_settings_raw()
-        settings[ASR_EXTRACTION_PROMPT_KEY] = value
-        _write_settings_raw(settings)
-    return value
+    """保存统一 AI 设置中的 ASR 信息提取提示词。"""
+    return ai_settings.save_asr_extraction_prompt(prompt)
 
 
 def _save_asr_extraction(record_id: str, text: str) -> dict:
@@ -2170,14 +2152,14 @@ async def _extract_asr_history(record_id: str) -> tuple[dict, str]:
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="转写文本为空，无法提取")
 
-    settings = _load_settings_raw()
-    base_url = str(settings.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/")
-    api_key = str(settings.get(OPENAI_API_KEY_KEY) or "").strip()
-    model = str(settings.get("openai_api_model") or "").strip()
+    config = ai_settings.get_ai_config()
+    base_url = config[ai_settings.OPENAI_API_BASE_URL_KEY]
+    api_key = config[ai_settings.OPENAI_API_KEY_KEY]
+    model = config[ai_settings.OPENAI_API_MODEL_KEY]
     if not base_url:
-        raise HTTPException(status_code=400, detail="请先在设置中保存 OpenAI 兼容 API 地址")
+        raise HTTPException(status_code=400, detail="请先在 AI 设置中保存 API 地址")
     if not model:
-        raise HTTPException(status_code=400, detail="请先在设置中选择 OpenAI 兼容 API 模型")
+        raise HTTPException(status_code=400, detail="请先在 AI 设置中选择模型")
 
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     payload = {
@@ -2433,11 +2415,11 @@ async def save_settings(data: dict):
 @app.post("/api/openai/test")
 async def test_openai_compatible_api():
     """使用已保存的密钥测试 OpenAI 兼容 API 的模型列表接口。"""
-    settings = _load_settings_raw()
-    base_url = str(settings.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/")
-    api_key = str(settings.get(OPENAI_API_KEY_KEY) or "").strip()
+    config = ai_settings.get_ai_config()
+    base_url = config[ai_settings.OPENAI_API_BASE_URL_KEY]
+    api_key = config[ai_settings.OPENAI_API_KEY_KEY]
     if not base_url:
-        raise HTTPException(status_code=400, detail="请先保存 OpenAI 兼容 API 地址")
+        raise HTTPException(status_code=400, detail="请先在 AI 设置中保存 API 地址")
 
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:

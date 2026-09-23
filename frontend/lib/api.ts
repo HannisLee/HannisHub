@@ -4,6 +4,7 @@ export const API_PATHS = {
   hub: "/api",
   pointClouds: "/api/point-clouds",
   fileManager: "/api/file-manager",
+  aiSettings: "/api/ai-settings",
   llama: "/llama-manager/api",
   server: "/server/api",
   prompts: "/prompt/api",
