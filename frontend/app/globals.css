@@ -391,8 +391,19 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-editor-card .segmented button { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor-card .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor { min-height: clamp(480px, 62vh, 760px); font: 400 15px/1.65 var(--font-mono); }
-.editor-meta { display: flex; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); color: var(--color-text-muted); font-size: 11px; }
-.editor-meta span { display: flex; align-items: center; gap: var(--space-2); }
+.editor-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.editor-meta span { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.editor-meta span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.editor-meta span:last-child { justify-content: flex-end; }
 .editor-meta select { width: auto; min-height: 24px; padding: 0 var(--space-2); font-size: 11px; }
 .prompt-layout { margin-top: var(--space-4); }
 .prompt-layout > .card { padding: var(--space-5); }
@@ -529,7 +540,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-actions { width: 100%; }
   .segmented { flex: 1 1 auto; }
   .segmented button { flex: 1; }
-  .editor-meta { align-items: flex-start; flex-direction: column; }
+  .editor-meta { grid-template-columns: 1fr; justify-items: start; }
+  .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
   .point-cloud-browser .card-header { align-items: flex-start; }
