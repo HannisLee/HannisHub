@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
+import httpx
+
 
 ROOT_DIR = Path(__file__).resolve().parent
 AI_SETTINGS_PATH = ROOT_DIR / "ai_settings.json"
@@ -94,7 +96,6 @@ def get_public_ai_settings() -> dict[str, Any]:
         OPENAI_API_BASE_URL_KEY: str(data.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/"),
         OPENAI_API_MODEL_KEY: str(data.get(OPENAI_API_MODEL_KEY) or "").strip(),
         "openai_api_key_configured": bool(str(data.get(OPENAI_API_KEY_KEY) or "").strip()),
-        ASR_EXTRACTION_PROMPT_KEY: get_asr_extraction_prompt(),
     }
 
 
@@ -162,3 +163,84 @@ def save_asr_extraction_prompt(prompt: object) -> str:
     value = normalize_asr_extraction_prompt(prompt)
     save_ai_settings({ASR_EXTRACTION_PROMPT_KEY: value})
     return value
+
+
+async def discover_models() -> dict[str, Any]:
+    """请求 OpenAI 兼容接口的 /models，返回可选择的模型列表。"""
+    config = get_ai_config()
+    base_url = config[OPENAI_API_BASE_URL_KEY]
+    api_key = config[OPENAI_API_KEY_KEY]
+    if not base_url:
+        raise HTTPException(status_code=400, detail="请先保存 AI API 地址")
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            response = await client.get(f"{base_url}/models", headers=headers)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"连接失败：{str(exc)[:300]}") from exc
+    if response.is_error:
+        raise HTTPException(status_code=502, detail=f"模型列表接口返回 HTTP {response.status_code}")
+
+    try:
+        payload = response.json()
+        raw_models = payload.get("data", payload if isinstance(payload, list) else [])
+        models = sorted(
+            str(item.get("id"))
+            for item in raw_models
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="模型列表接口返回格式不符合 OpenAI 兼容规范") from exc
+
+    return {
+        "ok": True,
+        "message": f"连接成功，发现 {len(models)} 个模型",
+        "models": models,
+    }
+
+
+async def test_connection() -> dict[str, Any]:
+    """测试 AI API 连接，并返回模型列表供前端填充。"""
+    return await discover_models()
+
+
+async def test_model(model: object) -> dict[str, Any]:
+    """使用指定模型发送一次最小对话请求，验证模型可用性。"""
+    model_name = str(model or "").strip()
+    if not model_name:
+        raise HTTPException(status_code=400, detail="请先选择或输入要测试的模型")
+    config = get_ai_config()
+    base_url = config[OPENAI_API_BASE_URL_KEY]
+    api_key = config[OPENAI_API_KEY_KEY]
+    if not base_url:
+        raise HTTPException(status_code=400, detail="请先保存 AI API 地址")
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": "请只回复 OK。"}],
+        "temperature": 0,
+        "max_tokens": 16,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=8.0)) as client:
+            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"模型测试请求失败：{str(exc)[:300]}") from exc
+    if response.is_error:
+        raise HTTPException(status_code=502, detail=f"模型测试返回 HTTP {response.status_code}")
+
+    try:
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="模型测试返回格式不符合 OpenAI 兼容规范") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(status_code=502, detail="模型测试未返回有效文字")
+
+    return {
+        "ok": True,
+        "message": "模型可用",
+        "response": content.strip()[:500],
+    }

@@ -3,14 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody, uploadFile } from "../../lib/api";
 import { errorMessage, formatDate } from "../../lib/format";
-import type { AsrInfo, AsrRecord } from "../../lib/types";
-import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
+import type { AiSettings, AsrInfo, AsrRecord } from "../../lib/types";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
 
 interface UploadState { id: string; name: string; progress: number; status: string; detail: string; }
 
 export function AsrPanel() {
   const [info, setInfo] = useState<AsrInfo | null>(null);
   const [records, setRecords] = useState<AsrRecord[]>([]);
+  const [aiModel, setAiModel] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [status, setStatus] = useState("");
   const [extraction, setExtraction] = useState<Record<string, string>>({});
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [error, setError] = useState("");
@@ -18,11 +21,18 @@ export function AsrPanel() {
 
   async function load() {
     try {
-      const [asr, history] = await Promise.all([
+      const [asr, history, extractionSettings, aiSettings] = await Promise.all([
         apiFetch<AsrInfo>(`${API_PATHS.llama}/asr`),
         apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`),
+        apiFetch<{ prompt: string }>(`${API_PATHS.llama}/asr/extraction-settings`),
+        apiFetch<AiSettings>(API_PATHS.aiSettings),
       ]);
-      setInfo(asr); setRecords(history.records || []); setError("");
+      setInfo(asr);
+      setRecords(history.records || []);
+      setPrompt(extractionSettings.prompt || "");
+      setAiModel(aiSettings.openai_api_model || "");
+      setStatus("");
+      setError("");
     } catch (value) { setError(errorMessage(value)); }
   }
   useEffect(() => { void load(); const timer = window.setInterval(() => void apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`).then(data => setRecords(data.records || [])).catch(() => {}), 3000); return () => window.clearInterval(timer); }, []);
@@ -39,6 +49,14 @@ export function AsrPanel() {
       } catch (value) { setUploads(current => current.map(item => item.id === id ? { ...item, status: "上传失败", detail: errorMessage(value) } : item)); }
     }
     await load();
+  }
+
+  async function savePrompt() {
+    try {
+      await apiFetch(`${API_PATHS.llama}/asr/extraction-settings`, { method: "PUT", body: jsonBody({ prompt }) });
+      setStatus("ASR 提炼提示词已保存");
+      setError("");
+    } catch (value) { setError(errorMessage(value)); }
   }
 
   async function showText(recordId: string, suffix: "text" | "extraction") {
@@ -61,9 +79,10 @@ export function AsrPanel() {
     <PageHeader kicker="模型管理 / ASR" title="音频转写" description="上传音频到受管 ASR 服务，后台切片、转写并保存历史文本。" actions={<Button onClick={() => inputRef.current?.click()}>上传音频</Button>} />
     <input ref={inputRef} className="visually-hidden" type="file" accept="audio/*,video/*,.m4s,.mkv,.ts" multiple onChange={event => { void upload(event.target.files); event.target.value = ""; }} />
     {error ? <ErrorState message={error} /> : null}
-    <div className="stack-grid">
+    {status ? <div className="inline-message"><Badge tone="success">完成</Badge>{status}</div> : null}
+    <div className="two-column-grid">
       <Card>
-        <CardHeader title="ASR 服务" description="当前由模型管理模块发现的唯一 ASR 实例；提炼使用的模型和提示词在统一 AI 设置中配置。" />
+        <CardHeader title="ASR 服务" description={`当前由模型管理模块发现的唯一 ASR 实例；提炼模型：${aiModel || "未配置"}`} />
         {info ? <div className="asr-service"><Badge tone="success">可用</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : <LoadingState />}
         <div
           className="upload-drop"
@@ -75,6 +94,12 @@ export function AsrPanel() {
           onDrop={event => { event.preventDefault(); void upload(event.dataTransfer.files); }}
         ><span className="upload-mark">↑</span><strong>拖入音频，或点击选择文件</strong><small>支持 FFmpeg 可以解码的常见音视频格式，单文件最大 4 GB。</small></div>
         {uploads.length ? <div className="upload-list">{uploads.map(item => <div className="upload-row" key={item.id}><div><strong>{item.name}</strong><span>{item.status} · {item.detail}</span></div><ProgressBar value={item.progress} /></div>)}</div> : null}
+      </Card>
+      <Card>
+        <CardHeader title="提炼提示词" description="仅用于 ASR 转写结果的信息提炼；接口和模型在 AI 能力设置中统一配置。" actions={<Button size="sm" onClick={() => void savePrompt()}>保存提示词</Button>} />
+        <Field label="System 提示词">
+          <textarea className="ai-prompt-editor" rows={10} value={prompt} onChange={event => setPrompt(event.target.value)} />
+        </Field>
       </Card>
     </div>
     <Card>

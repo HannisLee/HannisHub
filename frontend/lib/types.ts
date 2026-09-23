@@ -2,13 +2,18 @@ export interface AiSettings {
   openai_api_base_url: string;
   openai_api_model: string;
   openai_api_key_configured: boolean;
-  asr_extraction_prompt: string;
 }
 
 export interface AiConnectionTestResult {
   ok?: boolean;
   message: string;
   models?: string[];
+}
+
+export interface AiModelTestResult {
+  ok?: boolean;
+  message: string;
+  response?: string;
 }
 
 export interface ServiceSummary {

@@ -78,7 +78,7 @@ HannisHub/
 - `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
-- `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API、模型和 ASR 提炼提示词
+- `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
 - `/files`：文件管理组件，浏览并下载默认暴露的 `~/reproduce` 目录
 - `/files/point-clouds`：点云查看器，从文件管理组件选择扫描文件夹并交互预览；`/point-clouds` 为兼容旧入口
 
@@ -125,8 +125,10 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
 | GET | `/api/ai-settings` | 读取 AI 能力配置；API 密钥只返回是否已配置，不回显明文 |
-| PUT | `/api/ai-settings` | 保存 OpenAI 兼容 API 地址、模型、密钥与 ASR 提炼提示词到本地 `ai_settings.json` |
+| PUT | `/api/ai-settings` | 保存 OpenAI 兼容 API 地址、模型与密钥到本地 `ai_settings.json` |
 | POST | `/api/ai-settings/test` | 使用已保存配置请求 OpenAI 兼容 API 的 `/models`，测试连接并返回模型列表 |
+| POST | `/api/ai-settings/models` | 探查 OpenAI 兼容接口的可用模型列表，供前端模型下拉选择 |
+| POST | `/api/ai-settings/model-test` | 使用当前或指定模型发送一次最小对话请求，验证模型可用性 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
@@ -139,10 +141,11 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### AI 能力设置
 
-- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和 ASR 提炼提示词。
+- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和各业务提示词。API 与模型在 `/settings` 统一配置，提示词放在对应业务页面。
 - `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，仅返回 `openai_api_key_configured`。
 - 首次读取时会从旧版 `llama_manager/settings.json` 无损迁移已存在的 AI 配置；迁移只复制，不删除旧字段，便于回滚。
-- ASR 提炼和 `/api/ai-settings/test` 均通过同一份配置调用 OpenAI 兼容接口；后续需要 AI 能力的模块也应复用该模块，而不是各自保存密钥。
+- `/settings` 提供“测试链接”“探查模型列表”和“测试模型”三类操作；模型输入框关联探查结果下拉，同时允许直接输入自定义模型名。
+- ASR 提炼通过同一份配置调用 OpenAI 兼容接口；ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。后续需要 AI 能力的模块也应复用该模块，而不是各自保存密钥。
 - API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
 
 ### 登录与会话

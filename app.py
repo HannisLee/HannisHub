@@ -237,8 +237,20 @@ async def update_ai_settings(payload: dict[str, Any] = Body(...)):
 
 @app.post("/api/ai-settings/test")
 async def test_ai_settings_api():
-    """使用已保存配置测试 OpenAI 兼容接口。"""
-    return await llama_manager_app.test_openai_compatible_api()
+    """使用已保存配置测试 OpenAI 兼容接口连接。"""
+    return JSONResponse(await ai_settings.test_connection())
+
+
+@app.post("/api/ai-settings/models")
+async def discover_ai_models():
+    """探查 OpenAI 兼容接口的可用模型列表。"""
+    return JSONResponse(await ai_settings.discover_models())
+
+
+@app.post("/api/ai-settings/model-test")
+async def test_ai_model(payload: dict[str, Any] = Body(...)):
+    """使用当前或指定模型发送一次最小请求，验证模型可用。"""
+    return JSONResponse(await ai_settings.test_model(payload.get("model")))
 
 
 @app.get("/api/file-manager/settings")
