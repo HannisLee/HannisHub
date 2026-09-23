@@ -465,6 +465,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .point-cloud-browser { min-width: 0; }
 .point-cloud-browser .card-header { align-items: flex-end; }
 .point-cloud-dataset-list { display: grid; max-height: 620px; overflow: auto; border-top: 1px solid var(--color-divider); }
+.point-cloud-project-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0 var(--space-2); border-bottom: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 12px; }
+.point-cloud-project-heading strong { color: var(--color-text-secondary); font-weight: 600; }
+.point-cloud-project-heading span { flex: 0 0 auto; }
 .point-cloud-dataset {
   display: flex;
   width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);

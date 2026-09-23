@@ -26,6 +26,7 @@ import ai_settings
 import llama_manager.app as llama_manager_app
 from file_manager import (
     configured_roots,
+    directory_options,
     list_directory,
     resolve_file,
     save_roots,
@@ -315,7 +316,7 @@ async def point_cloud_datasets(
     refresh: bool = Query(False),
 ):
     """扫描指定文件夹，并将常见迭代层级归并成实验/结果目录。"""
-    return JSONResponse(await run_in_threadpool(scan_datasets, root, scope, refresh=refresh))
+    return JSONResponse(await run_in_threadpool(scan_datasets, root, scope=scope, refresh=refresh))
 
 
 @app.get("/api/point-clouds/file")

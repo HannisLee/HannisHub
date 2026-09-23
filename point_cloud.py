@@ -110,6 +110,11 @@ def scan_datasets(root_index: int | None = None, *, scope: str = "", refresh: bo
         scanned_count += len(files)
         truncated = truncated or walk_truncated
         for file_path in files:
+            try:
+                file_data = _file_payload(file_path, root, current_root_index)
+            except OSError:
+                # 扫描期间文件可能被训练进程移动或删除，跳过该文件即可。
+                continue
             dataset_dir = _dataset_directory(file_path, root)
             dataset_relative_path = dataset_dir.relative_to(root).as_posix()
             if dataset_relative_path == ".":
@@ -130,7 +135,6 @@ def scan_datasets(root_index: int | None = None, *, scope: str = "", refresh: bo
                     "files": [],
                 }
                 grouped[key] = dataset
-            file_data = _file_payload(file_path, root, current_root_index)
             dataset["file_count"] += 1
             dataset["total_size"] += file_data["size"]
             dataset["modified"] = max(dataset["modified"], file_data["modified"])

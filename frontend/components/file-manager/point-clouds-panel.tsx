@@ -214,7 +214,9 @@ function preferredFile(dataset: PointCloudDataset | undefined): PointCloudFile |
 export function PointCloudsPanel() {
   const [data, setData] = useState<PointCloudDatasetsResponse | null>(null);
   const [roots, setRoots] = useState<string[]>([]);
+  const [rootsLoaded, setRootsLoaded] = useState(false);
   const [scopeOptions, setScopeOptions] = useState<FileManagerDirectoryOptionsResponse | null>(null);
+  const [scopeError, setScopeError] = useState("");
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
   const [scope, setScope] = useState("");
   const [scopeQuery, setScopeQuery] = useState("");
@@ -227,50 +229,89 @@ export function PointCloudsPanel() {
   const [viewerError, setViewerError] = useState("");
   const [viewerLoading, setViewerLoading] = useState(false);
   const [viewerDetails, setViewerDetails] = useState<ViewerDetails | null>(null);
+  const requestId = useRef(0);
 
   const load = useCallback(async (rootIndex: number, nextScope: string, refresh = false) => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
+    setData(null);
     try {
       const refreshText = refresh ? "&refresh=true" : "";
-      const [settings, options, datasets] = await Promise.all([
-        apiFetch<{ roots: string[] }>(`${API_PATHS.fileManager}/settings`),
+      const [optionsResult, datasetsResult] = await Promise.allSettled([
         apiFetch<FileManagerDirectoryOptionsResponse>(`${API_PATHS.fileManager}/directories?root=${rootIndex}${refreshText}`),
         apiFetch<PointCloudDatasetsResponse>(`${API_PATHS.pointClouds}/datasets?root=${rootIndex}&scope=${encodeURIComponent(nextScope)}${refreshText}`),
       ]);
-      setRoots(settings.roots || []);
-      setScopeOptions(options);
-      setData(datasets);
+      if (currentRequest !== requestId.current) return;
+      if (optionsResult.status === "fulfilled") {
+        setScopeOptions(optionsResult.value);
+        setScopeError("");
+      } else {
+        setScopeOptions(null);
+        setScopeError(errorMessage(optionsResult.reason));
+      }
+      if (datasetsResult.status === "rejected") throw datasetsResult.reason;
+      setData(datasetsResult.value);
       setError("");
     } catch (value) {
-      setError(errorMessage(value));
+      if (currentRequest === requestId.current) setError(errorMessage(value));
     } finally {
-      setLoading(false);
+      if (currentRequest === requestId.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    let active = true;
+    apiFetch<{ roots: string[] }>(`${API_PATHS.fileManager}/settings`)
+      .then(value => {
+        if (!active) return;
+        setRoots(value.roots || []);
+        if (!value.roots?.length) setLoading(false);
+        setError("");
+      })
+      .catch(value => { if (active) { setError(errorMessage(value)); setLoading(false); } })
+      .finally(() => { if (active) setRootsLoaded(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!rootsLoaded || !roots[selectedRootIndex]) return;
     const timer = window.setTimeout(() => void load(selectedRootIndex, scope), 0);
     return () => window.clearTimeout(timer);
-  }, [load, scope, selectedRootIndex]);
+  }, [load, roots, rootsLoaded, scope, selectedRootIndex]);
 
   const scopeChoices = useMemo(() => {
     const normalized = scopeQuery.trim().toLowerCase();
     const options = (scopeOptions?.directories || []).filter(option => option.path);
+    const relevantPaths = new Set<string>();
+    for (const dataset of data?.datasets || []) {
+      const segments = dataset.relative_path === "." ? [] : dataset.relative_path.split("/");
+      for (let index = 1; index <= segments.length; index++) relevantPaths.add(segments.slice(0, index).join("/"));
+    }
     const filtered = normalized
       ? options.filter(option => `${option.path} ${option.name}`.toLowerCase().includes(normalized))
-      : options;
+      : relevantPaths.size ? options.filter(option => relevantPaths.has(option.path)) : options;
     if (scope && !filtered.some(option => option.path === scope)) {
       const current = options.find(option => option.path === scope);
       if (current) filtered.unshift(current);
     }
     return filtered.slice(0, 400);
-  }, [scope, scopeOptions, scopeQuery]);
+  }, [data, scope, scopeOptions, scopeQuery]);
 
   const datasets = data?.datasets ?? EMPTY_DATASETS;
   const filteredDatasets = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized ? datasets.filter(dataset => `${dataset.name} ${dataset.relative_path} ${dataset.root_path}`.toLowerCase().includes(normalized)) : datasets;
   }, [datasets, query]);
+  const groupedDatasets = useMemo(() => {
+    const groups = new Map<string, PointCloudDataset[]>();
+    for (const dataset of filteredDatasets) {
+      const project = dataset.relative_path === "." ? "顶层目录" : dataset.relative_path.split("/")[0];
+      const group = groups.get(project) || [];
+      group.push(dataset);
+      groups.set(project, group);
+    }
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right, "zh-CN"));
+  }, [filteredDatasets]);
 
   const selectedDataset = datasets.find(dataset => dataset.id === selectedDatasetId) ?? datasets[0];
   const selectedFile = selectedDataset?.files.find(file => file.relative_path === selectedFilePath && file.viewable) ?? preferredFile(selectedDataset);
@@ -290,45 +331,48 @@ export function PointCloudsPanel() {
 
   return (
     <>
-      <PageHeader kicker="文件管理 / Point clouds" title="点云查看器" description="扫描范围来自文件管理组件，默认只暴露 ~/reproduce；可选择顶层文件夹或其中的子文件夹，自动按实验结果归并点云。" actions={<Button variant="secondary" onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading}>重新扫描</Button>} />
+      <PageHeader kicker="文件管理 / Point clouds" title="点云查看器" description="扫描范围来自文件管理组件，默认只暴露 ~/reproduce；可选择顶层文件夹或其中的子文件夹，自动按实验结果归并点云。" actions={<Button variant="secondary" onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading || !roots.length}>重新扫描</Button>} />
       {error ? <ErrorState message={error} /> : null}
       <div className="stack-grid">
         <Card>
           <CardHeader title="扫描范围" description="浏览器只能读取文件管理组件已暴露目录之内的点云文件；默认仅暴露 ~/reproduce。" actions={<a className="text-link" href="/files">管理文件夹 →</a>} />
           <div className="point-cloud-settings">
             <Field label="顶层文件夹">
-              <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setScope(""); }}>
+              <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setScope(""); setScopeQuery(""); setSelectedDatasetId(""); setSelectedFilePath(""); }} disabled={!roots.length}>
                 {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
               </select>
+              {rootsLoaded && !roots.length ? <span className="muted-line">没有可扫描的顶层文件夹，请先到文件管理中添加。</span> : null}
             </Field>
             <Field label="子文件夹">
               <div className="point-cloud-scope">
-                <input className="search-input" value={scopeQuery} onChange={event => setScopeQuery(event.target.value)} placeholder="搜索子文件夹" />
+                <input className="search-input" value={scopeQuery} onChange={event => setScopeQuery(event.target.value)} placeholder="搜索全部子文件夹" />
                 <select value={scope} onChange={event => setScope(event.target.value)}>
                   <option value="">整个顶层文件夹</option>
                   {scopeChoices.map(option => <option value={option.path} key={option.path}>{option.path}</option>)}
                 </select>
                 {scopeOptions?.truncated ? <span className="muted-line">最多列出 {scopeOptions.max_directories} 个文件夹。</span> : null}
+                {data?.datasets.length && !scopeQuery ? <span className="muted-line">默认列出含点云结果的文件夹；输入名称可搜索全部目录。</span> : null}
+                {scopeError ? <span className="muted-line">子文件夹列表读取失败：{scopeError}；仍可扫描整个顶层目录。</span> : null}
               </div>
             </Field>
             <div className="form-actions">
-              <Button onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading}>立即扫描</Button>
+              <Button onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading || !roots.length}>立即扫描</Button>
               <span className="muted-line">目录与扫描结果各有 15 秒服务端缓存；点击“立即扫描”会强制同步磁盘。</span>
             </div>
           </div>
         </Card>
 
-        {loading ? <LoadingState label="正在扫描已配置的点云目录…" /> : <div className="point-cloud-workspace">
+        {loading ? <LoadingState label="正在扫描已配置的点云目录…" /> : !roots.length ? <EmptyState title="没有可扫描的文件夹" detail="先在文件管理中保存一个包含点云文件的顶层目录。" /> : <div className="point-cloud-workspace">
           <Card className="point-cloud-browser">
-            <CardHeader title={`发现的文件夹 · ${datasets.length}`} description="已跳过 point_cloud、iteration 等通用层级，优先显示实验或结果目录。" actions={<input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索文件夹" />} />
+            <CardHeader title={`发现的结果 · ${datasets.length}`} description="按项目归类；列表显示实验或结果目录。" actions={<input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索项目或结果" />} />
             {data?.root_errors.length ? <div className="inline-message"><Badge tone="warning">目录异常</Badge>{data.root_errors.map(item => <span key={item.path}>{item.path}：{item.message}</span>)}</div> : null}
             {data?.scan_truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>扫描最多展示 {data.max_scanned_files} 个点云文件；请缩小顶层目录范围。</span></div> : null}
-            {filteredDatasets.length ? <div className="point-cloud-dataset-list">{filteredDatasets.map(dataset => (
+            {filteredDatasets.length ? <div className="point-cloud-dataset-list">{groupedDatasets.map(([project, items]) => <div className="point-cloud-project" key={project}><div className="point-cloud-project-heading"><strong>{project}</strong><span>{items.length} 个结果</span></div>{items.map(dataset => (
               <button className={`point-cloud-dataset${dataset.id === selectedDataset?.id ? " is-selected" : ""}`} type="button" key={dataset.id} onClick={() => chooseDataset(dataset.id)} aria-pressed={dataset.id === selectedDataset?.id}>
-                <span><strong>{dataset.name}</strong><small>{dataset.relative_path}</small></span>
+                <span><strong>{dataset.name}</strong><small>{dataset.relative_path === "." || dataset.relative_path === project ? "." : dataset.relative_path.slice(project.length + 1)}</small></span>
                 <span className="point-cloud-dataset-meta"><b>{dataset.file_count}</b><small>{formatBytes(dataset.total_size)}</small></span>
               </button>
-            ))}</div> : <EmptyState title={datasets.length ? "没有匹配的文件夹" : "没有找到点云文件"} detail={datasets.length ? "尝试换一个搜索词。" : "先保存一个含点云文件的顶层目录，然后重新扫描。"} />}
+            ))}</div>)}</div> : <EmptyState title={datasets.length ? "没有匹配的文件夹" : "没有找到点云文件"} detail={datasets.length ? "尝试换一个搜索词。" : "先保存一个含点云文件的顶层目录，然后重新扫描。"} />}
           </Card>
 
           <Card className="point-cloud-preview-card">
@@ -336,7 +380,7 @@ export function PointCloudsPanel() {
               <CardHeader eyebrow="已选文件夹" title={selectedDataset.name} description={`${selectedDataset.root_path} / ${selectedDataset.relative_path}`} actions={<Badge tone="info">{selectedDataset.formats.map(format => `.${format}`).join(" · ")}</Badge>} />
               <div className="point-cloud-file-picker" role="list" aria-label="点云文件列表">
                 {selectedDataset.files.map(file => <button className={`point-cloud-file${file.relative_path === selectedFile?.relative_path ? " is-selected" : ""}`} type="button" key={file.relative_path} onClick={() => file.viewable && chooseFile(file.relative_path)} disabled={!file.viewable} title={file.viewable ? file.relative_path : `.${file.format} 暂不能直接在浏览器中解析`}>
-                  <span><strong>{file.name}</strong><small>{formatBytes(file.size)} · {formatDate(file.modified)}</small></span>
+                  <span><strong>{file.relative_path.startsWith(`${selectedDataset.relative_path}/`) ? file.relative_path.slice(selectedDataset.relative_path.length + 1) : file.name}</strong><small>{formatBytes(file.size)} · {formatDate(file.modified)}</small></span>
                   <Badge tone={file.viewable ? "success" : "warning"}>{file.viewable ? `.${file.format}` : `.${file.format} 待转换`}</Badge>
                 </button>)}
               </div>
