@@ -433,11 +433,15 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .ai-prompt-editor { min-height: 220px; font-size: 14px; line-height: 1.65; }
 .ai-action-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
-.file-manager-settings { display: grid; gap: var(--space-4); }
-.file-manager-roots { min-height: 82px; font-family: var(--font-mono); font-size: 13px; }
-.file-manager-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
-.file-manager-toolbar select { width: 150px; min-height: 30px; font-size: 12px; }
-.file-manager-toolbar .search-input { width: 150px; min-height: 30px; font-size: 12px; }
+.content-container.file-manager-page { width: min(100% - 64px, 1700px); padding-top: var(--space-5); }
+.file-manager-page .page-header { margin-bottom: var(--space-5); }
+.file-manager-page .page-title { font-size: clamp(30px, 2.4vw, 40px); }
+.file-manager-page .page-description { font-size: 14px; }
+.file-manager-browser .card-header { display: block; }
+.file-manager-browser .card-actions { width: 100%; margin-top: var(--space-3); }
+.file-manager-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; align-items: center; gap: var(--space-2); }
+.file-manager-toolbar select { grid-column: 1 / -1; width: 100%; min-height: 30px; font-size: 12px; }
+.file-manager-toolbar .search-input { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-filter { min-height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-filter[aria-pressed="true"] { border-color: var(--color-control-border); background: var(--color-control-light); color: var(--color-on-light); }
 .file-manager-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
@@ -457,16 +461,22 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-entry small { color: var(--color-text-muted); font-size: 12px; }
 .file-manager-entry-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .file-manager-entry-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
-.file-manager-workspace { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.2fr); gap: var(--space-6); align-items: start; }
+.file-manager-workspace { display: grid; grid-template-columns: minmax(290px, 0.34fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .file-manager-preview { min-width: 0; }
+.file-manager-preview.is-expanded { position: fixed; z-index: 30; inset: var(--space-5); display: flex; flex-direction: column; overflow: auto; }
+.file-manager-preview.is-expanded .point-cloud-canvas-wrap { flex: 1 1 auto; height: auto; min-height: 0; }
 .file-manager-entry.is-selected { background: var(--color-surface-hover); }
 .point-cloud-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: var(--space-5) 0 var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
+.point-cloud-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); }
+.point-cloud-toolbar-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .point-cloud-toolbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .point-cloud-toolbar label { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); color: var(--color-text-muted); }
 .point-cloud-toolbar input[type="range"] { width: 104px; min-height: auto; padding: 0; accent-color: var(--color-brand); }
 .point-cloud-toolbar b { min-width: 12px; color: var(--color-text-primary); font-weight: 500; text-align: right; }
-.point-cloud-canvas-wrap { position: relative; min-height: 500px; overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-bg); }
+.point-cloud-canvas-wrap { position: relative; height: min(76vh, 920px); min-height: 620px; overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-bg); }
 .point-cloud-canvas { display: block; width: 100%; height: 100%; cursor: grab; outline: none; }
+.point-cloud-canvas-overlay { position: absolute; z-index: 1; inset: 0; }
+.point-cloud-loading { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; color: var(--color-text-secondary); font-size: 14px; pointer-events: none; }
 .point-cloud-canvas:active { cursor: grabbing; }
 .point-cloud-viewer-error { margin-bottom: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-error); border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 13px; }
 .point-cloud-help { margin: var(--space-3) 0 0; color: var(--color-text-muted); font-size: 12px; }
@@ -500,6 +510,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 }
 
 @media (max-width: 767px) {
+  .content-container.file-manager-page { width: min(100% - 40px, 640px); }
   .sidebar { transform: translateX(-100%); width: min(288px, 88vw); transition: transform 180ms ease; }
   .sidebar.is-collapsed { width: min(288px, 88vw); padding: var(--space-6) var(--space-4) var(--space-5); }
   .sidebar.is-collapsed .brand-lockup { justify-content: flex-start; }
@@ -541,13 +552,12 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
-  .file-manager-toolbar { width: 100%; flex-wrap: wrap; }
-  .file-manager-toolbar .search-input, .file-manager-toolbar select { flex: 1 1 140px; width: auto; }
+  .file-manager-toolbar { width: 100%; }
   .file-manager-list { max-height: 420px; }
   .file-manager-breadcrumb { margin-top: calc(var(--space-2) * -1); }
   .point-cloud-toolbar { align-items: flex-start; flex-direction: column; }
   .point-cloud-toolbar-actions { width: 100%; flex-wrap: wrap; }
-  .point-cloud-canvas-wrap { min-height: min(500px, 72vh); }
+  .point-cloud-canvas-wrap { height: min(72vh, 680px); min-height: 420px; }
   .inline-form { width: 100%; }
   .inline-form input { flex: 1; width: auto; }
   .login-page { align-items: start; padding: var(--space-5); }
