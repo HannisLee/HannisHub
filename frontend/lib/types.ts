@@ -6,6 +6,51 @@ export interface ServiceSummary {
   icon?: string;
 }
 
+export interface FileManagerEntry {
+  name: string;
+  path: string;
+  type: "directory" | "file" | "other";
+  size: number;
+  modified: number;
+  extension: string;
+  download_url?: string;
+}
+
+export interface FileManagerDirectoryResponse {
+  root_index: number;
+  root_path: string;
+  path: string;
+  entries: FileManagerEntry[];
+  cached: boolean;
+  generated_at: number;
+  expires_at: number;
+  cache_ttl_seconds: number;
+  max_entries: number;
+  truncated: boolean;
+}
+
+export interface FileManagerDirectoryOption {
+  path: string;
+  name: string;
+}
+
+export interface FileManagerDirectoryOptionsResponse {
+  root_index: number;
+  root_path: string;
+  directories: FileManagerDirectoryOption[];
+  truncated: boolean;
+  max_directories: number;
+  cached?: boolean;
+  generated_at?: number;
+  cache_ttl_seconds?: number;
+}
+
+export interface FileManagerSyncResponse {
+  roots: string[];
+  synced_at: number;
+  cache_ttl_seconds: number;
+}
+
 export interface PointCloudFile {
   name: string;
   relative_path: string;
@@ -31,11 +76,13 @@ export interface PointCloudDataset {
 
 export interface PointCloudDatasetsResponse {
   roots: string[];
+  scope: string;
   datasets: PointCloudDataset[];
   root_errors: Array<{ path: string; message: string }>;
   scan_truncated: boolean;
   max_scanned_files: number;
   scanned_file_count: number;
+  cached?: boolean;
 }
 
 export interface ModelFile {

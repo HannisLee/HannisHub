@@ -7,7 +7,7 @@ import { PCDLoader } from "three/addons/loaders/PCDLoader.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { API_PATHS, apiFetch } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { PointCloudDataset, PointCloudDatasetsResponse, PointCloudFile } from "../../lib/types";
+import type { FileManagerDirectoryOptionsResponse, PointCloudDataset, PointCloudDatasetsResponse, PointCloudFile } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader } from "../ui/primitives";
 
 interface ViewerDetails {
@@ -213,26 +213,32 @@ function preferredFile(dataset: PointCloudDataset | undefined): PointCloudFile |
 
 export function PointCloudsPanel() {
   const [data, setData] = useState<PointCloudDatasetsResponse | null>(null);
-  const [rootsText, setRootsText] = useState("");
+  const [roots, setRoots] = useState<string[]>([]);
+  const [scopeOptions, setScopeOptions] = useState<FileManagerDirectoryOptionsResponse | null>(null);
+  const [selectedRootIndex, setSelectedRootIndex] = useState(0);
+  const [scope, setScope] = useState("");
+  const [scopeQuery, setScopeQuery] = useState("");
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [query, setQuery] = useState("");
   const [pointSize, setPointSize] = useState(3);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [viewerError, setViewerError] = useState("");
   const [viewerLoading, setViewerLoading] = useState(false);
   const [viewerDetails, setViewerDetails] = useState<ViewerDetails | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (rootIndex: number, nextScope: string, refresh = false) => {
     setLoading(true);
     try {
-      const [settings, datasets] = await Promise.all([
-        apiFetch<{ roots: string[] }>(`${API_PATHS.pointClouds}/settings`),
-        apiFetch<PointCloudDatasetsResponse>(`${API_PATHS.pointClouds}/datasets`),
+      const refreshText = refresh ? "&refresh=true" : "";
+      const [settings, options, datasets] = await Promise.all([
+        apiFetch<{ roots: string[] }>(`${API_PATHS.fileManager}/settings`),
+        apiFetch<FileManagerDirectoryOptionsResponse>(`${API_PATHS.fileManager}/directories?root=${rootIndex}${refreshText}`),
+        apiFetch<PointCloudDatasetsResponse>(`${API_PATHS.pointClouds}/datasets?root=${rootIndex}&scope=${encodeURIComponent(nextScope)}${refreshText}`),
       ]);
-      setRootsText(settings.roots.join("\n"));
+      setRoots(settings.roots || []);
+      setScopeOptions(options);
       setData(datasets);
       setError("");
     } catch (value) {
@@ -243,9 +249,22 @@ export function PointCloudsPanel() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void load(selectedRootIndex, scope), 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, scope, selectedRootIndex]);
+
+  const scopeChoices = useMemo(() => {
+    const normalized = scopeQuery.trim().toLowerCase();
+    const options = (scopeOptions?.directories || []).filter(option => option.path);
+    const filtered = normalized
+      ? options.filter(option => `${option.path} ${option.name}`.toLowerCase().includes(normalized))
+      : options;
+    if (scope && !filtered.some(option => option.path === scope)) {
+      const current = options.find(option => option.path === scope);
+      if (current) filtered.unshift(current);
+    }
+    return filtered.slice(0, 400);
+  }, [scope, scopeOptions, scopeQuery]);
 
   const datasets = data?.datasets ?? EMPTY_DATASETS;
   const filteredDatasets = useMemo(() => {
@@ -269,36 +288,32 @@ export function PointCloudsPanel() {
     setViewerError("");
   }
 
-  async function saveRoots() {
-    const roots = rootsText.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-    setSaving(true);
-    try {
-      await apiFetch<{ roots: string[] }>(`${API_PATHS.pointClouds}/settings`, {
-        method: "PUT",
-        body: JSON.stringify({ roots }),
-      });
-      await load();
-    } catch (value) {
-      setError(errorMessage(value));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <>
-      <PageHeader kicker="点云 / Point clouds" title="点云查看器" description="指定可扫描的顶层目录，自动按实验或结果文件夹归并点云；选择文件后可直接拖动查看。" actions={<Button variant="secondary" onClick={() => void load()} disabled={loading || saving}>重新扫描</Button>} />
+      <PageHeader kicker="文件管理 / Point clouds" title="点云查看器" description="扫描范围来自文件管理组件，默认只暴露 ~/reproduce；可选择顶层文件夹或其中的子文件夹，自动按实验结果归并点云。" actions={<Button variant="secondary" onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading}>重新扫描</Button>} />
       {error ? <ErrorState message={error} /> : null}
       <div className="stack-grid">
         <Card>
-          <CardHeader title="扫描范围" description="每行填写一个顶层文件夹。浏览器只能读取这些目录之内的点云文件；支持以 ~/ 开头的路径。" />
+          <CardHeader title="扫描范围" description="浏览器只能读取文件管理组件已暴露目录之内的点云文件；默认仅暴露 ~/reproduce。" actions={<a className="text-link" href="/files">管理文件夹 →</a>} />
           <div className="point-cloud-settings">
             <Field label="顶层文件夹">
-              <textarea className="point-cloud-roots" value={rootsText} onChange={event => setRootsText(event.target.value)} placeholder="~/reproduce" spellCheck={false} />
+              <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setScope(""); }}>
+                {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
+              </select>
+            </Field>
+            <Field label="子文件夹">
+              <div className="point-cloud-scope">
+                <input className="search-input" value={scopeQuery} onChange={event => setScopeQuery(event.target.value)} placeholder="搜索子文件夹" />
+                <select value={scope} onChange={event => setScope(event.target.value)}>
+                  <option value="">整个顶层文件夹</option>
+                  {scopeChoices.map(option => <option value={option.path} key={option.path}>{option.path}</option>)}
+                </select>
+                {scopeOptions?.truncated ? <span className="muted-line">最多列出 {scopeOptions.max_directories} 个文件夹。</span> : null}
+              </div>
             </Field>
             <div className="form-actions">
-              <Button onClick={() => void saveRoots()} disabled={saving}>{saving ? "保存并扫描中…" : "保存并扫描"}</Button>
-              <span className="muted-line">已内置 ~/reproduce 作为首次打开时的默认目录；保存空列表可暂时停止扫描。</span>
+              <Button onClick={() => void load(selectedRootIndex, scope, true)} disabled={loading}>立即扫描</Button>
+              <span className="muted-line">目录与扫描结果各有 15 秒服务端缓存；点击“立即扫描”会强制同步磁盘。</span>
             </div>
           </div>
         </Card>
@@ -328,7 +343,10 @@ export function PointCloudsPanel() {
               {selectedFile ? <>
                 <div className="point-cloud-toolbar">
                   <span>{viewerLoading ? "正在读取并解析点云…" : viewerDetails ? `${viewerDetails.pointCount.toLocaleString()} 个点${viewerDetails.hasColors ? " · 保留文件颜色" : " · 使用主题色"}` : "准备预览"}</span>
-                  <label>点大小 <input type="range" min="1" max="10" value={pointSize} onChange={event => setPointSize(Number(event.target.value))} /><b>{pointSize}</b></label>
+                  <div className="point-cloud-toolbar-actions">
+                    <label>点大小 <input type="range" min="1" max="10" value={pointSize} onChange={event => setPointSize(Number(event.target.value))} /><b>{pointSize}</b></label>
+                    <a className="button button-secondary button-sm" href={selectedFile.url} download>下载文件</a>
+                  </div>
                 </div>
                 {viewerError ? <div className="point-cloud-viewer-error">{viewerError}</div> : null}
                 <PointCloudCanvas file={selectedFile} pointSize={pointSize} onLoading={() => { setViewerLoading(true); setViewerError(""); }} onError={message => { setViewerLoading(false); setViewerError(message); }} onLoaded={details => { setViewerLoading(false); setViewerDetails(details); }} />

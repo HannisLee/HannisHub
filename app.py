@@ -23,7 +23,14 @@ from auth import (
     record_login_failure,
 )
 import llama_manager.app as llama_manager_app
-from point_cloud import configured_roots, resolve_cloud_file, save_roots, scan_datasets
+from file_manager import (
+    configured_roots,
+    list_directory,
+    resolve_file,
+    save_roots,
+    sync_roots,
+)
+from point_cloud import clear_scan_cache, resolve_cloud_file, scan_datasets
 import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
@@ -52,11 +59,11 @@ SERVICES: list[dict[str, str]] = [
         "icon": "✍️",
     },
     {
-        "id": "point-clouds",
-        "name": "点云查看器",
-        "description": "扫描指定顶层目录并在浏览器中交互预览点云",
-        "path": "/point-clouds/",
-        "icon": "◌",
+        "id": "file-manager",
+        "name": "文件管理",
+        "description": "浏览并下载本机 reproduce 目录，同时提供点云预览",
+        "path": "/files/",
+        "icon": "🗂",
     },
 ]
 
@@ -166,6 +173,18 @@ async def prompts_page():
     return await _new_frontend_route("prompts")
 
 
+@app.get("/files", include_in_schema=False)
+@app.get("/files/", include_in_schema=False)
+async def files_page():
+    return await _new_frontend_route("files")
+
+
+@app.get("/files/point-clouds", include_in_schema=False)
+@app.get("/files/point-clouds/", include_in_schema=False)
+async def files_point_clouds_page():
+    return await _new_frontend_route("files/point-clouds")
+
+
 @app.get("/point-clouds", include_in_schema=False)
 @app.get("/point-clouds/", include_in_schema=False)
 async def point_clouds_page():
@@ -190,22 +209,69 @@ async def services():
     return JSONResponse({"services": SERVICES})
 
 
-@app.get("/api/point-clouds/settings")
-async def point_cloud_settings():
-    """返回点云查看器允许扫描的顶层目录。"""
+@app.get("/api/file-manager/settings")
+async def file_manager_settings():
+    """返回文件管理组件已暴露的顶层目录。"""
     return JSONResponse({"roots": configured_roots()})
 
 
-@app.put("/api/point-clouds/settings")
-async def update_point_cloud_settings(payload: dict[str, Any] = Body(...)):
-    """保存点云查看器顶层目录；目录必须存在且仅允许绝对路径或 ~/。"""
+@app.put("/api/file-manager/settings")
+async def update_file_manager_settings(payload: dict[str, Any] = Body(...)):
+    """保存文件管理顶层目录；目录必须存在且仅允许绝对路径或 ~/。"""
+    clear_scan_cache()
     return JSONResponse({"roots": save_roots(payload.get("roots"))})
 
 
+@app.get("/api/file-manager/directory")
+async def file_manager_directory(
+    root: int = Query(..., ge=0),
+    path: str = Query("", max_length=4_096),
+    refresh: bool = Query(False),
+):
+    """返回受限目录的直接子项；默认使用服务端目录缓存。"""
+    return JSONResponse(await run_in_threadpool(list_directory, root, path, refresh=refresh))
+
+
+@app.get("/api/file-manager/directories")
+async def file_manager_directories(
+    root: int = Query(..., ge=0),
+    refresh: bool = Query(False),
+):
+    """返回某个顶层目录内的文件夹选项，供点云扫描范围选择。"""
+    return JSONResponse(await run_in_threadpool(directory_options, root, refresh=refresh))
+
+
+@app.post("/api/file-manager/sync")
+async def file_manager_sync():
+    """清空目录与点云扫描缓存，下一次访问将重新同步磁盘状态。"""
+    clear_scan_cache()
+    return JSONResponse(await run_in_threadpool(sync_roots))
+
+
+@app.get("/api/file-manager/download")
+async def file_manager_download(
+    root: int = Query(..., ge=0),
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """流式下载受限目录内的普通文件。"""
+    file_path = resolve_file(root, path)
+    return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/point-clouds/settings")
+async def point_cloud_settings():
+    """兼容返回点云查看器可用的文件管理顶层目录。"""
+    return JSONResponse({"roots": configured_roots()})
+
+
 @app.get("/api/point-clouds/datasets")
-async def point_cloud_datasets():
-    """扫描已配置目录，并将常见迭代层级归并成实验/结果目录。"""
-    return JSONResponse(await run_in_threadpool(scan_datasets))
+async def point_cloud_datasets(
+    root: int = Query(0, ge=0),
+    scope: str = Query("", max_length=4_096),
+    refresh: bool = Query(False),
+):
+    """扫描指定文件夹，并将常见迭代层级归并成实验/结果目录。"""
+    return JSONResponse(await run_in_threadpool(scan_datasets, root, scope, refresh=refresh))
 
 
 @app.get("/api/point-clouds/file")
@@ -215,7 +281,7 @@ async def point_cloud_file(
 ):
     """流式返回受限目录内的点云原始文件，供浏览器解析器加载。"""
     file_path = resolve_cloud_file(root, path)
-    return FileResponse(file_path, headers={"Cache-Control": "no-store"})
+    return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/auth/status")

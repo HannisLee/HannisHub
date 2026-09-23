@@ -23,7 +23,8 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
-├── point_cloud.py            # 点云目录配置、受限扫描与原始文件读取
+├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
+├── point_cloud.py            # 点云扫描归并与原始文件读取，复用文件管理目录能力
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
 ├── login.html                # Hub 旧版登录页，迁移验证期保留
 ├── frontend/                 # 统一 Next.js Dashboard
@@ -76,7 +77,8 @@ HannisHub/
 - `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
-- `/point-clouds`：点云查看器，配置扫描目录、选择结果文件夹并交互预览点云
+- `/files`：文件管理组件，浏览并下载默认暴露的 `~/reproduce` 目录
+- `/files/point-clouds`：点云查看器，从文件管理组件选择扫描文件夹并交互预览；`/point-clouds` 为兼容旧入口
 
 ### 统一前端静态托管
 
@@ -99,7 +101,7 @@ HannisHub/
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、分组和归档组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
-| `frontend/components/point-clouds/` | 点云目录浏览、文件选择与 Three.js 交互预览组件 |
+| `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
 
 API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
@@ -119,9 +121,14 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
-| GET | `/api/point-clouds/settings` | 读取点云查看器已配置的顶层目录；未显式配置且 `~/reproduce` 存在时以它作为默认目录 |
-| PUT | `/api/point-clouds/settings` | 保存点云查看器顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径 |
-| GET | `/api/point-clouds/datasets` | 递归扫描配置目录，按实验/结果目录归并 `.ply`、`.pcd`、`.xyz`、`.xyzn`、`.xyzrgb`、`.pts`、`.las`、`.laz` 文件 |
+| GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录；未显式配置时默认仅返回 `~/reproduce` |
+| PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
+| GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
+| GET | `/api/file-manager/directories?root=<index>&refresh=<bool>` | 返回某个顶层目录内的全部文件夹选项，供点云扫描范围选择 |
+| POST | `/api/file-manager/sync` | 清空目录缓存与点云扫描缓存，下一次访问重新读取磁盘 |
+| GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
+| GET | `/api/point-clouds/settings` | 兼容读取点云查看器可用的文件管理顶层目录 |
+| GET | `/api/point-clouds/datasets?root=<index>&scope=<relative_path>&refresh=<bool>` | 扫描指定文件夹，按实验/结果目录归并 `.ply`、`.pcd`、`.xyz`、`.xyzn`、`.xyzrgb`、`.pts`、`.las`、`.laz` 文件；默认使用 15 秒扫描缓存 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 返回指定顶层目录内的单个点云原始文件，供浏览器预览器读取；拒绝越界路径 |
 
 ### 登录与会话
@@ -134,12 +141,19 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - 登录接口内置简单防暴力破解：同一客户端 5 分钟内最多 5 次失败
 - 浏览器页面未登录时重定向到 `/login?next=...`，API 请求返回 `401` JSON
 
+### 文件管理组件
+
+- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。
+- 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
+- 服务端对目录列表、文件夹选项和点云扫描结果分别维护 15 秒线程安全缓存。目录缓存同时记录目录 mtime，顶层子项变化时立即失效；`POST /api/file-manager/sync` 会强制清空全部缓存。
+- 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
+
 ### 点云查看器
 
-- 顶层目录保存在根目录 `settings.json.point_cloud.roots`，不使用数据库；路径保留用户输入的 `~`，每次读取时通过 `Path.expanduser()` 展开。
-- 扫描阶段会跳过版本控制、缓存、依赖和虚拟环境目录，并按文件修改时间返回结果。为了避免单个极大目录阻塞管理页，单次最多扫描 2,000 个候选点云文件、展示 800 个结果目录。
+- 点云查看器归属于文件管理组件，扫描范围从 `/api/file-manager/directories` 返回的文件夹选项中选择，默认范围为 `~/reproduce`；不再单独维护点云顶层目录。
+- 扫描阶段会跳过版本控制、缓存、依赖、虚拟环境和隐藏目录，并按文件修改时间返回结果。为了避免单个极大目录阻塞管理页，单次最多扫描 2,000 个候选点云文件、展示 800 个结果目录；扫描结果同样有 15 秒缓存。
 - 对 `point_cloud`、`iteration_*`、`model`、`world`、`ply` 等通用容器目录，扫描器会向上归并，优先显示实验/结果目录名，因此实际结果目录位于文件上两级或上三级时仍可直接在列表中识别。
-- 文件读取接口只接收已配置顶层目录的索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。
+- 文件读取与下载接口复用文件管理组件的安全校验；前端可直接下载当前预览的 PLY 等点云文件。
 - 前端使用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`。`PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 仍会被发现和显示，但需要预先转换后再预览。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
@@ -453,7 +467,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 ### 根目录 settings.json
 
-根目录 `settings.json` 只保存 Hub 登录与会话配置，不保存子服务业务配置：
+根目录 `settings.json` 保存 Hub 登录与会话配置，以及文件管理组件的受限目录配置：
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -461,6 +475,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `auth.password_hash` | string | `""` | Argon2id 密码哈希；永不通过 API 返回 |
 | `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
 | `auth.session_max_age_seconds` | number | `43200` | 会话有效期，默认 12 小时 |
+| `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
 
 ### llama_manager/settings.json
 

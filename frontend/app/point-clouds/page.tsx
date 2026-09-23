@@ -1,5 +1,5 @@
 import { AppShell } from "../../components/layout/app-shell";
-import { PointCloudsPanel } from "../../components/point-clouds/point-clouds-panel";
+import { PointCloudsPanel } from "../../components/file-manager/point-clouds-panel";
 
 export default function PointCloudsPage() {
   return <AppShell><PointCloudsPanel /></AppShell>;

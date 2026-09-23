@@ -31,7 +31,7 @@ export const navigation: NavGroup[] = [
       { href: "/server/tasks", label: "远程任务", icon: "tasks" },
     ],
   },
-  { label: "点云", items: [{ href: "/point-clouds", label: "点云查看器", icon: "pointcloud" }] },
+  { label: "文件管理", items: [{ href: "/files", label: "文件浏览", icon: "files" }, { href: "/files/point-clouds", label: "点云查看器", icon: "pointcloud" }] },
   { label: "提示词", items: [{ href: "/prompts", label: "提示词工作区", icon: "prompts" }] },
 ];
 

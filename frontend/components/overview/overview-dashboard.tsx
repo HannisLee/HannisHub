@@ -74,8 +74,8 @@ export function OverviewDashboard() {
         <Card className="overview-wide">
           <CardHeader title="服务入口" description="从一个统一的工作台进入各个操作模块。" />
           <div className="service-grid">{data.services.map(service => {
-            const icon: IconName = service.id === "server" ? "connections" : service.id === "prompt" ? "prompts" : service.id === "point-clouds" ? "pointcloud" : "models";
-            const href = service.id === "server" ? "/server/connections" : service.id === "prompt" ? "/prompts" : service.id === "point-clouds" ? "/point-clouds" : "/llama/models";
+            const icon: IconName = service.id === "server" ? "connections" : service.id === "prompt" ? "prompts" : service.id === "file-manager" ? "files" : "models";
+            const href = service.id === "server" ? "/server/connections" : service.id === "prompt" ? "/prompts" : service.id === "file-manager" ? "/files" : "/llama/models";
             return <a href={href} className="service-card" key={service.id}><span className="service-icon"><Icon name={icon} /></span><span><strong>{service.name}</strong><small>{service.description}</small></span><b>→</b></a>;
           })}</div>
           <p className="last-updated">本地时间 {formatDate(data.loadedAt)}</p>

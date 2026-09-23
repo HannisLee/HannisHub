@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "pointcloud";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "pointcloud";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -13,6 +13,7 @@ const paths: Record<IconName, ReactNode> = {
   connections: <><path d="M9.5 14.5 7 17a3 3 0 0 1-4.24-4.24l3-3A3 3 0 0 1 10 9.5M14.5 9.5 17 7a3 3 0 0 1 4.24 4.24l-3 3A3 3 0 0 1 14 14.5M8.5 15.5l7-7" /></>,
   tasks: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 9h8M8 13h5M8 17h8" /></>,
   prompts: <><path d="M5 4.5h14v12H9l-4 3v-15Z" /><path d="M8 8h8M8 12h5" /></>,
+  files: <><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h3.2l1.8 2h8A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11Z" /><path d="M8 12h8M8 16h5" /></>,
   pointcloud: <><circle cx="6" cy="8" r="1.5" /><circle cx="12" cy="5" r="1.5" /><circle cx="18" cy="9" r="1.5" /><circle cx="9" cy="16" r="1.5" /><circle cx="16" cy="18" r="1.5" /><path d="m7.25 8.75 3.5-2.5m2.5.25 3.5 1.75m-8.5 6.5 1.5-5m2.5 7 3.5-6" /></>,
 };
 

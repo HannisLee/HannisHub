@@ -1,83 +1,29 @@
-"""点云查看器的数据目录配置、扫描与受限文件读取。"""
+"""点云查看器的扫描、归并与受限文件读取，目录能力复用文件管理组件。"""
 
 from __future__ import annotations
 
-import os
+from copy import deepcopy
 from pathlib import Path
-from typing import Any, Iterable
+from threading import RLock
+from typing import Any
+import time
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
-from auth import get_settings_section, update_settings_section
+from file_manager import configured_roots, iter_root_files, resolve_root, save_roots
 
 
 POINT_CLOUD_EXTENSIONS = {".ply", ".pcd", ".xyz", ".xyzn", ".xyzrgb", ".pts", ".las", ".laz"}
 VIEWABLE_EXTENSIONS = {".ply", ".pcd", ".xyz", ".xyzn", ".xyzrgb", ".pts"}
-MAX_ROOTS = 24
 MAX_SCANNED_FILES = 2_000
 MAX_DATASETS = 800
-IGNORED_DIRECTORY_NAMES = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".cache", ".venv", "venv"}
+SCAN_CACHE_TTL_SECONDS = 15
+_SCAN_CACHE: dict[tuple[tuple[str, ...], int, str], tuple[float, dict[str, Any]]] = {}
+_SCAN_CACHE_LOCK = RLock()
 
 # 这些目录通常只是在描述点云类型或迭代层级；列表中应优先显示实际实验目录。
 GENERIC_DATASET_DIRECTORY_NAMES = {"point_cloud", "pointcloud", "points", "model", "models", "world", "ply", "ply_dense", "sparse", "dense"}
-
-
-def _default_roots() -> list[str]:
-    """为当前用户已有的 reproduce 目录提供首开即用的默认范围。"""
-    return ["~/reproduce"] if Path("~/reproduce").expanduser().is_dir() else []
-
-
-def _normalize_root_text(value: object) -> str:
-    """校验可保存的顶层目录文本，保留 ~ 以便设置文件可迁移。"""
-    if not isinstance(value, str):
-        raise HTTPException(status_code=422, detail="顶层目录必须是字符串")
-    text = value.strip()
-    if not text:
-        raise HTTPException(status_code=422, detail="顶层目录不能为空")
-    if len(text) > 1_024:
-        raise HTTPException(status_code=422, detail="顶层目录过长")
-    expanded = Path(text).expanduser()
-    if not expanded.is_absolute():
-        raise HTTPException(status_code=422, detail="顶层目录请使用绝对路径或以 ~/ 开头")
-    return text
-
-
-def _resolve_root(root_text: str, *, require_existing: bool = True) -> Path:
-    """展开并规范化顶层目录，确保它是可扫描的真实目录。"""
-    root = Path(root_text).expanduser().resolve()
-    if require_existing and (not root.exists() or not root.is_dir()):
-        raise HTTPException(status_code=422, detail=f"顶层目录不存在或不是目录：{root_text}")
-    return root
-
-
-def configured_roots() -> list[str]:
-    """读取已保存的顶层目录；未配置时仅提供存在的默认 reproduce 目录。"""
-    value = get_settings_section("point_cloud")
-    if not isinstance(value, dict) or not isinstance(value.get("roots"), list):
-        return _default_roots()
-    return [item for item in value["roots"] if isinstance(item, str)]
-
-
-def save_roots(values: object) -> list[str]:
-    """保存用户显式指定的顶层目录，拒绝无效或重复路径。"""
-    if not isinstance(values, list):
-        raise HTTPException(status_code=422, detail="roots 必须是目录数组")
-    if len(values) > MAX_ROOTS:
-        raise HTTPException(status_code=422, detail=f"最多可配置 {MAX_ROOTS} 个顶层目录")
-
-    roots: list[str] = []
-    seen: set[Path] = set()
-    for item in values:
-        text = _normalize_root_text(item)
-        resolved = _resolve_root(text)
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        roots.append(text)
-
-    update_settings_section("point_cloud", {"roots": roots})
-    return roots
 
 
 def _is_generic_dataset_directory(name: str) -> bool:
@@ -100,7 +46,7 @@ def _dataset_directory(file_path: Path, root: Path) -> Path:
 
 
 def _file_payload(file_path: Path, root: Path, root_index: int) -> dict[str, Any]:
-    """生成前端加载所需的受限文件信息。"""
+    """生成前端加载与下载所需的受限文件信息。"""
     relative_path = file_path.relative_to(root).as_posix()
     suffix = file_path.suffix.lower()
     stat = file_path.stat()
@@ -115,52 +61,67 @@ def _file_payload(file_path: Path, root: Path, root_index: int) -> dict[str, Any
     }
 
 
-def _iter_cloud_files(root: Path) -> Iterable[Path]:
-    """按稳定顺序扫描点云后缀，跳过依赖、缓存和版本控制目录。"""
-    for directory, child_directories, filenames in os.walk(root, topdown=True, onerror=lambda _: None):
-        child_directories[:] = sorted(
-            name for name in child_directories
-            if name not in IGNORED_DIRECTORY_NAMES and not name.startswith(".")
-        )
-        for filename in sorted(filenames):
-            file_path = Path(directory) / filename
-            if file_path.suffix.lower() in POINT_CLOUD_EXTENSIONS:
-                yield file_path
+def clear_scan_cache() -> None:
+    """清空点云扫描结果缓存。"""
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE.clear()
 
 
-def scan_datasets(root_texts: list[str] | None = None) -> dict[str, Any]:
-    """扫描配置目录并按更有意义的实验目录归并点云文件。"""
-    raw_roots = configured_roots() if root_texts is None else root_texts
+def scan_datasets(root_index: int | None = None, *, scope: str = "", refresh: bool = False) -> dict[str, Any]:
+    """扫描已暴露目录，并可按顶层目录索引缩小点云扫描范围。"""
+    roots = configured_roots()
+    cache_key = (tuple(roots), -1 if root_index is None else root_index, scope)
+    now = time.time()
+    with _SCAN_CACHE_LOCK:
+        cached = _SCAN_CACHE.get(cache_key)
+        if not refresh and cached and now - cached[0] < SCAN_CACHE_TTL_SECONDS:
+            payload = deepcopy(cached[1])
+            payload["cached"] = True
+            return payload
+    if root_index is None:
+        selected_roots = list(enumerate(roots))
+    else:
+        if root_index < 0 or root_index >= len(roots):
+            raise HTTPException(status_code=404, detail="点云扫描范围不存在")
+        selected_roots = [(root_index, roots[root_index])]
+
     grouped: dict[tuple[int, str], dict[str, Any]] = {}
     root_errors: list[dict[str, str]] = []
     scanned_count = 0
     truncated = False
 
-    for root_index, root_text in enumerate(raw_roots):
+    for current_root_index, root_text in selected_roots:
+        remaining = MAX_SCANNED_FILES - scanned_count
+        if remaining <= 0:
+            truncated = True
+            break
         try:
-            root = _resolve_root(root_text)
+            root, files, walk_truncated = iter_root_files(
+                root_text,
+                {f".{extension}" for extension in ("ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts", "las", "laz")},
+                max_files=remaining,
+                refresh=refresh,
+                scope=scope,
+            )
         except HTTPException as exc:
             root_errors.append({"path": root_text, "message": str(exc.detail)})
             continue
 
-        for file_path in _iter_cloud_files(root):
-            scanned_count += 1
-            if scanned_count > MAX_SCANNED_FILES:
-                truncated = True
-                break
-
+        scanned_count += len(files)
+        truncated = truncated or walk_truncated
+        for file_path in files:
             dataset_dir = _dataset_directory(file_path, root)
             dataset_relative_path = dataset_dir.relative_to(root).as_posix()
             if dataset_relative_path == ".":
                 dataset_relative_path = ""
-            key = (root_index, dataset_relative_path)
+            key = (current_root_index, dataset_relative_path)
             dataset = grouped.get(key)
             if dataset is None:
                 dataset = {
-                    "id": f"{root_index}:{dataset_relative_path}",
+                    "id": f"{current_root_index}:{dataset_relative_path}",
                     "name": dataset_dir.name or root.name,
                     "relative_path": dataset_relative_path or ".",
-                    "root_index": root_index,
+                    "root_index": current_root_index,
                     "root_path": root_text,
                     "file_count": 0,
                     "total_size": 0,
@@ -169,14 +130,12 @@ def scan_datasets(root_texts: list[str] | None = None) -> dict[str, Any]:
                     "files": [],
                 }
                 grouped[key] = dataset
-            file_data = _file_payload(file_path, root, root_index)
+            file_data = _file_payload(file_path, root, current_root_index)
             dataset["file_count"] += 1
             dataset["total_size"] += file_data["size"]
             dataset["modified"] = max(dataset["modified"], file_data["modified"])
             dataset["formats"].add(file_data["format"])
             dataset["files"].append(file_data)
-        if truncated:
-            break
 
     ordered = sorted(grouped.values(), key=lambda item: (-item["modified"], item["name"].lower()))
     if len(ordered) > MAX_DATASETS:
@@ -189,22 +148,27 @@ def scan_datasets(root_texts: list[str] | None = None) -> dict[str, Any]:
         dataset["formats"] = sorted(dataset["formats"])
         datasets.append(dataset)
 
-    return {
-        "roots": raw_roots,
+    payload = {
+        "roots": [root_text for _, root_text in selected_roots],
+        "scope": scope,
         "datasets": datasets,
         "root_errors": root_errors,
         "scan_truncated": truncated,
         "max_scanned_files": MAX_SCANNED_FILES,
-        "scanned_file_count": min(scanned_count, MAX_SCANNED_FILES),
+        "scanned_file_count": scanned_count,
+        "cached": False,
     }
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE[cache_key] = (time.time(), deepcopy(payload))
+    return payload
 
 
 def resolve_cloud_file(root_index: int, relative_path: str) -> Path:
-    """只允许读取已配置顶层目录内部的已支持点云文件。"""
+    """只允许读取文件管理组件已暴露目录内部的已支持点云文件。"""
     roots = configured_roots()
     if root_index < 0 or root_index >= len(roots):
         raise HTTPException(status_code=404, detail="点云顶层目录不存在")
-    root = _resolve_root(roots[root_index])
+    root = resolve_root(roots[root_index])
     candidate = (root / relative_path).resolve()
     try:
         candidate.relative_to(root)
