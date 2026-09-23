@@ -377,11 +377,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .loading-line { display: inline-block; width: 32px; height: 2px; background: var(--color-brand); animation: loading-pulse 1.2s ease-in-out infinite; }
 .app-error-screen, .app-loading-screen { min-height: 100vh; border: 0; border-radius: 0; background: var(--color-bg); }
 
-.prompt-workspace .page-header { gap: var(--space-5); margin-bottom: var(--space-5); }
-.prompt-workspace .page-header .eyebrow { margin-bottom: var(--space-1); font-size: 11px; }
-.prompt-workspace .page-title { font-size: clamp(28px, 2.4vw, 36px); }
-.prompt-workspace .page-description { margin-top: var(--space-1); font-size: 14px; }
-.prompt-workspace .page-actions .button { min-height: 30px; padding-inline: var(--space-2); font-size: 12px; }
+.prompt-workspace-title { margin: 0 0 var(--space-4); color: var(--color-brand); font: 500 13px/1.4 var(--font-ui); letter-spacing: 0.04em; }
 .prompt-workspace .inline-message { margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); font-size: 12px; }
 .prompt-editor-card { padding: var(--space-5); padding-bottom: var(--space-3); }
 .prompt-editor-card .card-header { gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -532,8 +528,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .segmented { flex: 1 1 auto; }
   .segmented button { flex: 1; }
   .editor-meta { align-items: flex-start; flex-direction: column; }
-  .prompt-workspace .page-header { gap: var(--space-3); margin-bottom: var(--space-4); }
-  .prompt-workspace .page-title { font-size: 30px; }
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
   .point-cloud-browser .card-header { align-items: flex-start; }

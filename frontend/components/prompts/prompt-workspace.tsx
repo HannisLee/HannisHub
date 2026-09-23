@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
 import { errorMessage, formatDate, truncate } from "../../lib/format";
 import type { PromptGroup, PromptItem } from "../../lib/types";
-import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, PageHeader } from "../ui/primitives";
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
 const DRAFT_KEY = "hannishub_prompt_draft";
 const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
@@ -242,18 +242,12 @@ export function PromptWorkspace() {
 
   return (
     <div className="prompt-workspace">
-      <PageHeader
-        kicker="提示词 / Workspace"
-        title="提示词工作区"
-        description="在一个宽松、可持续的编辑空间里整理原文、润色稿和归档分组。"
-        actions={<Button variant="secondary" size="sm" onClick={() => void load()}>刷新归档</Button>}
-      />
+      <h1 className="prompt-workspace-title">提示词 / Workspace</h1>
       {error ? <ErrorState message={error} /> : null}
       {message ? <div className="inline-message">{message}</div> : null}
       <Card className="prompt-editor-card">
         <CardHeader
           title="当前提示词"
-          description="润色只在浏览器本地整理排版，不会发送外部请求。"
           actions={<div className="editor-actions"><div className="segmented" role="tablist" aria-label="文本模式"><button type="button" role="tab" aria-selected={mode === "raw"} onClick={() => switchMode("raw")}>原文</button><button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => switchMode("polished")}>润色</button></div><Button variant="secondary" size="sm" onClick={() => void copyText(currentValue, mode === "polished" ? "润色稿已复制" : "原文已复制")}>复制</Button><Button size="sm" onClick={() => void archive()}>归档</Button></div>}
         />
         <textarea className="prompt-editor" value={currentValue} onChange={event => mode === "polished" ? setPolished(event.target.value) : (setRaw(event.target.value), setStale(true))} placeholder="在这里输入或粘贴你的提示词…" spellCheck={false} />
