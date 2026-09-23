@@ -47,60 +47,10 @@ export interface FileManagerDirectoryResponse {
   truncated: boolean;
 }
 
-export interface FileManagerDirectoryOption {
-  path: string;
-  name: string;
-}
-
-export interface FileManagerDirectoryOptionsResponse {
-  root_index: number;
-  root_path: string;
-  directories: FileManagerDirectoryOption[];
-  truncated: boolean;
-  max_directories: number;
-  cached?: boolean;
-  generated_at?: number;
-  cache_ttl_seconds?: number;
-}
-
 export interface FileManagerSyncResponse {
   roots: string[];
   synced_at: number;
   cache_ttl_seconds: number;
-}
-
-export interface PointCloudFile {
-  name: string;
-  relative_path: string;
-  size: number;
-  modified: number;
-  format: string;
-  viewable: boolean;
-  url: string;
-}
-
-export interface PointCloudDataset {
-  id: string;
-  name: string;
-  relative_path: string;
-  root_index: number;
-  root_path: string;
-  file_count: number;
-  total_size: number;
-  modified: number;
-  formats: string[];
-  files: PointCloudFile[];
-}
-
-export interface PointCloudDatasetsResponse {
-  roots: string[];
-  scope: string;
-  datasets: PointCloudDataset[];
-  root_errors: Array<{ path: string; message: string }>;
-  scan_truncated: boolean;
-  max_scanned_files: number;
-  scanned_file_count: number;
-  cached?: boolean;
 }
 
 export interface ModelFile {

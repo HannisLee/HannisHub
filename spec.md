@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理、子服务挂载和统一前端静态托管；当前包含模型管理、Server、提示词与点云查看器模块。模型管理子服务管理任意本机启动命令、Hugging Face 模型下载、多 GPU 监控、ASR 转写和进程日志；Server 子服务管理 SSH 服务器连接、远端时间与定时任务；点云查看器可在受限的本机目录范围内扫描并交互预览点云。日常界面由统一的 Next.js Dashboard 提供。
+HannisHub 是一个本地综合管理站。根应用负责统一登录、会话管理、子服务挂载和统一前端静态托管；当前包含模型管理、Server、提示词与文件管理模块。模型管理子服务管理任意本机启动命令、Hugging Face 模型下载、多 GPU 监控、ASR 转写和进程日志；Server 子服务管理 SSH 服务器连接、远端时间与定时任务；文件管理可在受限的本机目录范围内浏览、下载并交互预览点云。日常界面由统一的 Next.js Dashboard 提供。
 
 ## 技术栈
 
@@ -25,7 +25,7 @@ HannisHub/
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
-├── point_cloud.py            # 点云扫描归并与原始文件读取，复用文件管理目录能力
+├── point_cloud.py            # 旧版点云文件读取接口兼容层
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
 ├── login.html                # Hub 旧版登录页，迁移验证期保留
 ├── frontend/                 # 统一 Next.js Dashboard
@@ -79,8 +79,8 @@ HannisHub/
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
-- `/files`：文件管理组件，浏览并下载默认暴露的 `~/reproduce` 目录
-- `/files/point-clouds`：点云查看器，从文件管理组件选择扫描文件夹并交互预览；`/point-clouds` 为兼容旧入口
+- `/files`：文件管理组件，浏览和下载默认暴露的 `~/reproduce` 目录，并在文件列表中直接打开点云预览
+- `/files/point-clouds`、`/point-clouds`：兼容旧入口，展示同一文件浏览与点云预览界面
 
 ### 统一前端静态托管
 
@@ -132,12 +132,9 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
-| GET | `/api/file-manager/directories?root=<index>&refresh=<bool>` | 返回某个顶层目录内的全部文件夹选项，供点云扫描范围选择 |
-| POST | `/api/file-manager/sync` | 清空目录缓存与点云扫描缓存，下一次访问重新读取磁盘 |
+| POST | `/api/file-manager/sync` | 清空目录缓存，下一次访问重新读取磁盘 |
 | GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
-| GET | `/api/point-clouds/settings` | 兼容读取点云查看器可用的文件管理顶层目录 |
-| GET | `/api/point-clouds/datasets?root=<index>&scope=<relative_path>&refresh=<bool>` | 扫描指定文件夹，按实验/结果目录归并 `.ply`、`.pcd`、`.xyz`、`.xyzn`、`.xyzrgb`、`.pts`、`.las`、`.laz` 文件；默认使用 15 秒扫描缓存 |
-| GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 返回指定顶层目录内的单个点云原始文件，供浏览器预览器读取；拒绝越界路径 |
+| GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 兼容旧版点云文件地址；新预览器直接使用文件管理下载接口，仍拒绝越界路径 |
 
 ### AI 能力设置
 
@@ -162,17 +159,14 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 - `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
-- 服务端对目录列表、文件夹选项和点云扫描结果分别维护 15 秒线程安全缓存。目录缓存同时记录目录 mtime，顶层子项变化时立即失效；`POST /api/file-manager/sync` 会强制清空全部缓存。
+- 服务端对目录列表维护 15 秒线程安全缓存。目录缓存同时记录目录 mtime，顶层子项变化时立即失效；`POST /api/file-manager/sync` 会强制清空缓存。
 - 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
 
-### 点云查看器
+### 点云预览
 
-- 点云查看器归属于文件管理组件，扫描范围从 `/api/file-manager/directories` 返回的文件夹选项中选择，默认范围为 `~/reproduce`；不再单独维护点云顶层目录。页面先读取顶层目录配置；未配置目录时提示前往文件管理添加，子文件夹选项读取失败时仍可扫描整个顶层目录。
-- 扫描阶段会跳过版本控制、缓存、依赖、虚拟环境和隐藏目录，并按文件修改时间返回结果。为了避免单个极大目录阻塞管理页，单次最多扫描 2,000 个候选点云文件、展示 800 个结果目录；扫描结果同样有 15 秒缓存。
-- 对 `point_cloud`、`iteration_*`、`model`、`world`、`ply` 等通用容器目录，扫描器会向上归并，优先显示实验/结果目录名，因此实际结果目录位于文件上两级或上三级时仍可直接在列表中识别。
-- 发现的结果按顶层项目分组，结果下的点云文件显示相对路径，便于区分不同迭代和输出类型。子文件夹选择器默认只列出当前扫描命中的结果目录及其上级，输入关键词仍可搜索全部文件夹；扫描时文件被并发删除或移动则跳过该文件。
-- 文件读取与下载接口复用文件管理组件的安全校验；前端可直接下载当前预览的 PLY 等点云文件。
-- 前端使用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`。`PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 仍会被发现和显示，但需要预先转换后再预览。
+- 文件浏览页的目录列表与点云查看区并列；用户逐级浏览，点击可预览的点云文件即可在同页查看。预览直接读取文件管理下载接口，不发起全目录点云扫描。
+- 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，保留点大小调整、旋转、缩放、平移与下载操作。
+- `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 可在文件列表中下载，但需要预先转换后再预览。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
 

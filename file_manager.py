@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
@@ -36,7 +35,6 @@ class DirectoryRecord:
 
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
-_DIRECTORY_OPTIONS_CACHE: dict[tuple[Path, ...], tuple[float, list[dict[str, str]], bool]] = {}
 _CACHE_LOCK = threading.RLock()
 
 
@@ -228,128 +226,6 @@ def list_directory(root_index: int, relative_path: str, *, refresh: bool = False
     }
 
 
-def iter_root_files(
-    root_text: str,
-    extensions: Iterable[str],
-    *,
-    max_files: int,
-    refresh: bool = False,
-    scope: str = "",
-) -> tuple[Path, list[Path], bool]:
-    """递归发现指定后缀文件，只对命中的文件执行 stat，供点云等模块复用。"""
-    root = _resolve_root(root_text)
-    allowed = {extension.lower().lstrip(".") for extension in extensions}
-    safe_scope = _normalize_relative_path(scope)
-    files: list[Path] = []
-    truncated = False
-    pending: deque[str] = deque([safe_scope])
-
-    while pending:
-        relative_path = pending.popleft()
-        directory = root if not relative_path else root / relative_path
-        try:
-            with os.scandir(directory) as iterator:
-                children = sorted(iterator, key=lambda item: item.name.lower())
-        except OSError as exc:
-            # 递归扫描时单个子目录不可读不应导致整次扫描失败；范围本身不可读时返回明确错误。
-            if relative_path == safe_scope:
-                raise HTTPException(status_code=404, detail=f"目录不存在或无法读取：{relative_path or root_text}") from exc
-            continue
-
-        for item in children:
-            child_path = f"{relative_path}/{item.name}" if relative_path else item.name
-            try:
-                if item.is_dir(follow_symlinks=False):
-                    if item.name in IGNORED_DIRECTORY_NAMES or item.name.startswith("."):
-                        continue
-                    pending.append(child_path)
-                    continue
-                if not item.is_file(follow_symlinks=False) or Path(item.name).suffix.lower().lstrip(".") not in allowed:
-                    continue
-                files.append(root / child_path)
-            except OSError:
-                continue
-            if len(files) >= max_files:
-                truncated = True
-                pending.clear()
-                break
-        if truncated:
-            break
-    return root, files, truncated
-
-
-
-def directory_options(root_index: int, *, refresh: bool = False) -> dict[str, Any]:
-    """返回某个顶层目录内的文件夹选项，供点云等模块选择扫描范围。"""
-    roots = configured_roots()
-    if root_index < 0 or root_index >= len(roots):
-        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
-    root_texts = roots[root_index:root_index + 1]
-    cache_key = tuple(_resolve_root(root_text) for root_text in root_texts)
-    now = time.time()
-    with _CACHE_LOCK:
-        cached = _DIRECTORY_OPTIONS_CACHE.get(cache_key)
-        if not refresh and cached and now - cached[0] < CACHE_TTL_SECONDS:
-            generated_at, options, truncated = cached
-            return {
-                "root_index": root_index,
-                "root_path": roots[root_index],
-                "directories": options,
-                "truncated": truncated,
-                "max_directories": 10_000,
-                "cached": True,
-                "generated_at": generated_at,
-                "cache_ttl_seconds": CACHE_TTL_SECONDS,
-            }
-
-    root_text = roots[root_index]
-    root = _resolve_root(root_text)
-    options: list[dict[str, str]] = [{"path": "", "name": root.name or root_text}]
-    truncated = False
-    pending: deque[str] = deque([""])
-
-    while pending:
-        relative_path = pending.popleft()
-        directory = root if not relative_path else root / relative_path
-        try:
-            with os.scandir(directory) as iterator:
-                children = sorted(iterator, key=lambda item: item.name.lower())
-        except OSError:
-            continue
-        for item in children:
-            try:
-                if not item.is_dir(follow_symlinks=False):
-                    continue
-                if item.name in IGNORED_DIRECTORY_NAMES or item.name.startswith("."):
-                    continue
-                child_path = f"{relative_path}/{item.name}" if relative_path else item.name
-                options.append({"path": child_path, "name": item.name})
-                pending.append(child_path)
-            except OSError:
-                continue
-            if len(options) >= 10_000:
-                truncated = True
-                pending.clear()
-                break
-        if truncated:
-            break
-
-    options.sort(key=lambda item: (item["path"] == "", item["path"].lower()))
-    generated_at = time.time()
-    with _CACHE_LOCK:
-        _DIRECTORY_OPTIONS_CACHE[cache_key] = (generated_at, options, truncated)
-    return {
-        "root_index": root_index,
-        "root_path": root_text,
-        "directories": options,
-        "truncated": truncated,
-        "max_directories": 10_000,
-        "cached": False,
-        "generated_at": generated_at,
-        "cache_ttl_seconds": CACHE_TTL_SECONDS,
-    }
-
-
 def resolve_file(root_index: int, relative_path: str) -> Path:
     """只允许下载已暴露顶层目录内部的普通文件。"""
     roots = configured_roots()
@@ -367,14 +243,13 @@ def resolve_file(root_index: int, relative_path: str) -> Path:
 
 
 def clear_directory_cache() -> None:
-    """清空目录与文件夹选项缓存，下一次访问会重新同步磁盘状态。"""
+    """清空目录缓存，下一次访问会重新同步磁盘状态。"""
     with _CACHE_LOCK:
         _DIRECTORY_CACHE.clear()
-        _DIRECTORY_OPTIONS_CACHE.clear()
 
 
 def sync_roots() -> dict[str, Any]:
-    """手动同步所有已暴露目录；先清空缓存，由后续浏览或扫描按需重建。"""
+    """手动同步所有已暴露目录；先清空缓存，由后续浏览按需重建。"""
     clear_directory_cache()
     return {
         "roots": configured_roots(),

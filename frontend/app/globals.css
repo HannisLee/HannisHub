@@ -457,45 +457,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-entry small { color: var(--color-text-muted); font-size: 12px; }
 .file-manager-entry-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .file-manager-entry-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
-.point-cloud-settings { display: grid; gap: var(--space-4); }
-.point-cloud-scope { display: grid; gap: var(--space-2); }
-.point-cloud-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); }
-.point-cloud-toolbar-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
-.point-cloud-workspace { display: grid; grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.5fr); gap: var(--space-6); align-items: start; }
-.point-cloud-browser { min-width: 0; }
-.point-cloud-browser .card-header { align-items: flex-end; }
-.point-cloud-dataset-list { display: grid; max-height: 620px; overflow: auto; border-top: 1px solid var(--color-divider); }
-.point-cloud-project-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0 var(--space-2); border-bottom: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 12px; }
-.point-cloud-project-heading strong { color: var(--color-text-secondary); font-weight: 600; }
-.point-cloud-project-heading span { flex: 0 0 auto; }
-.point-cloud-dataset {
-  display: flex;
-  width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
-  padding: var(--space-4) 0; border: 0; border-bottom: 1px solid var(--color-divider);
-  background: transparent; color: var(--color-text-secondary); text-align: left;
-  transition: color 160ms ease, background-color 160ms ease;
-}
-.point-cloud-dataset > span:first-child { display: grid; min-width: 0; gap: var(--space-1); }
-.point-cloud-dataset strong { overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.point-cloud-dataset small { overflow: hidden; color: var(--color-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.point-cloud-dataset:hover, .point-cloud-dataset.is-selected { margin-inline: calc(var(--space-2) * -1); padding-inline: var(--space-2); background: var(--color-surface-hover); color: var(--color-text-primary); }
-.point-cloud-dataset.is-selected { box-shadow: inset 2px 0 0 var(--color-brand); }
-.point-cloud-dataset-meta { display: grid; flex: 0 0 auto; justify-items: end; gap: var(--space-1); }
-.point-cloud-dataset-meta b { color: var(--color-text-primary); font: 400 20px/1 var(--font-display); }
-.point-cloud-preview-card { min-width: 0; }
-.point-cloud-file-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-4); }
-.point-cloud-file {
-  display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3);
-  padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-sm);
-  background: var(--color-surface-soft); color: var(--color-text-secondary); text-align: left;
-  transition: border-color 160ms ease, background-color 160ms ease;
-}
-.point-cloud-file:hover:not(:disabled), .point-cloud-file.is-selected { border-color: var(--color-control-border); background: var(--color-surface-hover); }
-.point-cloud-file.is-selected { border-color: var(--color-text-muted); }
-.point-cloud-file > span:first-child { display: grid; min-width: 0; gap: var(--space-1); }
-.point-cloud-file strong, .point-cloud-file small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.point-cloud-file strong { color: var(--color-text-primary); font-size: 13px; font-weight: 500; }
-.point-cloud-file small { color: var(--color-text-muted); font-size: 11px; }
+.file-manager-workspace { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.2fr); gap: var(--space-6); align-items: start; }
+.file-manager-preview { min-width: 0; }
+.file-manager-entry.is-selected { background: var(--color-surface-hover); }
 .point-cloud-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: var(--space-5) 0 var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
 .point-cloud-toolbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .point-cloud-toolbar label { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); color: var(--color-text-muted); }
@@ -532,6 +496,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .shell-content { width: calc(100% - 236px); margin-left: 236px; }
   .content-container { padding-top: var(--space-10); }
   .service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .file-manager-workspace { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
@@ -558,7 +523,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .page-description { font-size: 16px; }
   .page-actions { width: 100%; }
   .card { padding: var(--space-6); border-radius: var(--radius-lg); }
-  .metric-grid, .overview-grid, .two-column-grid, .settings-grid, .service-grid, .repository-grid, .gpu-grid, .point-cloud-workspace { grid-template-columns: 1fr; }
+  .metric-grid, .overview-grid, .two-column-grid, .settings-grid, .service-grid, .repository-grid, .gpu-grid, .file-manager-workspace { grid-template-columns: 1fr; }
   .metric-card { min-height: 148px; }
   .overview-wide { grid-column: auto; }
   .form-grid, .form-row { grid-template-columns: 1fr; }
@@ -580,9 +545,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .file-manager-toolbar .search-input, .file-manager-toolbar select { flex: 1 1 140px; width: auto; }
   .file-manager-list { max-height: 420px; }
   .file-manager-breadcrumb { margin-top: calc(var(--space-2) * -1); }
-  .point-cloud-browser .card-header { align-items: flex-start; }
-  .point-cloud-browser .search-input { width: 100%; }
-  .point-cloud-dataset-list { max-height: 360px; }
   .point-cloud-toolbar { align-items: flex-start; flex-direction: column; }
   .point-cloud-toolbar-actions { width: 100%; flex-wrap: wrap; }
   .point-cloud-canvas-wrap { min-height: min(500px, 72vh); }

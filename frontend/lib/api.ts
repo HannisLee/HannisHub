@@ -2,7 +2,6 @@ import type { ApiErrorShape } from "./types";
 
 export const API_PATHS = {
   hub: "/api",
-  pointClouds: "/api/point-clouds",
   fileManager: "/api/file-manager",
   aiSettings: "/api/ai-settings",
   llama: "/llama-manager/api",
