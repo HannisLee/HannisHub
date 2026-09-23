@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
 import { errorMessage, formatDate, truncate } from "../../lib/format";
 import type { PromptGroup, PromptItem } from "../../lib/types";
@@ -66,8 +66,11 @@ export function PromptWorkspace() {
   const [activeGroup, setActiveGroup] = useState("");
   const [newGroup, setNewGroup] = useState("");
   const [loading, setLoading] = useState(true);
+  const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const archiveInFlightRef = useRef(false);
+  const messageTokenRef = useRef(0);
 
   const currentValue = mode === "polished" ? polished : raw;
   const sections = useMemo(() => [{ id: "", name: "无分组" }, ...groups], [groups]);
@@ -117,6 +120,45 @@ export function PromptWorkspace() {
     return id ? groups.find(group => group.id === id)?.name || "已删除分组" : "无分组";
   }
 
+  function claimMessage() {
+    const token = ++messageTokenRef.current;
+    return (value: string) => {
+      if (messageTokenRef.current === token) setMessage(value);
+    };
+  }
+
+  function legacyCopyText(value: string): boolean {
+    // 非安全上下文（例如通过 HTTP IP 访问）可能没有异步 Clipboard API，使用浏览器同步复制兜底。
+    const textarea = document.createElement("textarea");
+    const previousActive = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    previousActive?.focus();
+    textarea.remove();
+    return copied;
+  }
+
+  function copyToClipboard(value: string): Promise<boolean> {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      return navigator.clipboard
+        .writeText(value)
+        .then(() => true)
+        .catch(() => false);
+    }
+    return Promise.resolve(legacyCopyText(value));
+  }
+
   function switchMode(next: "raw" | "polished") {
     if (next === "polished" && (stale || !polished)) {
       setPolished(polishText(raw));
@@ -125,50 +167,82 @@ export function PromptWorkspace() {
     setMode(next);
   }
 
-  async function copyToClipboard(value: string): Promise<boolean> {
-    try {
-      await navigator.clipboard.writeText(value);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function copyText(value: string, success: string) {
+  function copyText(value: string, success: string) {
     if (!value.trim()) {
       setMessage("当前提示词为空");
       return;
     }
-    if (await copyToClipboard(value)) setMessage(success);
-    else setMessage("复制失败，请手动选择文本");
+
+    // 复制是纯前端操作：先立即反馈，再让 Clipboard API 在后台完成写入。
+    const showMessage = claimMessage();
+    showMessage(success);
+    void copyToClipboard(value).then(copied => {
+      if (!copied) showMessage("复制失败，请手动选择文本");
+    });
   }
 
   async function archive() {
+    if (archiveInFlightRef.current) return;
     if (!currentValue.trim()) {
       setMessage("提示词为空，不能归档");
       return;
     }
-    // 先复制再归档，避免归档请求耗时过长导致浏览器丢失剪贴板写入时机。
-    const copied = await copyToClipboard(currentValue);
+
+    // 固定本次归档的内容与分组，避免后台请求期间用户切换状态造成数据错乱。
+    const content = currentValue;
+    const groupId = activeGroup;
+    const groupLabel = groupName(groupId);
+    archiveInFlightRef.current = true;
+    setArchiving(true);
+    setError("");
+
+    // 用户可感知的复制反馈立即完成；归档请求与剪贴板写入并行执行。
+    const showMessage = claimMessage();
+    showMessage("已复制，正在归档…");
+    let copied: boolean | null = null;
+    let archiveFinished = false;
+    let archiveSucceeded = false;
+    void copyToClipboard(content).then(result => {
+      copied = result;
+      if (result) return;
+      if (!archiveFinished) {
+        showMessage("复制失败，归档仍在进行…");
+        return;
+      }
+      showMessage(archiveSucceeded ? `已归档到「${groupLabel}」，但复制失败，请手动复制` : "复制与归档均失败，内容仍保留在编辑器");
+    });
+
     try {
       await apiFetch(`${API_PATHS.prompts}/prompts`, {
         method: "POST",
-        body: jsonBody({ content: currentValue, group_id: activeGroup }),
+        body: jsonBody({ content, group_id: groupId }),
       });
+      archiveFinished = true;
+      archiveSucceeded = true;
       setRaw("");
       setPolished("");
       setStale(true);
       setMode("raw");
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(LEGACY_DRAFT_KEY);
-      setMessage(
-        copied
-          ? `已复制并归档到「${groupName(activeGroup)}」`
-          : `已归档到「${groupName(activeGroup)}」，但复制失败，请手动复制`,
+      showMessage(
+        copied === false
+          ? `已归档到「${groupLabel}」，但复制失败，请手动复制`
+          : `已复制并归档到「${groupLabel}」`,
       );
-      await load();
+      void load();
     } catch (value) {
+      archiveFinished = true;
+      archiveSucceeded = false;
       setError(errorMessage(value));
+      showMessage(
+        copied === false
+          ? "复制与归档均失败，内容仍保留在编辑器"
+          : `已复制，但归档到「${groupLabel}」失败，内容仍保留在编辑器`,
+      );
+    } finally {
+      archiveInFlightRef.current = false;
+      setArchiving(false);
     }
   }
 
@@ -259,10 +333,10 @@ export function PromptWorkspace() {
       <Card className="prompt-editor-card">
         <CardHeader
           title="当前提示词"
-          actions={<div className="editor-actions"><div className="segmented" role="tablist" aria-label="文本模式"><button type="button" role="tab" aria-selected={mode === "raw"} onClick={() => switchMode("raw")}>原文</button><button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => switchMode("polished")}>润色</button></div><Button variant="secondary" size="sm" onClick={() => void copyText(currentValue, mode === "polished" ? "润色稿已复制" : "原文已复制")}>复制</Button><Button size="sm" onClick={() => void archive()}>归档并复制</Button></div>}
+          actions={<div className="editor-actions"><div className="segmented" role="tablist" aria-label="文本模式"><button type="button" role="tab" aria-selected={mode === "raw"} onClick={() => switchMode("raw")} disabled={archiving}>原文</button><button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => switchMode("polished")} disabled={archiving}>润色</button></div><Button variant="secondary" size="sm" onClick={() => copyText(currentValue, mode === "polished" ? "润色稿已复制" : "原文已复制")} disabled={archiving}>复制</Button><Button size="sm" onClick={() => void archive()} disabled={archiving}>{archiving ? "归档中…" : "归档并复制"}</Button></div>}
         />
-        <textarea className="prompt-editor" value={currentValue} onChange={event => mode === "polished" ? setPolished(event.target.value) : (setRaw(event.target.value), setStale(true))} placeholder="在这里输入或粘贴你的提示词…" spellCheck={false} />
-        <div className="editor-meta"><span>{currentValue.length.toLocaleString("zh-CN")} 字符</span><span>归档到 <select value={activeGroup} onChange={event => setActiveGroup(event.target.value)}><option value="">无分组</option>{groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></span><span>自动暂存</span></div>
+        <textarea className="prompt-editor" value={currentValue} onChange={event => mode === "polished" ? setPolished(event.target.value) : (setRaw(event.target.value), setStale(true))} placeholder="在这里输入或粘贴你的提示词…" spellCheck={false} disabled={archiving} />
+        <div className="editor-meta"><span>{currentValue.length.toLocaleString("zh-CN")} 字符</span><span>归档到 <select value={activeGroup} onChange={event => setActiveGroup(event.target.value)} disabled={archiving}><option value="">无分组</option>{groups.map(group => <option value={group.id} key={group.id}>{group.name}</option>)}</select></span><span>自动暂存</span></div>
       </Card>
       <div className="prompt-layout">
         <Card>
