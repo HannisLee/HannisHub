@@ -20,7 +20,7 @@ interface SidebarState {
   menuOpen: boolean;
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, contentClassName = "" }: { children: ReactNode; contentClassName?: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarState, setSidebarState] = useState<SidebarState>({ pathname, collapsed: pathname !== "/", menuOpen: false });
@@ -120,7 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button variant="quiet" size="sm" onClick={logout}>退出</Button>
           </div>
         </header>
-        <main className="content-container">{children}</main>
+        <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
       </div>
     </div>
   );

@@ -412,7 +412,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-item { border: 1px solid var(--color-divider); border-radius: var(--radius-sm); background: var(--color-bg); }
 .prompt-item summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-text-primary); cursor: pointer; font-size: 13px; list-style: none; }
 .prompt-item summary::-webkit-details-marker { display: none; }
-.prompt-item summary span:first-child { display: grid; gap: var(--space-1); min-width: 0; }
+.prompt-page { padding-top: var(--space-8); }
+.prompt-item-copy { display: grid; gap: 2px; min-width: 0; }
+.prompt-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-item summary small { color: var(--color-text-muted); font-size: 12px; }
 .prompt-item-body { display: grid; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
 .prompt-item-body pre { max-height: 280px; margin: 0; padding-top: var(--space-3); overflow: auto; border-top: 1px solid var(--color-divider); color: var(--color-text-secondary); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
