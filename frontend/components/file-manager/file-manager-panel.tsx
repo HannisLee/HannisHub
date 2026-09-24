@@ -23,9 +23,14 @@ interface SelectedFile extends PointCloudSource {
   path: string;
 }
 
+/** 受限目录内的文件下载地址，预览与列表下载按钮共用 */
+function downloadUrl(rootIndex: number, path: string): string {
+  return `${API_PATHS.fileManager}/download?${new URLSearchParams({ root: String(rootIndex), path })}`;
+}
+
 function selectedFile(rootIndex: number, path: string): SelectedFile {
   const name = path.split("/").at(-1) || path;
-  return { rootIndex, path, name, format: name.split(".").at(-1)?.toLowerCase() || "", url: `${API_PATHS.fileManager}/download?${new URLSearchParams({ root: String(rootIndex), path })}` };
+  return { rootIndex, path, name, format: name.split(".").at(-1)?.toLowerCase() || "", url: downloadUrl(rootIndex, path) };
 }
 
 export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) {
@@ -270,6 +275,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                     {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
                     {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>预览</button> : null}
                     {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
+                    {pointCloudMode && entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
                   </span>
                 </div>
               ))}
