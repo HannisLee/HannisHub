@@ -79,8 +79,8 @@ HannisHub/
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
-- `/files`：文件管理组件，浏览和下载默认暴露的 `~/reproduce` 目录，并在文件列表中直接打开点云预览
-- `/files/point-clouds`、`/point-clouds`：兼容旧入口，展示同一文件浏览与点云预览界面
+- `/files`：文件游览页，浏览已开放目录；点击可预览的点云文件会打开点云预览页
+- `/files/point-clouds`：点云预览页，依次展示固定尺寸预览、目录收藏和当前目录；`/point-clouds` 为兼容入口
 
 ### 统一前端静态托管
 
@@ -133,6 +133,10 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
 | POST | `/api/file-manager/sync` | 清空目录缓存，下一次访问重新读取磁盘 |
+| GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
+| POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
+| PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
+| DELETE | `/api/file-manager/favorites/{favorite_id}` | 移除目录收藏 |
 | GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 兼容旧版点云文件地址；新预览器直接使用文件管理下载接口，仍拒绝越界路径 |
 
@@ -161,14 +165,15 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 服务端对目录列表维护 15 秒线程安全缓存。目录缓存同时记录目录 mtime，顶层子项变化时立即失效；`POST /api/file-manager/sync` 会强制清空缓存。
 - 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
+- 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重名路径拒绝重复收藏；目录配置被移除时暂不展示对应收藏。
 
 ### 点云预览
 
-- 文件浏览页先展示占满内容宽度的点云预览，目录浏览区位于预览下方并同样占满宽度；文件条目将名称、大小与时间排在单行。用户可逐级浏览、点击“返回上级”或面包屑跳转，点击点云文件即可在同页预览。预览直接读取文件管理下载接口，不发起全目录点云扫描；页面不显示文件下载按钮。
+- 文件管理导航分为“文件游览”和“点云预览”两个入口，两页复用目录浏览组件。文件游览页点击可预览文件会带着顶层目录索引与相对路径进入点云页；点云页不显示页面标题，预览、收藏目录和当前目录自上而下排列。文件条目将名称、大小与时间排在单行。预览直接读取文件管理下载接口，不发起全目录点云扫描；页面不显示文件下载按钮。
 - 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，支持 0.2 起的点大小调整、文件颜色与主题单色切换、旋转、缩放和平移。
 - `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 暂不支持直接预览。
-- 文件浏览页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
-- 浏览器端在目录缓存有效期内直接复用已读目录；点云文件下载显示进度。预览区使用更宽的布局和更高的画布，并提供大屏按钮。
+- 点云页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
+- 浏览器端在目录缓存有效期内直接复用已读目录；点云文件下载显示进度。预览画布桌面端固定为 720px 高、窄屏固定为 520px 高，并提供大屏按钮；浏览其他目录时保留当前点云，不改变预览高度。
 - Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
@@ -492,6 +497,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
 | `auth.session_max_age_seconds` | number | `43200` | 会话有效期，默认 12 小时 |
 | `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
+| `file_favorites` | array | `[]` | 目录收藏，包含 `id`、`name`、`root_path` 和相对目录 `path` |
 
 ### 根目录 ai_settings.json（不入 Git）
 

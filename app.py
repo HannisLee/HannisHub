@@ -25,8 +25,12 @@ from auth import (
 import ai_settings
 import llama_manager.app as llama_manager_app
 from file_manager import (
+    add_favorite,
     configured_roots,
+    delete_favorite,
     list_directory,
+    list_favorites,
+    rename_favorite,
     resolve_file,
     save_roots,
     sync_roots,
@@ -279,6 +283,30 @@ async def file_manager_directory(
 async def file_manager_sync():
     """清空目录缓存，下一次访问将重新同步磁盘状态。"""
     return JSONResponse(await run_in_threadpool(sync_roots))
+
+
+@app.get("/api/file-manager/favorites")
+async def file_manager_favorites():
+    """读取当前已开放目录中的收藏。"""
+    return JSONResponse({"favorites": await run_in_threadpool(list_favorites)})
+
+
+@app.post("/api/file-manager/favorites")
+async def create_file_manager_favorite(payload: dict[str, Any] = Body(...)):
+    """收藏一个已开放目录。"""
+    return JSONResponse({"favorites": await run_in_threadpool(add_favorite, payload.get("root"), payload.get("path"), payload.get("name"))})
+
+
+@app.patch("/api/file-manager/favorites/{favorite_id}")
+async def update_file_manager_favorite(favorite_id: str, payload: dict[str, Any] = Body(...)):
+    """修改收藏的显示名称。"""
+    return JSONResponse({"favorites": await run_in_threadpool(rename_favorite, favorite_id, payload.get("name"))})
+
+
+@app.delete("/api/file-manager/favorites/{favorite_id}")
+async def remove_file_manager_favorite(favorite_id: str):
+    """删除指定收藏。"""
+    return JSONResponse({"favorites": await run_in_threadpool(delete_favorite, favorite_id)})
 
 
 @app.get("/api/file-manager/download")

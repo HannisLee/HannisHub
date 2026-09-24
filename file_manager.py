@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from auth import get_settings_section, update_settings_section
 DEFAULT_ROOT = "~/reproduce"
 MAX_ROOTS = 24
 MAX_DIRECTORY_ENTRIES = 1_000
+MAX_FAVORITES = 100
 CACHE_TTL_SECONDS = 15
 IGNORED_DIRECTORY_NAMES = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".cache", ".venv", "venv"}
 
@@ -36,6 +38,7 @@ class DirectoryRecord:
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
 _CACHE_LOCK = threading.RLock()
+_FAVORITES_LOCK = threading.RLock()
 
 
 def _default_roots() -> list[str]:
@@ -118,9 +121,20 @@ def _normalize_relative_path(value: str) -> str:
     return "/".join(parts)
 
 
-def _scan_directory(root: Path, relative_path: str) -> tuple[list[DirectoryRecord], bool]:
+def _resolve_directory(root: Path, relative_path: str) -> Path:
+    """解析受限目录，并阻止中间路径通过符号链接越界。"""
+    directory = (root / relative_path).resolve()
+    try:
+        directory.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="目录不在允许的顶层目录内") from exc
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="目录不存在或无法读取")
+    return directory
+
+
+def _scan_directory(directory: Path, relative_path: str) -> tuple[list[DirectoryRecord], bool]:
     """读取单个目录的直接子项，并按文件夹、名称稳定排序。"""
-    directory = root if not relative_path else root / relative_path
     records: list[DirectoryRecord] = []
     truncated = False
     try:
@@ -166,7 +180,7 @@ def _directory_records(
     root = _resolve_root(root_text)
     safe_path = _normalize_relative_path(relative_path)
     key = (root, safe_path)
-    directory = root if not safe_path else root / safe_path
+    directory = _resolve_directory(root, safe_path)
     try:
         directory_mtime = directory.stat().st_mtime_ns
     except OSError as exc:
@@ -183,7 +197,7 @@ def _directory_records(
         ):
             return cached[1], True, cached[0]
 
-    records, _ = _scan_directory(root, safe_path)
+    records, _ = _scan_directory(directory, safe_path)
     generated_at = time.time()
     with _CACHE_LOCK:
         _DIRECTORY_CACHE[key] = (generated_at, records, directory.stat().st_mtime_ns)
@@ -240,6 +254,78 @@ def resolve_file(root_index: int, relative_path: str) -> Path:
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="文件不存在或不是普通文件")
     return candidate
+
+
+def _favorite_name(value: object) -> str:
+    """校验收藏名称，避免空白或控制字符进入界面。"""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="收藏名称必须是字符串")
+    name = value.strip()
+    if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+        raise HTTPException(status_code=422, detail="收藏名称需为 1 到 80 个可见字符")
+    return name
+
+
+def _stored_favorites() -> list[dict[str, str]]:
+    """读取独立配置区段中的有效收藏记录。"""
+    value = get_settings_section("file_favorites")
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict) and all(isinstance(item.get(key), str) for key in ("id", "name", "root_path", "path"))]
+
+
+def list_favorites() -> list[dict[str, str]]:
+    """只展示当前仍在已开放顶层目录下的收藏。"""
+    roots = set(configured_roots())
+    with _FAVORITES_LOCK:
+        return [item for item in _stored_favorites() if item["root_path"] in roots]
+
+
+def add_favorite(root_index: object, relative_path: object, name: object = None) -> list[dict[str, str]]:
+    """收藏已开放目录，拒绝越界、重复和不存在的目录。"""
+    if not isinstance(root_index, int) or isinstance(root_index, bool) or not isinstance(relative_path, str):
+        raise HTTPException(status_code=422, detail="收藏目录参数无效")
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    root_path = roots[root_index]
+    root = _resolve_root(root_path)
+    safe_path = _normalize_relative_path(relative_path)
+    directory = _resolve_directory(root, safe_path)
+    display_name = _favorite_name(name if name is not None else directory.name)
+    with _FAVORITES_LOCK:
+        favorites = _stored_favorites()
+        if any(item["root_path"] == root_path and item["path"] == safe_path for item in favorites):
+            raise HTTPException(status_code=409, detail="这个目录已经收藏")
+        if len(favorites) >= MAX_FAVORITES:
+            raise HTTPException(status_code=422, detail=f"最多收藏 {MAX_FAVORITES} 个目录")
+        favorites.append({"id": uuid4().hex, "name": display_name, "root_path": root_path, "path": safe_path})
+        update_settings_section("file_favorites", favorites)
+    return list_favorites()
+
+
+def rename_favorite(favorite_id: str, name: object) -> list[dict[str, str]]:
+    """修改已有收藏的显示名称。"""
+    display_name = _favorite_name(name)
+    with _FAVORITES_LOCK:
+        favorites = _stored_favorites()
+        favorite = next((item for item in favorites if item["id"] == favorite_id), None)
+        if favorite is None or favorite["root_path"] not in configured_roots():
+            raise HTTPException(status_code=404, detail="收藏目录不存在")
+        favorite["name"] = display_name
+        update_settings_section("file_favorites", favorites)
+    return list_favorites()
+
+
+def delete_favorite(favorite_id: str) -> list[dict[str, str]]:
+    """删除指定收藏。"""
+    with _FAVORITES_LOCK:
+        favorites = _stored_favorites()
+        remaining = [item for item in favorites if item["id"] != favorite_id]
+        if len(remaining) == len(favorites):
+            raise HTTPException(status_code=404, detail="收藏目录不存在")
+        update_settings_section("file_favorites", remaining)
+    return list_favorites()
 
 
 def clear_directory_cache() -> None:

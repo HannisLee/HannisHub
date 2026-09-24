@@ -1,29 +1,48 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { API_PATHS, apiFetch } from "../../lib/api";
+import { useRouter } from "next/navigation";
+import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import type {
   FileManagerDirectoryResponse,
   FileManagerEntry,
+  FileManagerFavorite,
   FileManagerSyncResponse,
 } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, PageHeader } from "../ui/primitives";
-import { PointCloudViewer } from "./point-cloud-viewer";
+import { PointCloudViewer, type PointCloudSource } from "./point-cloud-viewer";
 
 const POINT_CLOUD_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts", "las", "laz"]);
 const VIEWABLE_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts"]);
 const DEFAULT_DIRECTORY = "RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000";
 const DEFAULT_FILE = `${DEFAULT_DIRECTORY}/point_cloud.ply`;
 
-export function FileManagerPanel() {
+interface SelectedFile extends PointCloudSource {
+  rootIndex: number;
+  path: string;
+}
+
+function selectedFile(rootIndex: number, path: string): SelectedFile {
+  const name = path.split("/").at(-1) || path;
+  return { rootIndex, path, name, format: name.split(".").at(-1)?.toLowerCase() || "", url: `${API_PATHS.fileManager}/download?${new URLSearchParams({ root: String(rootIndex), path })}` };
+}
+
+export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) {
+  const router = useRouter();
+  const pointCloudMode = mode === "point-cloud";
   const [roots, setRoots] = useState<string[]>([]);
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
   const [path, setPath] = useState("");
   const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
   const [query, setQuery] = useState("");
   const [onlyPointClouds, setOnlyPointClouds] = useState(false);
-  const [previewPath, setPreviewPath] = useState("");
+  const [previewFile, setPreviewFile] = useState<SelectedFile | null>(null);
+  const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
+  const [favoriteError, setFavoriteError] = useState("");
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [editingId, setEditingId] = useState("");
+  const [editName, setEditName] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -62,11 +81,22 @@ export function FileManagerPanel() {
       .then(value => {
         if (!active) return;
         const nextRoots = value.roots || [];
-        const defaultRoot = nextRoots.findIndex(root => root === "~/reproduce" || root.endsWith("/reproduce"));
-        if (defaultRoot >= 0) {
-          setSelectedRootIndex(defaultRoot);
-          setPath(DEFAULT_DIRECTORY);
-          setPreviewPath(DEFAULT_FILE);
+        if (pointCloudMode) {
+          const params = new URLSearchParams(window.location.search);
+          const requestedRoot = Number(params.get("root"));
+          const requestedFile = params.get("file") || "";
+          if (params.has("root") && Number.isInteger(requestedRoot) && requestedRoot >= 0 && requestedRoot < nextRoots.length && VIEWABLE_EXTENSIONS.has(requestedFile.split(".").at(-1)?.toLowerCase() || "")) {
+            setSelectedRootIndex(requestedRoot);
+            setPath(requestedFile.split("/").slice(0, -1).join("/"));
+            setPreviewFile(selectedFile(requestedRoot, requestedFile));
+          } else {
+            const defaultRoot = nextRoots.findIndex(root => root === "~/reproduce" || root.endsWith("/reproduce"));
+            if (defaultRoot >= 0) {
+              setSelectedRootIndex(defaultRoot);
+              setPath(DEFAULT_DIRECTORY);
+              setPreviewFile(selectedFile(defaultRoot, DEFAULT_FILE));
+            }
+          }
         }
         setRoots(nextRoots);
         if (!nextRoots.length) setLoading(false);
@@ -74,7 +104,16 @@ export function FileManagerPanel() {
       .catch(value => { if (active) setError(errorMessage(value)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [pointCloudMode]);
+
+  useEffect(() => {
+    if (!pointCloudMode) return;
+    let active = true;
+    apiFetch<{ favorites: FileManagerFavorite[] }>(`${API_PATHS.fileManager}/favorites`)
+      .then(value => { if (active) setFavorites(value.favorites); })
+      .catch(value => { if (active) setFavoriteError(errorMessage(value)); });
+    return () => { active = false; };
+  }, [pointCloudMode]);
 
   useEffect(() => {
     if (!roots.length) return;
@@ -88,21 +127,54 @@ export function FileManagerPanel() {
       return !normalized || `${entry.name} ${entry.path}`.toLowerCase().includes(normalized);
     });
   }, [directory, onlyPointClouds, query]);
-  const previewEntry = directory?.entries.find(entry => entry.path === previewPath && entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension));
-  const previewSource = useMemo(() => previewEntry?.download_url ? { name: previewEntry.name, format: previewEntry.extension, url: previewEntry.download_url } : null, [previewEntry]);
-
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
+  const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
 
-  function goToDirectory(nextPath: string) {
-    if (nextPath === path) return;
-    const root = roots[selectedRootIndex];
+  function goToDirectory(nextPath: string, rootIndex = selectedRootIndex) {
+    if (nextPath === path && rootIndex === selectedRootIndex) return;
+    setSelectedRootIndex(rootIndex);
     setQuery("");
-    setPreviewPath(nextPath === DEFAULT_DIRECTORY && (root === "~/reproduce" || root?.endsWith("/reproduce")) ? DEFAULT_FILE : "");
     setPath(nextPath);
+  }
+
+  function openPreview(entry: FileManagerEntry) {
+    if (!VIEWABLE_EXTENSIONS.has(entry.extension)) return;
+    if (pointCloudMode) {
+      setPreviewFile(selectedFile(selectedRootIndex, entry.path));
+    } else {
+      router.push(`/files/point-clouds?${new URLSearchParams({ root: String(selectedRootIndex), file: entry.path })}`);
+    }
   }
 
   function pathAt(index: number) {
     return pathSegments.slice(0, index + 1).join("/");
+  }
+
+  async function updateFavorites(request: Promise<{ favorites: FileManagerFavorite[] }>) {
+    setFavoriteBusy(true);
+    setFavoriteError("");
+    try {
+      const result = await request;
+      setFavorites(result.favorites);
+      setEditingId("");
+    } catch (value) {
+      setFavoriteError(errorMessage(value));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
+  function addCurrentFavorite() {
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: selectedRootIndex, path }) }));
+  }
+
+  function saveFavoriteName() {
+    if (!editingId || !editName.trim()) return;
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(editingId)}`, { method: "PATCH", body: jsonBody({ name: editName.trim() }) }));
+  }
+
+  function removeFavorite(id: string) {
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" }));
   }
 
   async function syncCache() {
@@ -120,32 +192,49 @@ export function FileManagerPanel() {
 
   return (
     <>
-      <PageHeader
-        kicker="文件管理 / Files"
-        title="文件浏览与点云预览"
-        description="浏览文件夹并直接预览点云；默认打开指定的点云文件。"
-        actions={<Button variant="secondary" onClick={() => void syncCache()} disabled={syncing || !roots.length}>{syncing ? "正在同步…" : "同步目录"}</Button>}
-      />
+      {!pointCloudMode ? <PageHeader kicker="文件管理 / Files" title="文件游览" description="浏览已开放的目录，选择点云文件后进入预览。" /> : null}
       {error ? <ErrorState message={error} /> : null}
-      <div className="stack-grid">
-        <div className="file-manager-workspace">
-        <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
-          {previewSource ? <>
-            <CardHeader eyebrow="点云预览" title={previewSource.name} actions={<Button variant="secondary" size="sm" onClick={() => setExpanded(value => !value)}>{expanded ? "退出大屏" : "放大预览"}</Button>} />
-            <PointCloudViewer key={`${selectedRootIndex}:${previewPath}`} file={previewSource} />
-          </> : <EmptyState title="选择点云文件" detail="在下方浏览文件夹，打开 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" />}
-        </Card>
+      <div className="file-manager-workspace">
+        {pointCloudMode ? <>
+          <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
+            {previewFile ? <PointCloudViewer key={`${previewFile.rootIndex}:${previewFile.path}`} file={previewFile} expanded={expanded} onToggleExpanded={() => setExpanded(value => !value)} />
+              : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title="选择点云文件" detail="从下方目录选择 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" /></div>}
+          </Card>
+          <Card className="file-manager-favorites">
+            <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={addCurrentFavorite} disabled={!roots.length || !directory || loading || favoriteBusy || Boolean(currentFavorite)}>{currentFavorite ? "已收藏当前目录" : "收藏当前目录"}</Button>} />
+            {favoriteError ? <ErrorState message={favoriteError} /> : null}
+            {favorites.length ? <div className="file-manager-favorite-list">
+              {favorites.map(favorite => {
+                const rootIndex = roots.indexOf(favorite.root_path);
+                return <div className={`file-manager-favorite${favorite.id === currentFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
+                  {editingId === favorite.id ? <form className="file-manager-favorite-edit" onSubmit={event => { event.preventDefault(); saveFavoriteName(); }}>
+                    <input className="search-input" value={editName} maxLength={80} autoFocus onChange={event => setEditName(event.target.value)} aria-label="收藏名称" disabled={favoriteBusy} />
+                    <Button variant="secondary" size="sm" type="submit" disabled={!editName.trim() || favoriteBusy}>保存</Button>
+                    <Button variant="quiet" size="sm" type="button" onClick={() => setEditingId("")} disabled={favoriteBusy}>取消</Button>
+                  </form> : <>
+                    <button className="file-manager-favorite-main" type="button" onClick={() => goToDirectory(favorite.path, rootIndex)} disabled={rootIndex < 0} title={`${favorite.root_path}/${favorite.path}`}><strong>{favorite.name}</strong><small>{favorite.root_path}/{favorite.path}</small></button>
+                    <div className="file-manager-favorite-actions">
+                      <Button variant="quiet" size="sm" onClick={() => { setEditingId(favorite.id); setEditName(favorite.name); }}>改名</Button>
+                      <Button variant="quiet" size="sm" onClick={() => removeFavorite(favorite.id)} disabled={favoriteBusy}>移除</Button>
+                    </div>
+                  </>}
+                </div>;
+              })}
+            </div> : <p className="file-manager-favorites-empty">收藏常用目录后，可以从这里快速跳转并修改显示名称。</p>}
+          </Card>
+        </> : null}
         <Card className="file-manager-browser">
           <CardHeader
             title={directory ? `当前目录 · ${filteredEntries.length}` : "当前目录"}
-            description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已暴露的顶层目录。"}
+            description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已开放的顶层目录。"}
             actions={
               <div className="file-manager-toolbar">
-                <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setPath(""); setPreviewPath(""); setQuery(""); }} aria-label="顶层文件夹" disabled={!roots.length}>
+                <select value={selectedRootIndex} onChange={event => goToDirectory("", Number(event.target.value))} aria-label="顶层文件夹" disabled={!roots.length}>
                   {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
                 </select>
                 <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
                 <button className="file-manager-filter" type="button" aria-pressed={onlyPointClouds} onClick={() => setOnlyPointClouds(value => !value)}>仅点云</button>
+                <Button variant="secondary" size="sm" onClick={() => void syncCache()} disabled={syncing || !roots.length}>{syncing ? "正在同步…" : "同步目录"}</Button>
               </div>
             }
           />
@@ -167,11 +256,11 @@ export function FileManagerPanel() {
           {loading ? <LoadingState label="正在读取目录…" /> : !roots.length ? <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" /> : filteredEntries.length ? (
             <div className="file-manager-list">
               {filteredEntries.map((entry: FileManagerEntry) => (
-                <div className={`file-manager-entry${previewPath === entry.path ? " is-selected" : ""}`} key={entry.path}>
-                  <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : setPreviewPath(entry.path)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
+                <div className={`file-manager-entry${previewFile?.rootIndex === selectedRootIndex && previewFile.path === entry.path ? " is-selected" : ""}`} key={entry.path}>
+                  <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
                     <span className="file-manager-entry-mark">{entry.type === "directory" ? "◇" : entry.type === "file" ? "·" : "×"}</span>
                     <span className="file-manager-entry-details">
-                      <strong>{entry.name}</strong>
+                      <strong title={entry.name}>{entry.name}</strong>
                       <small>
                         {entry.type === "directory" ? "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
                       </small>
@@ -179,7 +268,7 @@ export function FileManagerPanel() {
                   </button>
                   <span className="file-manager-entry-actions">
                     {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
-                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => setPreviewPath(entry.path)}>预览</button> : null}
+                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>预览</button> : null}
                     {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
                   </span>
                 </div>
@@ -187,7 +276,7 @@ export function FileManagerPanel() {
             </div>
           ) : <EmptyState title={roots.length ? "没有匹配的文件" : "没有已暴露的目录"} detail={roots.length ? "尝试更换搜索词，或取消“仅点云”过滤。" : "服务端尚未配置可浏览目录。"} />}
           {directory?.truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span></div> : null}
-        </Card></div>
+        </Card>
       </div>
     </>
   );

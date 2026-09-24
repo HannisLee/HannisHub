@@ -203,16 +203,6 @@ function PointCloudCanvas({
       return;
     }
     let renderer: THREE.WebGLRenderer | null = null;
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setClearColor(cssColor(mount, "--color-bg", "#141413"));
-      renderer.domElement.className = "point-cloud-canvas";
-      mount.insertBefore(renderer.domElement, overlay);
-    } catch {
-      // 浏览器无 WebGL 时仍可使用二维画布预览。
-    }
-    const activeRenderer = renderer;
     const controls = new OrbitControls(camera, overlay);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -230,7 +220,7 @@ function PointCloudCanvas({
       overlay.width = Math.round(width * ratio);
       overlay.height = Math.round(height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      activeRenderer?.setSize(width, height, false);
+      renderer?.setSize(width, height, false);
       redrawRef.current = true;
     };
     const resizeObserver = new ResizeObserver(resize);
@@ -290,7 +280,7 @@ function PointCloudCanvas({
           redrawRef.current = false;
           lastDraw = now;
         }
-      } else activeRenderer?.render(scene, camera);
+      } else renderer?.render(scene, camera);
     };
     frame = window.requestAnimationFrame(animate);
 
@@ -302,8 +292,6 @@ function PointCloudCanvas({
         redrawRef.current = true;
       }
     };
-    activeRenderer?.domElement.addEventListener("webglcontextlost", onContextLost);
-
     async function loadPointCloud() {
       onLoadingRef.current();
       try {
@@ -366,7 +354,23 @@ function PointCloudCanvas({
         controls.maxDistance = maxDimension * 50;
         controls.target.set(0, 0, 0);
         controls.update();
-        if (gaussian || !activeRenderer) {
+        if (!gaussian) {
+          try {
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(cssColor(mount, "--color-bg", "#141413"));
+            renderer.domElement.className = "point-cloud-canvas";
+            mount.insertBefore(renderer.domElement, overlay);
+            renderer.domElement.addEventListener("webglcontextlost", onContextLost);
+            resize();
+          } catch {
+            // 浏览器无 WebGL 时仍可使用二维画布预览。
+            renderer?.domElement.remove();
+            renderer?.dispose();
+            renderer = null;
+          }
+        }
+        if (gaussian || !renderer) {
           fallbackGeometry = geometry;
           fallbackGaussian = gaussian;
           redrawRef.current = true;
@@ -402,9 +406,9 @@ function PointCloudCanvas({
       });
       if (fallbackGeometry && !scene.children.some(child => child instanceof THREE.Points && child.geometry === fallbackGeometry)) fallbackGeometry.dispose();
       materialRef.current = null;
-      activeRenderer?.domElement.removeEventListener("webglcontextlost", onContextLost);
-      activeRenderer?.dispose();
-      activeRenderer?.domElement.remove();
+      renderer?.domElement.removeEventListener("webglcontextlost", onContextLost);
+      renderer?.dispose();
+      renderer?.domElement.remove();
       overlay.remove();
     };
   }, [file]);
@@ -432,7 +436,7 @@ function PointCloudCanvas({
   </div>;
 }
 
-export function PointCloudViewer({ file }: { file: PointCloudSource }) {
+export function PointCloudViewer({ file, expanded, onToggleExpanded }: { file: PointCloudSource; expanded: boolean; onToggleExpanded: () => void }) {
   const [pointSize, setPointSize] = useState(1);
   const [colored, setColored] = useState(true);
   const [error, setError] = useState("");
@@ -446,6 +450,7 @@ export function PointCloudViewer({ file }: { file: PointCloudSource }) {
       <div className="point-cloud-toolbar-actions">
         <label>点大小 <input type="range" min="0.2" max="10" step="0.2" value={pointSize} onChange={event => setPointSize(Number(event.target.value))} /><b>{pointSize.toFixed(1)}</b></label>
         <button className="file-manager-filter" type="button" aria-pressed={colored} onClick={() => setColored(value => !value)}>{colored ? "文件颜色" : "主题单色"}</button>
+        <button className="button button-secondary button-sm" type="button" onClick={onToggleExpanded}>{expanded ? "退出大屏" : "放大预览"}</button>
       </div>
     </div>
     {error ? <div className="point-cloud-viewer-error">{error}</div> : null}

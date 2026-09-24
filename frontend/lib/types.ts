@@ -53,6 +53,13 @@ export interface FileManagerSyncResponse {
   cache_ttl_seconds: number;
 }
 
+export interface FileManagerFavorite {
+  id: string;
+  name: string;
+  root_path: string;
+  path: string;
+}
+
 export interface ModelFile {
   name: string;
   path: string;
