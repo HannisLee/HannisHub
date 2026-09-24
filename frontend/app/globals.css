@@ -439,8 +439,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-page .page-description { font-size: 14px; }
 .file-manager-browser .card-header { display: block; }
 .file-manager-browser .card-actions { width: 100%; margin-top: var(--space-3); }
-.file-manager-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; align-items: center; gap: var(--space-2); }
-.file-manager-toolbar select { grid-column: 1 / -1; width: 100%; min-height: 30px; font-size: 12px; }
+.file-manager-toolbar { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto; width: 100%; align-items: center; gap: var(--space-2); }
+.file-manager-toolbar select { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-toolbar .search-input { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-filter { min-height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-filter[aria-pressed="true"] { border-color: var(--color-control-border); background: var(--color-control-light); color: var(--color-on-light); }
@@ -453,18 +453,19 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-breadcrumb button:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .file-manager-breadcrumb b { color: var(--color-text-muted); font-weight: 400; }
 .file-manager-list { display: grid; max-height: 680px; overflow: auto; border-top: 1px solid var(--color-divider); }
-.file-manager-entry { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
+.file-manager-entry { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
 .file-manager-entry-main { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-3); padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .file-manager-entry-main:disabled { cursor: default; }
-.file-manager-entry-main > span { display: grid; min-width: 0; gap: var(--space-1); }
 .file-manager-entry-mark { flex: 0 0 auto; width: 20px; color: var(--color-brand); font-size: 13px; text-align: center; }
-.file-manager-entry-mark + span { display: grid; min-width: 0; gap: var(--space-1); }
+.file-manager-entry-details { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-5); }
+.file-manager-entry-details strong { min-width: 0; flex: 1 1 auto; }
+.file-manager-entry-details small { flex: 0 0 240px; text-align: right; }
 .file-manager-entry strong, .file-manager-entry small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-manager-entry strong { color: var(--color-text-primary); font-size: 14px; font-weight: 500; }
 .file-manager-entry small { color: var(--color-text-muted); font-size: 12px; }
 .file-manager-entry-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .file-manager-entry-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
-.file-manager-workspace { display: grid; grid-template-columns: minmax(290px, 0.34fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.file-manager-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .file-manager-preview { min-width: 0; }
 .file-manager-preview.is-expanded { position: fixed; z-index: 30; inset: var(--space-5); display: flex; flex-direction: column; overflow: auto; }
 .file-manager-preview.is-expanded .point-cloud-canvas-wrap { flex: 1 1 auto; height: auto; min-height: 0; }
@@ -509,7 +510,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .shell-content { width: calc(100% - 236px); margin-left: 236px; }
   .content-container { padding-top: var(--space-10); }
   .service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .file-manager-workspace { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
@@ -555,8 +555,10 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
-  .file-manager-toolbar { width: 100%; }
+  .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .file-manager-toolbar select { grid-column: 1 / -1; }
   .file-manager-list { max-height: 420px; }
+  .file-manager-entry-details small { display: none; }
   .file-manager-breadcrumb { margin-top: calc(var(--space-2) * -1); }
   .point-cloud-toolbar { align-items: flex-start; flex-direction: column; }
   .point-cloud-toolbar-actions { width: 100%; flex-wrap: wrap; }

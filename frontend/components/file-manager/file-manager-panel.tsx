@@ -128,7 +128,14 @@ export function FileManagerPanel() {
       />
       {error ? <ErrorState message={error} /> : null}
       <div className="stack-grid">
-        <div className="file-manager-workspace"><Card className="file-manager-browser">
+        <div className="file-manager-workspace">
+        <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
+          {previewSource ? <>
+            <CardHeader eyebrow="点云预览" title={previewSource.name} actions={<Button variant="secondary" size="sm" onClick={() => setExpanded(value => !value)}>{expanded ? "退出大屏" : "放大预览"}</Button>} />
+            <PointCloudViewer key={`${selectedRootIndex}:${previewPath}`} file={previewSource} />
+          </> : <EmptyState title="选择点云文件" detail="在下方浏览文件夹，打开 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" />}
+        </Card>
+        <Card className="file-manager-browser">
           <CardHeader
             title={directory ? `当前目录 · ${filteredEntries.length}` : "当前目录"}
             description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已暴露的顶层目录。"}
@@ -163,7 +170,7 @@ export function FileManagerPanel() {
                 <div className={`file-manager-entry${previewPath === entry.path ? " is-selected" : ""}`} key={entry.path}>
                   <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : setPreviewPath(entry.path)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
                     <span className="file-manager-entry-mark">{entry.type === "directory" ? "◇" : entry.type === "file" ? "·" : "×"}</span>
-                    <span>
+                    <span className="file-manager-entry-details">
                       <strong>{entry.name}</strong>
                       <small>
                         {entry.type === "directory" ? "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
@@ -180,12 +187,6 @@ export function FileManagerPanel() {
             </div>
           ) : <EmptyState title={roots.length ? "没有匹配的文件" : "没有已暴露的目录"} detail={roots.length ? "尝试更换搜索词，或取消“仅点云”过滤。" : "服务端尚未配置可浏览目录。"} />}
           {directory?.truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span></div> : null}
-        </Card>
-        <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
-          {previewSource ? <>
-            <CardHeader eyebrow="点云预览" title={previewSource.name} actions={<Button variant="secondary" size="sm" onClick={() => setExpanded(value => !value)}>{expanded ? "退出大屏" : "放大预览"}</Button>} />
-            <PointCloudViewer key={`${selectedRootIndex}:${previewPath}`} file={previewSource} />
-          </> : <EmptyState title="选择点云文件" detail="在左侧浏览文件夹，打开 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" />}
         </Card></div>
       </div>
     </>
