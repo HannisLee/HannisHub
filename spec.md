@@ -97,7 +97,7 @@ HannisHub/
 | 目录 | 职责 |
 |---|---|
 | `frontend/app/` | App Router 页面、全局样式、登录与 404 页面 |
-| `frontend/components/layout/` | 会话检查、桌面/移动侧栏、Topbar 与统一 App Shell |
+| `frontend/components/layout/` | 会话检查、桌面/移动侧栏、Topbar、浏览器标签标题与统一 App Shell |
 | `frontend/components/ui/` | 按钮、卡片、表单、状态、进度条与细线 SVG 图标 |
 | `frontend/components/llama/` | 模型、进程、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
@@ -108,6 +108,10 @@ HannisHub/
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
 
 API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
+
+主导航侧栏支持手动展开与收起。桌面端收起后为 72px 宽的图标小格，导航文字与分组标题隐藏，改为图标列加分组分隔线，悬停时显示名称；开关按钮位于侧栏顶部的品牌行，使用面板图标并在展开态显示「收起」、收起态显示「展开」。收起状态写入浏览器 `localStorage`（键 `hannishub_sidebar_collapsed`），刷新与跨页面跳转后保持同一形态，不再根据页面路径自动收起；窄屏（≤767px）侧栏固定为抽屉形态，由顶栏按钮控制开合，顶栏按钮在桌面端隐藏以保持单一入口。
+
+浏览器标签标题跟随当前模块变化，格式为「模块名 · HannisHub」，模块名取自 `frontend/lib/navigation.ts` 导航项的 `title`（未设置时回退到 `label`，首页为「总览」、提示词页为「提示词」、点云页为「点云预览」）。这些页面都不显示页面内标题，识别入口统一由侧栏、Topbar 面包屑和浏览器标签提供。
 
 页面复现原有的实时行为：GPU 与进程状态每 5 秒刷新，下载状态每 3 秒刷新且日志每 5 秒刷新，ASR 历史每 3 秒刷新，Server 任务每 15 秒刷新。所有页面均对加载、错误和空数据提供明确状态。
 

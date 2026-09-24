@@ -3,6 +3,8 @@ import type { IconName } from "../components/ui/icon";
 export interface NavItem {
   href: string;
   label: string;
+  /** 浏览器标签页标题，未设置时回退到 label */
+  title?: string;
   icon: IconName;
 }
 
@@ -12,7 +14,7 @@ export interface NavGroup {
 }
 
 export const navigation: NavGroup[] = [
-  { label: "总览", items: [{ href: "/", label: "Overview", icon: "overview" }] },
+  { label: "总览", items: [{ href: "/", label: "Overview", title: "总览", icon: "overview" }] },
   {
     label: "模型管理",
     items: [
@@ -31,10 +33,21 @@ export const navigation: NavGroup[] = [
       { href: "/server/tasks", label: "远程任务", icon: "tasks" },
     ],
   },
-  { label: "文件管理", items: [{ href: "/files", label: "文件游览", icon: "files" }, { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" }] },
-  { label: "提示词", items: [{ href: "/prompts", label: "提示词工作区", icon: "prompts" }] },
+  {
+    label: "文件管理",
+    items: [
+      { href: "/files", label: "文件游览", icon: "files" },
+      { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
+    ],
+  },
+  { label: "提示词", items: [{ href: "/prompts", label: "提示词工作区", title: "提示词", icon: "prompts" }] },
   { label: "设置", items: [{ href: "/settings", label: "AI 能力", icon: "settings" }] },
 ];
+
+/** 取导航项对应的浏览器标签标题，未显式设置时使用导航标签 */
+export function navTitle(item: NavItem): string {
+  return item.title ?? item.label;
+}
 
 export function isActivePath(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";

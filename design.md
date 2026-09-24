@@ -375,6 +375,18 @@ Do not scale cards on hover.
 - CTA cluster may include one outline button and one light button.
 - Nav dropdown chevrons should be small and low contrast.
 
+### Collapsible workspace sidebar
+
+```css
+.sidebar { width: 272px; }
+.sidebar.is-collapsed { width: 72px; }
+```
+
+- 侧栏顶部品牌行放一个面板图标的开关按钮：展开态表示「收起」，收起态表示「展开」，尺寸 34px（收起后 40px），边框与文字使用现有 token，不加阴影。
+- 收起后导航项变成 40px 图标小格：隐藏文字与分组标题，分组之间用 1px `--color-divider` 分隔线区分；悬停用 `--color-card-hover-border`，当前项用 `--color-brand` 边框。
+- 收起状态保存在浏览器 `localStorage`，刷新与路由跳转后保持同一形态；窄屏侧栏固定为抽屉形态，由顶栏按钮控制。
+- 浏览器标签标题使用「当前模块 · HannisHub」，模块名与侧栏导航标签保持一致。
+
 ### Secondary navbar
 
 ```css

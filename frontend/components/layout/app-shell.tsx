@@ -1,12 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
-import { isActivePath, navigation } from "../../lib/navigation";
+import { isActivePath, navigation, navTitle } from "../../lib/navigation";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
+import { DocumentTitle } from "./document-title";
+
+/** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */
+const COLLAPSE_STORAGE_KEY = "hannishub_sidebar_collapsed";
+const COLLAPSE_CHANGE_EVENT = "hannishub:sidebar-collapse-change";
+const MOBILE_QUERY = "(max-width: 767px)";
 
 interface AuthStatus {
   authenticated: boolean;
@@ -14,30 +20,65 @@ interface AuthStatus {
   username?: string | null;
 }
 
-interface SidebarState {
-  pathname: string;
-  collapsed: boolean;
-  menuOpen: boolean;
+function isMobileViewport(): boolean {
+  return window.matchMedia(MOBILE_QUERY).matches;
 }
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSidebarCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(COLLAPSE_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event(COLLAPSE_CHANGE_EVENT));
+}
+
+function subscribeSidebarCollapsed(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(COLLAPSE_CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(COLLAPSE_CHANGE_EVENT, onChange);
+  };
+}
+
+function subscribeMobileViewport(onChange: () => void): () => void {
+  const query = window.matchMedia(MOBILE_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** 静态导出的构建期没有浏览器环境，服务端快照统一回退到默认形态 */
+const serverSnapshot = () => false;
 
 export function AppShell({ children, contentClassName = "" }: { children: ReactNode; contentClassName?: string }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [sidebarState, setSidebarState] = useState<SidebarState>({ pathname, collapsed: pathname !== "/", menuOpen: false });
+  const sidebarCollapsed = useSyncExternalStore(subscribeSidebarCollapsed, readSidebarCollapsed, serverSnapshot);
+  const isMobile = useSyncExternalStore(subscribeMobileViewport, isMobileViewport, serverSnapshot);
+  const [drawer, setDrawer] = useState({ pathname, open: false });
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [authError, setAuthError] = useState("");
 
-  const routeChanged = sidebarState.pathname !== pathname;
-  const sidebarCollapsed = routeChanged ? pathname !== "/" : sidebarState.collapsed;
-  const menuOpen = routeChanged ? false : sidebarState.menuOpen;
+  // 抽屉只在当前路径下有效，切换页面即自动收起
+  const mobileDrawerOpen = drawer.pathname === pathname && drawer.open;
 
-  function updateSidebar(updater: (state: SidebarState) => SidebarState) {
-    setSidebarState(current => updater(current.pathname === pathname ? current : {
-      pathname,
-      collapsed: pathname !== "/",
-      menuOpen: false,
-    }));
-  }
+  const current = useMemo(() => {
+    for (const group of navigation) {
+      const item = group.items.find(candidate => isActivePath(pathname, candidate.href));
+      if (item) return item;
+    }
+    return navigation[0].items[0];
+  }, [pathname]);
+  const pageTitle = navTitle(current);
 
   useEffect(() => {
     let active = true;
@@ -61,46 +102,68 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
     return () => window.removeEventListener("hannishub:unauthorized", redirect);
   }, [router]);
 
-  const current = useMemo(() => {
-    for (const group of navigation) {
-      const item = group.items.find(candidate => isActivePath(pathname, candidate.href));
-      if (item) return item;
+  /** 桌面端切换侧栏的展开/收起，移动端切换抽屉 */
+  const toggleNavigation = useCallback(() => {
+    if (isMobileViewport()) {
+      setDrawer(current => ({ pathname, open: !(current.pathname === pathname && current.open) }));
+      return;
     }
-    return navigation[0].items[0];
+    writeSidebarCollapsed(!readSidebarCollapsed());
   }, [pathname]);
+
+  const closeDrawer = useCallback(() => setDrawer(current => ({ ...current, open: false })), []);
 
   async function logout() {
     await apiFetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
   }
 
-  function toggleNavigation() {
-    updateSidebar(current => window.matchMedia("(max-width: 767px)").matches
-      ? { ...current, menuOpen: !current.menuOpen }
-      : { ...current, collapsed: !current.collapsed });
+  if (authError) return <div className="app-error-screen"><DocumentTitle title="无法连接" />{authError}</div>;
+  if (!auth || !auth.authenticated) {
+    return <div className="app-loading-screen"><DocumentTitle title="载入中" /><span className="loading-line" />正在载入 HannisHub…</div>;
   }
 
-  if (authError) return <div className="app-error-screen">{authError}</div>;
-  if (!auth || !auth.authenticated) return <div className="app-loading-screen"><span className="loading-line" />正在载入 HannisHub…</div>;
-
-  const navigationOpen = menuOpen || !sidebarCollapsed;
+  // 移动端侧栏始终是抽屉形态，收起形态只在桌面端生效
+  const collapsed = sidebarCollapsed && !isMobile;
+  const navigationOpen = isMobile ? mobileDrawerOpen : !collapsed;
 
   return (
     <div className="app-shell">
-      <div className={`shell-overlay${menuOpen ? " is-visible" : ""}`} onClick={() => updateSidebar(current => ({ ...current, menuOpen: false }))} />
-      <aside className={`sidebar${sidebarCollapsed ? " is-collapsed" : ""}${menuOpen ? " is-open" : ""}`} id="main-sidebar">
-        <div className="brand-lockup">
-          <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页">HH</Link>
-          <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
+      <DocumentTitle title={pageTitle} />
+      <div className={`shell-overlay${mobileDrawerOpen ? " is-visible" : ""}`} onClick={closeDrawer} />
+      <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
+        <div className="sidebar-head">
+          <div className="brand-lockup">
+            <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
+            <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
+          </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={toggleNavigation}
+            aria-expanded={navigationOpen}
+            aria-controls="main-sidebar"
+            aria-label={navigationOpen ? "收起侧栏" : "展开侧栏"}
+            title={navigationOpen ? "收起侧栏" : "展开侧栏"}
+          >
+            <Icon name={navigationOpen ? "panelCollapse" : "panelExpand"} />
+          </button>
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
           {navigation.map(group => (
             <div className="nav-group" key={group.label}>
               <p className="nav-group-label">{group.label}</p>
               {group.items.map(item => (
-                <Link className={`nav-item${isActivePath(pathname, item.href) ? " is-active" : ""}`} href={item.href} key={item.href} onClick={() => updateSidebar(current => ({ ...current, menuOpen: false }))} title={item.label}>
+                <Link
+                  className={`nav-item${isActivePath(pathname, item.href) ? " is-active" : ""}`}
+                  href={item.href}
+                  key={item.href}
+                  onClick={closeDrawer}
+                  title={item.label}
+                  aria-label={item.label}
+                >
                   <span className="nav-icon"><Icon name={item.icon} /></span>
-                  <span>{item.label}</span>
+                  <span className="nav-item-label">{item.label}</span>
                 </Link>
               ))}
             </div>

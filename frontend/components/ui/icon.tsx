@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "pointcloud";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "pointcloud" | "panelCollapse" | "panelExpand";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -15,6 +15,8 @@ const paths: Record<IconName, ReactNode> = {
   prompts: <><path d="M5 4.5h14v12H9l-4 3v-15Z" /><path d="M8 8h8M8 12h5" /></>,
   files: <><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h3.2l1.8 2h8A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11Z" /><path d="M8 12h8M8 16h5" /></>,
   pointcloud: <><circle cx="6" cy="8" r="1.5" /><circle cx="12" cy="5" r="1.5" /><circle cx="18" cy="9" r="1.5" /><circle cx="9" cy="16" r="1.5" /><circle cx="16" cy="18" r="1.5" /><path d="m7.25 8.75 3.5-2.5m2.5.25 3.5 1.75m-8.5 6.5 1.5-5m2.5 7 3.5-6" /></>,
+  panelCollapse: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m16.5 9.5-2.75 2.5 2.75 2.5" /></>,
+  panelExpand: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m14 9.5 2.75 2.5L14 14.5" /></>,
 };
 
 export function Icon({ name, title, ...props }: SVGProps<SVGSVGElement> & { name: IconName; title?: string }) {

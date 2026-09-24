@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "../../lib/api";
+import { DocumentTitle } from "../../components/layout/document-title";
 
 interface AuthStatus {
   authenticated: boolean;
@@ -62,6 +63,7 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
+      <DocumentTitle title="登录" />
       <section className="login-panel" aria-labelledby="login-title">
         <div className="brand-lockup login-brand">
           <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页">HH</Link>
