@@ -142,7 +142,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### AI 能力设置
 
-- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和各业务提示词。API 与模型在 `/settings` 统一配置，提示词放在对应业务页面。
+- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和各业务提示词。API 与模型在 `/settings` 统一配置，提示词放在对应业务页面。模型探查结果会在“可支持的模型”按钮区展示，点击按钮即自动填入模型选择，同时保留自定义模型名称输入。
 - `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，仅返回 `openai_api_key_configured`。
 - 首次读取时会从旧版 `llama_manager/settings.json` 无损迁移已存在的 AI 配置；迁移只复制，不删除旧字段，便于回滚。
 - `/settings` 提供“测试链接”“探查模型列表”和“测试模型”三类操作；模型输入框关联探查结果下拉，同时允许直接输入自定义模型名。

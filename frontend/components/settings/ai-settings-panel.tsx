@@ -46,6 +46,12 @@ export function AiSettingsPanel() {
     setSettings(current => ({ ...current, ...patch }));
   }
 
+  function selectModel(model: string) {
+    patchSettings({ openai_api_model: model });
+    setModelStatus("");
+    setError("");
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -75,10 +81,11 @@ export function AiSettingsPanel() {
     setDiscoveringModels(true);
     try {
       const result = await apiFetch<AiConnectionTestResult>(`${API_PATHS.aiSettings}/models`, { method: "POST" });
-      setModels(result.models || []);
-      setStatus(result.message || `已发现 ${result.models?.length || 0} 个模型`);
-      if (!settings.openai_api_model && result.models?.length) {
-        patchSettings({ openai_api_model: result.models[0] });
+      const discovered = result.models || [];
+      setModels(discovered);
+      setStatus(result.message || `已发现 ${discovered.length} 个模型`);
+      if (!settings.openai_api_model.trim() && discovered.length) {
+        patchSettings({ openai_api_model: discovered[0] });
       }
       setError("");
     } catch (value) {
@@ -146,7 +153,7 @@ export function AiSettingsPanel() {
                 placeholder="https://api.openai.com/v1"
               />
             </Field>
-            <Field label="模型选择" hint="可从列表选择，也可以直接输入自定义模型名称">
+            <Field label="模型选择" hint="点击下方模型按钮会自动填入；也可以直接输入自定义模型名称">
               <input
                 list="ai-model-options"
                 value={settings.openai_api_model}
@@ -157,6 +164,29 @@ export function AiSettingsPanel() {
                 {models.map(model => <option value={model} key={model}>{model}</option>)}
               </datalist>
             </Field>
+            <section className="ai-models field-wide" aria-label="可支持的模型">
+              <div className="ai-models-head">
+                <span>可支持的模型</span>
+                <small>{models.length ? `${models.length} 个` : "未探查"}</small>
+              </div>
+              {models.length ? (
+                <div className="ai-model-list">
+                  {models.map(model => (
+                    <button
+                      type="button"
+                      className={`ai-model-chip${settings.openai_api_model === model ? " is-selected" : ""}`}
+                      onClick={() => selectModel(model)}
+                      key={model}
+                      title={model}
+                    >
+                      <span>{model}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="ai-models-empty">保存 API 地址和密钥后，点击“探查模型列表”，这里会显示可点击的模型按钮。</p>
+              )}
+            </section>
             <Field
               label="API 密钥"
               hint={settings.openai_api_key_configured ? "已保存；留空则保持不变" : "不会回显已保存的密钥"}
