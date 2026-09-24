@@ -502,6 +502,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-browser .card-header { display: block; }
 .file-manager-browser .card-actions { width: 100%; margin-top: var(--space-3); }
 .file-manager-toolbar { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto minmax(150px, 180px) auto; width: 100%; align-items: center; gap: var(--space-2); }
+.file-manager-toolbar.is-point-cloud { display: flex; justify-content: flex-end; }
+.file-manager-toolbar.is-point-cloud select { width: min(180px, 100%); }
 .file-manager-toolbar select { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-toolbar .search-input { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-filter { min-height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
@@ -642,6 +644,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
+  .file-manager-toolbar.is-point-cloud { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .file-manager-toolbar select:first-child { grid-column: 1 / -1; }
   .file-manager-toolbar select:not(:first-child) { grid-column: 1 / 2; }
   .file-manager-toolbar .search-input { grid-column: 1 / -1; }

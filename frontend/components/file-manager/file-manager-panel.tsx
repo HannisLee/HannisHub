@@ -244,12 +244,14 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
             title={directory ? `当前目录 · ${filteredEntries.length}` : "当前目录"}
             description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已开放的顶层目录。"}
             actions={
-              <div className="file-manager-toolbar">
-                <select value={selectedRootIndex} onChange={event => goToDirectory("", Number(event.target.value))} aria-label="顶层文件夹" disabled={!roots.length}>
-                  {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
-                </select>
-                <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
-                <button className="file-manager-filter" type="button" aria-pressed={onlyPointClouds} onClick={() => setOnlyPointClouds(value => !value)}>仅点云</button>
+              <div className={`file-manager-toolbar${pointCloudMode ? " is-point-cloud" : ""}`}>
+                {!pointCloudMode ? <>
+                  <select value={selectedRootIndex} onChange={event => goToDirectory("", Number(event.target.value))} aria-label="顶层文件夹" disabled={!roots.length}>
+                    {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
+                  </select>
+                  <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
+                  <button className="file-manager-filter" type="button" aria-pressed={onlyPointClouds} onClick={() => setOnlyPointClouds(value => !value)}>仅点云</button>
+                </> : null}
                 <select value={syncTarget} onChange={event => setSyncTarget(event.target.value)} aria-label="同步范围" disabled={syncing}>
                   <option value="all">同步两个项目</option>
                   <option value="RadioGS-perlight">RadioGS-perlight</option>
