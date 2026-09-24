@@ -20,7 +20,11 @@ DEFAULT_ROOT = "~/reproduce"
 MAX_ROOTS = 24
 MAX_DIRECTORY_ENTRIES = 1_000
 MAX_FAVORITES = 100
-CACHE_TTL_SECONDS = 15
+CACHE_TTL_SECONDS = 60 * 60
+SYNC_DIRECTORIES = {
+    "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
+    "RadioGS-stage1": Path("/home/lihan/reproduce/RadioGS-stage1"),
+}
 IGNORED_DIRECTORY_NAMES = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".cache", ".venv", "venv"}
 
 
@@ -38,6 +42,7 @@ class DirectoryRecord:
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
 _CACHE_LOCK = threading.RLock()
+_SYNC_LOCK = threading.Lock()
 _FAVORITES_LOCK = threading.RLock()
 
 
@@ -199,8 +204,12 @@ def _directory_records(
 
     records, _ = _scan_directory(directory, safe_path)
     generated_at = time.time()
+    try:
+        scanned_mtime = directory.stat().st_mtime_ns
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="目录不存在或无法读取") from exc
     with _CACHE_LOCK:
-        _DIRECTORY_CACHE[key] = (generated_at, records, directory.stat().st_mtime_ns)
+        _DIRECTORY_CACHE[key] = (generated_at, records, scanned_mtime)
     return records, False, generated_at
 
 
@@ -275,10 +284,18 @@ def _stored_favorites() -> list[dict[str, str]]:
 
 
 def list_favorites() -> list[dict[str, str]]:
-    """只展示当前仍在已开放顶层目录下的收藏。"""
-    roots = set(configured_roots())
+    """展示仍属于开放范围的收藏，并兼容顶层目录路径写法变化。"""
+    roots = configured_roots()
     with _FAVORITES_LOCK:
-        return [item for item in _stored_favorites() if item["root_path"] in roots]
+        visible = []
+        for item in _stored_favorites():
+            directory = (Path(item["root_path"]).expanduser() / item["path"]).resolve()
+            for root_text in roots:
+                root = Path(root_text).expanduser().resolve()
+                if directory.is_dir() and directory.is_relative_to(root):
+                    visible.append({**item, "root_path": root_text, "path": directory.relative_to(root).as_posix() if directory != root else ""})
+                    break
+        return visible
 
 
 def add_favorite(root_index: object, relative_path: object, name: object = None) -> list[dict[str, str]]:
@@ -295,7 +312,7 @@ def add_favorite(root_index: object, relative_path: object, name: object = None)
     display_name = _favorite_name(name if name is not None else directory.name)
     with _FAVORITES_LOCK:
         favorites = _stored_favorites()
-        if any(item["root_path"] == root_path and item["path"] == safe_path for item in favorites):
+        if any((Path(item["root_path"]).expanduser() / item["path"]).resolve() == directory for item in favorites):
             raise HTTPException(status_code=409, detail="这个目录已经收藏")
         if len(favorites) >= MAX_FAVORITES:
             raise HTTPException(status_code=422, detail=f"最多收藏 {MAX_FAVORITES} 个目录")
@@ -310,7 +327,7 @@ def rename_favorite(favorite_id: str, name: object) -> list[dict[str, str]]:
     with _FAVORITES_LOCK:
         favorites = _stored_favorites()
         favorite = next((item for item in favorites if item["id"] == favorite_id), None)
-        if favorite is None or favorite["root_path"] not in configured_roots():
+        if favorite is None or not any(item["id"] == favorite_id for item in list_favorites()):
             raise HTTPException(status_code=404, detail="收藏目录不存在")
         favorite["name"] = display_name
         update_settings_section("file_favorites", favorites)
@@ -334,11 +351,42 @@ def clear_directory_cache() -> None:
         _DIRECTORY_CACHE.clear()
 
 
-def sync_roots() -> dict[str, Any]:
-    """手动同步所有已暴露目录；先清空缓存，由后续浏览按需重建。"""
-    clear_directory_cache()
-    return {
-        "roots": configured_roots(),
-        "synced_at": time.time(),
-        "cache_ttl_seconds": CACHE_TTL_SECONDS,
-    }
+def sync_roots(targets: object = None) -> dict[str, Any]:
+    """递归预读指定项目的目录列表，使随后浏览直接命中缓存。"""
+    selected = list(SYNC_DIRECTORIES) if targets is None else targets
+    if not isinstance(selected, list) or not selected or any(not isinstance(value, str) or value not in SYNC_DIRECTORIES for value in selected):
+        raise HTTPException(status_code=422, detail="同步目录参数无效")
+    roots = [(text, _resolve_root(text)) for text in configured_roots()]
+    jobs: list[tuple[str, str]] = []
+    for name in dict.fromkeys(selected):
+        directory = SYNC_DIRECTORIES[name].resolve()
+        if not directory.is_dir():
+            raise HTTPException(status_code=404, detail=f"同步目录不存在：{directory}")
+        match = next(((text, root) for text, root in roots if directory.is_relative_to(root)), None)
+        if match is None:
+            raise HTTPException(status_code=422, detail=f"同步目录不在已开放范围：{directory}")
+        root_text, root = match
+        jobs.append((root_text, directory.relative_to(root).as_posix() if directory != root else ""))
+
+    directory_count = 0
+    with _SYNC_LOCK:
+        with _CACHE_LOCK:
+            for root_text, prefix in jobs:
+                root = _resolve_root(root_text)
+                for key in list(_DIRECTORY_CACHE):
+                    if key[0] == root and (key[1] == prefix or key[1].startswith(f"{prefix}/")):
+                        del _DIRECTORY_CACHE[key]
+        for root_text, prefix in jobs:
+            pending = [prefix]
+            while pending:
+                relative_path = pending.pop()
+                try:
+                    records, _, _ = _directory_records(root_text, relative_path, refresh=True)
+                except HTTPException as exc:
+                    if exc.status_code == 404 and relative_path != prefix:
+                        continue
+                    raise
+                directory_count += 1
+                pending.extend(record.path for record in records if record.type == "directory")
+    return {"targets": list(dict.fromkeys(selected)), "directory_count": directory_count,
+            "synced_at": time.time(), "cache_ttl_seconds": CACHE_TTL_SECONDS}

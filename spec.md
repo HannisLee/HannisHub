@@ -133,10 +133,10 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/ai-settings/test` | 使用已保存配置请求 OpenAI 兼容 API 的 `/models`，测试连接并返回模型列表 |
 | POST | `/api/ai-settings/models` | 探查 OpenAI 兼容接口的可用模型列表，供前端模型下拉选择 |
 | POST | `/api/ai-settings/model-test` | 使用当前或指定模型发送一次最小对话请求，验证模型可用性 |
-| GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录；未显式配置时默认仅返回 `~/reproduce` |
+| GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
-| GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 15 秒服务端缓存，`refresh=true` 强制同步 |
-| POST | `/api/file-manager/sync` | 清空目录缓存，下一次访问重新读取磁盘 |
+| GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
+| POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
@@ -167,9 +167,9 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 - `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
-- 服务端对目录列表维护 15 秒线程安全缓存。目录缓存同时记录目录 mtime，顶层子项变化时立即失效；`POST /api/file-manager/sync` 会强制清空缓存。
+- 服务端对目录列表维护 1 小时线程安全缓存。目录缓存同时记录目录 mtime；手动同步会清除所选项目旧缓存并递归预读目录树。浏览器端复用有效缓存，手动同步后清除浏览器缓存并刷新当前目录。
 - 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
-- 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重名路径拒绝重复收藏；目录配置被移除时暂不展示对应收藏。
+- 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重复路径拒绝收藏；读取时将旧顶层路径映射到当前开放范围，无法访问的目录暂不展示。
 
 ### 点云预览
 
@@ -177,7 +177,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，支持 0.2 起的点大小调整、文件颜色与主题单色切换、旋转、缩放和平移。
 - `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 暂不支持直接预览。
 - 点云页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
-- 浏览器端在目录缓存有效期内直接复用已读目录；点云文件下载显示进度。预览画布桌面端固定为 720px 高、窄屏固定为 520px 高，并提供大屏按钮；浏览其他目录时保留当前点云，不改变预览高度。
+- 浏览器端在目录缓存有效期内直接复用已读目录；同步范围默认是 RadioGS-perlight 与 RadioGS-stage1，也可单选。预览顶部展示展开后的文件路径和所属收藏目录名称；点云文件下载显示进度。预览画布桌面端固定为 720px 高、窄屏固定为 520px 高，并提供大屏按钮；浏览其他目录时保留当前点云，不改变预览高度。
 - Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）

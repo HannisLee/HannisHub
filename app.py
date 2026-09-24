@@ -260,7 +260,8 @@ async def test_ai_model(payload: dict[str, Any] = Body(...)):
 @app.get("/api/file-manager/settings")
 async def file_manager_settings():
     """返回文件管理组件已暴露的顶层目录。"""
-    return JSONResponse({"roots": configured_roots()})
+    roots = configured_roots()
+    return JSONResponse({"roots": roots, "resolved_roots": [str(Path(root).expanduser().resolve()) for root in roots]})
 
 
 @app.put("/api/file-manager/settings")
@@ -280,9 +281,9 @@ async def file_manager_directory(
 
 
 @app.post("/api/file-manager/sync")
-async def file_manager_sync():
-    """清空目录缓存，下一次访问将重新同步磁盘状态。"""
-    return JSONResponse(await run_in_threadpool(sync_roots))
+async def file_manager_sync(payload: dict[str, Any] = Body(default_factory=dict)):
+    """递归预读所选项目的目录列表。"""
+    return JSONResponse(await run_in_threadpool(sync_roots, payload.get("targets")))
 
 
 @app.get("/api/file-manager/favorites")

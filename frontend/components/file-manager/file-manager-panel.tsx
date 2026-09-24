@@ -37,6 +37,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const router = useRouter();
   const pointCloudMode = mode === "point-cloud";
   const [roots, setRoots] = useState<string[]>([]);
+  const [resolvedRoots, setResolvedRoots] = useState<string[]>([]);
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
   const [path, setPath] = useState("");
   const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
@@ -50,6 +51,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [editName, setEditName] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncTarget, setSyncTarget] = useState("all");
+  const [syncMessage, setSyncMessage] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef(0);
@@ -82,10 +85,11 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
 
   useEffect(() => {
     let active = true;
-    apiFetch<{ roots: string[] }>(`${API_PATHS.fileManager}/settings`)
+    apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
       .then(value => {
         if (!active) return;
         const nextRoots = value.roots || [];
+        setResolvedRoots(value.resolved_roots || nextRoots);
         if (pointCloudMode) {
           const params = new URLSearchParams(window.location.search);
           const requestedRoot = Number(params.get("root"));
@@ -134,6 +138,10 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }, [directory, onlyPointClouds, query]);
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
   const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
+  const previewFavorite = previewFile ? favorites
+    .filter(item => item.root_path === roots[previewFile.rootIndex] && (previewFile.path.startsWith(`${item.path}/`) || item.path === ""))
+    .sort((left, right) => right.path.length - left.path.length)[0] : undefined;
+  const previewPath = previewFile ? `${resolvedRoots[previewFile.rootIndex] || roots[previewFile.rootIndex] || ""}/${previewFile.path}` : "";
 
   function goToDirectory(nextPath: string, rootIndex = selectedRootIndex) {
     if (nextPath === path && rootIndex === selectedRootIndex) return;
@@ -184,10 +192,13 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
 
   async function syncCache() {
     setSyncing(true);
+    setSyncMessage("");
     try {
-      await apiFetch<FileManagerSyncResponse>(`${API_PATHS.fileManager}/sync`, { method: "POST" });
+      const targets = syncTarget === "all" ? ["RadioGS-perlight", "RadioGS-stage1"] : [syncTarget];
+      const result = await apiFetch<FileManagerSyncResponse>(`${API_PATHS.fileManager}/sync`, { method: "POST", body: jsonBody({ targets }) });
       directoryCache.current.clear();
       await loadDirectory(selectedRootIndex, path, true);
+      setSyncMessage(`已缓存 ${result.directory_count.toLocaleString()} 个目录`);
     } catch (value) {
       setError(errorMessage(value));
     } finally {
@@ -202,11 +213,11 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
       <div className="file-manager-workspace">
         {pointCloudMode ? <>
           <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
-            {previewFile ? <PointCloudViewer key={`${previewFile.rootIndex}:${previewFile.path}`} file={previewFile} expanded={expanded} onToggleExpanded={() => setExpanded(value => !value)} />
+            {previewFile ? <PointCloudViewer key={`${previewFile.rootIndex}:${previewFile.path}`} file={previewFile} filePath={previewPath} favoriteName={previewFavorite?.name} expanded={expanded} onToggleExpanded={() => setExpanded(value => !value)} />
               : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title="选择点云文件" detail="从下方目录选择 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" /></div>}
           </Card>
           <Card className="file-manager-favorites">
-            <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={addCurrentFavorite} disabled={!roots.length || !directory || loading || favoriteBusy || Boolean(currentFavorite)}>{currentFavorite ? "已收藏当前目录" : "收藏当前目录"}</Button>} />
+            <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={() => currentFavorite ? (setEditingId(currentFavorite.id), setEditName(currentFavorite.name)) : addCurrentFavorite()} disabled={!roots.length || !directory || loading || favoriteBusy}>{currentFavorite ? "修改当前目录名称" : "收藏当前目录"}</Button>} />
             {favoriteError ? <ErrorState message={favoriteError} /> : null}
             {favorites.length ? <div className="file-manager-favorite-list">
               {favorites.map(favorite => {
@@ -239,6 +250,11 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                 </select>
                 <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
                 <button className="file-manager-filter" type="button" aria-pressed={onlyPointClouds} onClick={() => setOnlyPointClouds(value => !value)}>仅点云</button>
+                <select value={syncTarget} onChange={event => setSyncTarget(event.target.value)} aria-label="同步范围" disabled={syncing}>
+                  <option value="all">同步两个项目</option>
+                  <option value="RadioGS-perlight">RadioGS-perlight</option>
+                  <option value="RadioGS-stage1">RadioGS-stage1</option>
+                </select>
                 <Button variant="secondary" size="sm" onClick={() => void syncCache()} disabled={syncing || !roots.length}>{syncing ? "正在同步…" : "同步目录"}</Button>
               </div>
             }
@@ -247,8 +263,9 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
             {directory ? (
               <>
                 <span><Badge tone={directory.cached ? "success" : "info"}>{directory.cached ? "缓存" : "已同步"}</Badge> {formatDate(directory.generated_at)}</span>
-                <span>{directory.cache_ttl_seconds} 秒缓存</span>
+                <span>{directory.cache_ttl_seconds / 60} 分钟缓存</span>
                 <span>最多 {directory.max_entries} 项</span>
+                {syncMessage ? <span>{syncMessage}</span> : null}
               </>
             ) : <span>正在读取目录状态…</span>}
           </div>

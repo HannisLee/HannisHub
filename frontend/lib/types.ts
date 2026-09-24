@@ -48,7 +48,8 @@ export interface FileManagerDirectoryResponse {
 }
 
 export interface FileManagerSyncResponse {
-  roots: string[];
+  targets: string[];
+  directory_count: number;
   synced_at: number;
   cache_ttl_seconds: number;
 }

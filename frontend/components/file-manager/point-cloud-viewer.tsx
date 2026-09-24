@@ -436,7 +436,7 @@ function PointCloudCanvas({
   </div>;
 }
 
-export function PointCloudViewer({ file, expanded, onToggleExpanded }: { file: PointCloudSource; expanded: boolean; onToggleExpanded: () => void }) {
+export function PointCloudViewer({ file, filePath, favoriteName, expanded, onToggleExpanded }: { file: PointCloudSource; filePath: string; favoriteName?: string; expanded: boolean; onToggleExpanded: () => void }) {
   const [pointSize, setPointSize] = useState(1);
   const [colored, setColored] = useState(true);
   const [error, setError] = useState("");
@@ -445,6 +445,10 @@ export function PointCloudViewer({ file, expanded, onToggleExpanded }: { file: P
   const [details, setDetails] = useState<ViewerDetails | null>(null);
 
   return <>
+    <div className="point-cloud-file-identity">
+      {favoriteName ? <strong>{favoriteName}</strong> : null}
+      <span title={filePath}>{filePath}</span>
+    </div>
     <div className="point-cloud-toolbar">
       <span>{loading ? "正在读取并解析点云…" : details ? `${details.pointCount.toLocaleString()} 个点${details.gaussian ? " · Gaussian 预览" : details.hasColors ? " · 保留文件颜色" : " · 使用主题色"}` : "预览失败"}</span>
       <div className="point-cloud-toolbar-actions">
