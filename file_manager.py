@@ -41,6 +41,7 @@ class DirectoryRecord:
 
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
+_PLY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
 _CACHE_LOCK = threading.RLock()
 _SYNC_LOCK = threading.Lock()
 _FAVORITES_LOCK = threading.RLock()
@@ -249,6 +250,61 @@ def list_directory(root_index: int, relative_path: str, *, refresh: bool = False
     }
 
 
+def _scan_ply_tree(directory: Path, relative_path: str) -> list[DirectoryRecord]:
+    """递归读取 PLY 文件，忽略符号链接与不相关的普通文件。"""
+    records: list[DirectoryRecord] = []
+    pending = [(directory, relative_path)]
+    while pending:
+        current, current_path = pending.pop()
+        try:
+            with os.scandir(current) as iterator:
+                for item in iterator:
+                    try:
+                        child_path = f"{current_path}/{item.name}" if current_path else item.name
+                        if len(child_path) > 4_096:
+                            continue
+                        if item.is_dir(follow_symlinks=False):
+                            if item.name not in IGNORED_DIRECTORY_NAMES:
+                                pending.append((Path(item.path), child_path))
+                        elif item.name.lower().endswith(".ply") and item.is_file(follow_symlinks=False):
+                            stat = item.stat(follow_symlinks=False)
+                            records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, "ply"))
+                    except OSError:
+                        continue
+        except OSError as exc:
+            if current == directory:
+                raise HTTPException(status_code=404, detail="目录不存在或无法读取") from exc
+            continue
+    records.sort(key=lambda record: (record.path.lower(), record.path))
+    return records
+
+
+def list_ply_files(root_index: int, relative_path: str, *, refresh: bool = False) -> dict[str, Any]:
+    """返回当前目录及所有子目录中的 PLY 文件，优先复用同步缓存。"""
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    root = _resolve_root(roots[root_index])
+    safe_path = _normalize_relative_path(relative_path)
+    directory = _resolve_directory(root, safe_path)
+    now = time.time()
+    with _CACHE_LOCK:
+        if not refresh:
+            for (cached_root, cached_path), (generated_at, records) in _PLY_CACHE.items():
+                if cached_root == root and now - generated_at < CACHE_TTL_SECONDS and (safe_path == cached_path or not cached_path or safe_path.startswith(f"{cached_path}/")):
+                    prefix = f"{safe_path}/" if safe_path else ""
+                    matches = [record for record in records if record.path.startswith(prefix)]
+                    return {"entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(prefix):]} for record in matches],
+                            "cached": True, "generated_at": generated_at, "expires_at": generated_at + CACHE_TTL_SECONDS}
+    records = _scan_ply_tree(directory, safe_path)
+    generated_at = time.time()
+    with _CACHE_LOCK:
+        _PLY_CACHE[(root, safe_path)] = (generated_at, records)
+    prefix = f"{safe_path}/" if safe_path else ""
+    return {"entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(prefix):]} for record in records],
+            "cached": False, "generated_at": generated_at, "expires_at": generated_at + CACHE_TTL_SECONDS}
+
+
 def resolve_file(root_index: int, relative_path: str) -> Path:
     """只允许下载已暴露顶层目录内部的普通文件。"""
     roots = configured_roots()
@@ -349,6 +405,7 @@ def clear_directory_cache() -> None:
     """清空目录缓存，下一次访问会重新同步磁盘状态。"""
     with _CACHE_LOCK:
         _DIRECTORY_CACHE.clear()
+        _PLY_CACHE.clear()
 
 
 def sync_roots(targets: object = None) -> dict[str, Any]:
@@ -376,6 +433,9 @@ def sync_roots(targets: object = None) -> dict[str, Any]:
                 for key in list(_DIRECTORY_CACHE):
                     if key[0] == root and (key[1] == prefix or key[1].startswith(f"{prefix}/")):
                         del _DIRECTORY_CACHE[key]
+                for key in list(_PLY_CACHE):
+                    if key[0] == root and (key[1] == prefix or key[1].startswith(f"{prefix}/") or not key[1] or prefix.startswith(f"{key[1]}/")):
+                        del _PLY_CACHE[key]
         for root_text, prefix in jobs:
             pending = [prefix]
             while pending:
@@ -388,5 +448,9 @@ def sync_roots(targets: object = None) -> dict[str, Any]:
                     raise
                 directory_count += 1
                 pending.extend(record.path for record in records if record.type == "directory")
+            root = _resolve_root(root_text)
+            ply_records = _scan_ply_tree(_resolve_directory(root, prefix), prefix)
+            with _CACHE_LOCK:
+                _PLY_CACHE[(root, prefix)] = (time.time(), ply_records)
     return {"targets": list(dict.fromkeys(selected)), "directory_count": directory_count,
             "synced_at": time.time(), "cache_ttl_seconds": CACHE_TTL_SECONDS}

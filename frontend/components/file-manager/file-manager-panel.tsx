@@ -8,6 +8,7 @@ import type {
   FileManagerDirectoryResponse,
   FileManagerEntry,
   FileManagerFavorite,
+  FileManagerPlyResponse,
   FileManagerSyncResponse,
 } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, PageHeader } from "../ui/primitives";
@@ -41,6 +42,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
   const [path, setPath] = useState("");
   const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
+  const [plyFiles, setPlyFiles] = useState<FileManagerPlyResponse | null>(null);
   const [query, setQuery] = useState("");
   const [onlyPointClouds, setOnlyPointClouds] = useState(false);
   const [previewFile, setPreviewFile] = useState<SelectedFile | null>(null);
@@ -57,31 +59,40 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [error, setError] = useState("");
   const requestId = useRef(0);
   const directoryCache = useRef(new Map<string, FileManagerDirectoryResponse>());
+  const plyCache = useRef(new Map<string, FileManagerPlyResponse>());
 
   const loadDirectory = useCallback(async (rootIndex: number, nextPath: string, refresh = false) => {
     const currentRequest = ++requestId.current;
     const key = `${rootIndex}:${nextPath}`;
     const cached = directoryCache.current.get(key);
-    if (!refresh && cached && cached.expires_at > Date.now() / 1000) {
+    const cachedPly = pointCloudMode ? plyCache.current.get(key) : null;
+    if (!refresh && cached && cached.expires_at > Date.now() / 1000 && (!pointCloudMode || (cachedPly && cachedPly.expires_at > Date.now() / 1000))) {
       setDirectory(cached);
+      if (pointCloudMode) setPlyFiles(cachedPly || null);
       setLoading(false);
       setError("");
       return;
     }
     setLoading(true);
+    setDirectory(null);
+    if (pointCloudMode) setPlyFiles(null);
     try {
       const separator = refresh ? "&refresh=true" : "";
-      const data = await apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?root=${rootIndex}&path=${encodeURIComponent(nextPath)}${separator}`);
+      const directoryRequest = apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?root=${rootIndex}&path=${encodeURIComponent(nextPath)}${separator}`);
+      const plyRequest = pointCloudMode ? apiFetch<FileManagerPlyResponse>(`${API_PATHS.fileManager}/ply-files?root=${rootIndex}&path=${encodeURIComponent(nextPath)}`) : Promise.resolve(null);
+      const [data, plyData] = await Promise.all([directoryRequest, plyRequest]);
       if (currentRequest !== requestId.current) return;
       directoryCache.current.set(key, data);
+      if (plyData) plyCache.current.set(key, plyData);
       setDirectory(data);
+      if (pointCloudMode) setPlyFiles(plyData);
       setError("");
     } catch (value) {
       if (currentRequest === requestId.current) setError(errorMessage(value));
     } finally {
       if (currentRequest === requestId.current) setLoading(false);
     }
-  }, []);
+  }, [pointCloudMode]);
 
   useEffect(() => {
     let active = true;
@@ -130,12 +141,16 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }, [roots, selectedRootIndex, path, loadDirectory]);
 
   const filteredEntries = useMemo(() => {
+    if (pointCloudMode) return [
+      ...(directory?.entries.filter(entry => entry.type === "directory") || []),
+      ...(plyFiles?.entries || []),
+    ];
     const normalized = query.trim().toLowerCase();
     return (directory?.entries || []).filter(entry => {
       if (onlyPointClouds && !(entry.type === "directory" || POINT_CLOUD_EXTENSIONS.has(entry.extension))) return false;
       return !normalized || `${entry.name} ${entry.path}`.toLowerCase().includes(normalized);
     });
-  }, [directory, onlyPointClouds, query]);
+  }, [directory, plyFiles, pointCloudMode, onlyPointClouds, query]);
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
   const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
   const previewFavorite = previewFile ? favorites
@@ -197,6 +212,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
       const targets = syncTarget === "all" ? ["RadioGS-perlight", "RadioGS-stage1"] : [syncTarget];
       const result = await apiFetch<FileManagerSyncResponse>(`${API_PATHS.fileManager}/sync`, { method: "POST", body: jsonBody({ targets }) });
       directoryCache.current.clear();
+      plyCache.current.clear();
       await loadDirectory(selectedRootIndex, path, true);
       setSyncMessage(`已缓存 ${result.directory_count.toLocaleString()} 个目录`);
     } catch (value) {
@@ -214,7 +230,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
         {pointCloudMode ? <>
           <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}`}>
             {previewFile ? <PointCloudViewer key={`${previewFile.rootIndex}:${previewFile.path}`} file={previewFile} filePath={previewPath} favoriteName={previewFavorite?.name} expanded={expanded} onToggleExpanded={() => setExpanded(value => !value)} />
-              : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title="选择点云文件" detail="从下方目录选择 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" /></div>}
+              : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title="选择点云文件" detail="从下方目录选择 PLY 文件，或从文件游览页打开其他可预览格式。" /></div>}
           </Card>
           <Card className="file-manager-favorites">
             <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={() => currentFavorite ? (setEditingId(currentFavorite.id), setEditName(currentFavorite.name)) : addCurrentFavorite()} disabled={!roots.length || !directory || loading || favoriteBusy}>{currentFavorite ? "修改当前目录名称" : "收藏当前目录"}</Button>} />
@@ -280,11 +296,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
           {loading ? <LoadingState label="正在读取目录…" /> : !roots.length ? <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" /> : filteredEntries.length ? (
             <div className="file-manager-list">
               {filteredEntries.map((entry: FileManagerEntry) => (
-                <div className={`file-manager-entry${previewFile?.rootIndex === selectedRootIndex && previewFile.path === entry.path ? " is-selected" : ""}`} key={entry.path}>
+                <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFile?.rootIndex === selectedRootIndex && previewFile.path === entry.path ? " is-selected" : ""}`} key={entry.path}>
                   <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
                     <span className="file-manager-entry-mark">{entry.type === "directory" ? "◇" : entry.type === "file" ? "·" : "×"}</span>
                     <span className="file-manager-entry-details">
                       <strong title={entry.name}>{entry.name}</strong>
+                      {pointCloudMode && entry.type === "file" ? <span className="file-manager-entry-relative" title={entry.relative_path}>{entry.relative_path}</span> : null}
                       <small>
                         {entry.type === "directory" ? "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
                       </small>
@@ -299,7 +316,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                 </div>
               ))}
             </div>
-          ) : <EmptyState title={roots.length ? "没有匹配的文件" : "没有已暴露的目录"} detail={roots.length ? "尝试更换搜索词，或取消“仅点云”过滤。" : "服务端尚未配置可浏览目录。"} />}
+          ) : <EmptyState title={roots.length ? pointCloudMode ? "此目录没有文件夹或 PLY 文件" : "没有匹配的文件" : "没有已暴露的目录"} detail={roots.length ? pointCloudMode ? "可以返回上级目录，或选择其他收藏目录。" : "尝试更换搜索词，或取消“仅点云”过滤。" : "服务端尚未配置可浏览目录。"} />}
           {directory?.truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span></div> : null}
         </Card>
       </div>

@@ -518,11 +518,14 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-breadcrumb b { color: var(--color-text-muted); font-weight: 400; }
 .file-manager-list { display: grid; max-height: 680px; overflow: auto; border-top: 1px solid var(--color-divider); }
 .file-manager-entry { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
+.file-manager-entry.is-recursive-ply { padding-left: var(--space-5); }
 .file-manager-entry-main { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-3); padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .file-manager-entry-main:disabled { cursor: default; }
 .file-manager-entry-mark { flex: 0 0 auto; width: 20px; color: var(--color-brand); font-size: 13px; text-align: center; }
 .file-manager-entry-details { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-5); }
 .file-manager-entry-details strong { min-width: 0; flex: 1 1 auto; }
+.file-manager-entry.is-recursive-ply .file-manager-entry-details strong { flex: 0 1 auto; max-width: 30%; }
+.file-manager-entry-relative { min-width: 0; flex: 1 1 auto; overflow: hidden; color: var(--color-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .file-manager-entry-details small { flex: 0 0 240px; text-align: right; }
 .file-manager-entry strong, .file-manager-entry small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-manager-entry strong { color: var(--color-text-primary); font-size: 14px; font-weight: 500; }

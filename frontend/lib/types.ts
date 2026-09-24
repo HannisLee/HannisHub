@@ -32,6 +32,7 @@ export interface FileManagerEntry {
   modified: number;
   extension: string;
   download_url?: string;
+  relative_path?: string;
 }
 
 export interface FileManagerDirectoryResponse {
@@ -45,6 +46,13 @@ export interface FileManagerDirectoryResponse {
   cache_ttl_seconds: number;
   max_entries: number;
   truncated: boolean;
+}
+
+export interface FileManagerPlyResponse {
+  entries: FileManagerEntry[];
+  cached: boolean;
+  generated_at: number;
+  expires_at: number;
 }
 
 export interface FileManagerSyncResponse {

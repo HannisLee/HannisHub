@@ -30,6 +30,7 @@ from file_manager import (
     delete_favorite,
     list_directory,
     list_favorites,
+    list_ply_files,
     rename_favorite,
     resolve_file,
     save_roots,
@@ -278,6 +279,16 @@ async def file_manager_directory(
 ):
     """返回受限目录的直接子项；默认使用服务端目录缓存。"""
     return JSONResponse(await run_in_threadpool(list_directory, root, path, refresh=refresh))
+
+
+@app.get("/api/file-manager/ply-files")
+async def file_manager_ply_files(
+    root: int = Query(..., ge=0),
+    path: str = Query("", max_length=4_096),
+    refresh: bool = Query(False),
+):
+    """返回当前目录及其所有子目录中的 PLY 文件。"""
+    return JSONResponse(await run_in_threadpool(list_ply_files, root, path, refresh=refresh))
 
 
 @app.post("/api/file-manager/sync")
