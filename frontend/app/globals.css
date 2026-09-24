@@ -445,6 +445,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-filter { min-height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-filter[aria-pressed="true"] { border-color: var(--color-control-border); background: var(--color-control-light); color: var(--color-on-light); }
 .file-manager-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
+.file-manager-up { min-height: 30px; margin-bottom: var(--space-2); padding: 0 var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-primary); font-size: 12px; cursor: pointer; }
+.file-manager-up:disabled { opacity: 0.45; cursor: default; }
+.file-manager-up:hover:not(:disabled) { background: var(--color-surface-hover); }
 .file-manager-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); margin-bottom: var(--space-3); color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-breadcrumb button { min-height: auto; padding: 2px 4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-breadcrumb button:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }

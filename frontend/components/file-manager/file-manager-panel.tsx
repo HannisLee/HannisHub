@@ -96,6 +96,7 @@ export function FileManagerPanel() {
   function goToDirectory(nextPath: string) {
     if (nextPath === path) return;
     const root = roots[selectedRootIndex];
+    setQuery("");
     setPreviewPath(nextPath === DEFAULT_DIRECTORY && (root === "~/reproduce" || root?.endsWith("/reproduce")) ? DEFAULT_FILE : "");
     setPath(nextPath);
   }
@@ -133,7 +134,7 @@ export function FileManagerPanel() {
             description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已暴露的顶层目录。"}
             actions={
               <div className="file-manager-toolbar">
-                <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setPath(""); setPreviewPath(""); }} aria-label="顶层文件夹" disabled={!roots.length}>
+                <select value={selectedRootIndex} onChange={event => { setSelectedRootIndex(Number(event.target.value)); setPath(""); setPreviewPath(""); setQuery(""); }} aria-label="顶层文件夹" disabled={!roots.length}>
                   {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
                 </select>
                 <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
@@ -150,6 +151,7 @@ export function FileManagerPanel() {
               </>
             ) : <span>正在读取目录状态…</span>}
           </div>
+          <button className="file-manager-up" type="button" onClick={() => goToDirectory(pathSegments.slice(0, -1).join("/"))} disabled={!path}>← 返回上级</button>
           <nav className="file-manager-breadcrumb" aria-label="目录路径">
             <button type="button" onClick={() => goToDirectory("")}>{roots[selectedRootIndex]?.split("/").filter(Boolean).at(-1) || "顶层目录"}</button>
             {pathSegments.map((segment, index) => <span key={pathAt(index)}><b>/</b><button type="button" onClick={() => goToDirectory(pathAt(index))}>{segment}</button></span>)}
@@ -171,8 +173,7 @@ export function FileManagerPanel() {
                   <span className="file-manager-entry-actions">
                     {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
                     {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => setPreviewPath(entry.path)}>预览</button> : null}
-                    {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">需转换后预览</span> : null}
-                    {entry.download_url ? <a className="button button-secondary button-sm" href={entry.download_url} download>下载</a> : null}
+                    {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
                   </span>
                 </div>
               ))}
@@ -184,7 +185,7 @@ export function FileManagerPanel() {
           {previewSource ? <>
             <CardHeader eyebrow="点云预览" title={previewSource.name} actions={<Button variant="secondary" size="sm" onClick={() => setExpanded(value => !value)}>{expanded ? "退出大屏" : "放大预览"}</Button>} />
             <PointCloudViewer key={`${selectedRootIndex}:${previewPath}`} file={previewSource} />
-          </> : <EmptyState title="选择点云文件" detail="在左侧浏览文件夹，打开 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。LAS/LAZ 文件可下载后转换。" />}
+          </> : <EmptyState title="选择点云文件" detail="在左侧浏览文件夹，打开 PLY、PCD、XYZ、XYZN、XYZRGB 或 PTS 文件。" />}
         </Card></div>
       </div>
     </>

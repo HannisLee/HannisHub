@@ -150,6 +150,7 @@ function parseGeometry(file: PointCloudSource, data: ArrayBuffer): { geometry: T
 function PointCloudCanvas({
   file,
   pointSize,
+  colored,
   onLoaded,
   onError,
   onLoading,
@@ -158,6 +159,7 @@ function PointCloudCanvas({
 }: {
   file: PointCloudSource;
   pointSize: number;
+  colored: boolean;
   onLoaded: (details: ViewerDetails) => void;
   onError: (message: string) => void;
   onLoading: () => void;
@@ -167,6 +169,8 @@ function PointCloudCanvas({
   const mountRef = useRef<HTMLDivElement>(null);
   const materialRef = useRef<THREE.PointsMaterial | null>(null);
   const pointSizeRef = useRef(pointSize);
+  const coloredRef = useRef(colored);
+  const hasColorsRef = useRef(false);
   const redrawRef = useRef(true);
   const onLoadedRef = useRef(onLoaded);
   const onErrorRef = useRef(onError);
@@ -243,10 +247,8 @@ function PointCloudCanvas({
       const positions = fallbackGeometry.getAttribute("position");
       const colors = fallbackGeometry.getAttribute("color");
       const opacities = fallbackGeometry.getAttribute("splatOpacity");
-      const scales = fallbackGeometry.getAttribute("splatScale");
-      const focal = 0.5 * height * camera.projectionMatrix.elements[5];
       const sampleStep = Math.max(1, Math.ceil(positions.count / 120_000));
-      const points: Array<{ x: number; y: number; depth: number; radius: number; color: string; alpha: number }> = [];
+      const points: Array<{ x: number; y: number; depth: number; size: number; color: string; alpha: number }> = [];
       const point = new THREE.Vector3();
       const view = new THREE.Vector3();
       const fallbackColor = cssColor(mount, "--color-brand", "#D97757");
@@ -257,17 +259,15 @@ function PointCloudCanvas({
         if (depth <= camera.near || depth >= camera.far) continue;
         point.project(camera);
         if (Math.abs(point.x) > 1.1 || Math.abs(point.y) > 1.1) continue;
-        const radius = fallbackGaussian && scales
-          ? Math.max(1, Math.min(14, scales.getX(index) * focal / depth * pointSizeRef.current))
-          : Math.max(1.5, pointSizeRef.current * 0.8);
-        const color = colors
+        const size = Math.max(0.5, pointSizeRef.current * 0.9);
+        const color = coloredRef.current && colors
           ? `rgb(${Math.round(Math.max(0.07, colors.getX(index)) * 255)} ${Math.round(Math.max(0.07, colors.getY(index)) * 255)} ${Math.round(Math.max(0.07, colors.getZ(index)) * 255)})`
           : fallbackColor;
         points.push({
           x: (point.x + 1) * width / 2,
           y: (1 - point.y) * height / 2,
           depth,
-          radius,
+          size,
           color,
           alpha: fallbackGaussian && opacities ? Math.min(0.85, opacities.getX(index)) : 0.9,
         });
@@ -276,9 +276,7 @@ function PointCloudCanvas({
       for (const point of points) {
         context.globalAlpha = point.alpha;
         context.fillStyle = point.color;
-        context.beginPath();
-        context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-        context.fill();
+        context.fillRect(Math.round(point.x - point.size / 2), Math.round(point.y - point.size / 2), point.size, point.size);
       }
       context.globalAlpha = 1;
     };
@@ -358,6 +356,7 @@ function PointCloudCanvas({
         const maxDimension = Math.max(size.x, size.y, size.z, 1e-4);
         geometry.translate(-center.x, -center.y, -center.z);
         const hasColors = Boolean(geometry.getAttribute("color"));
+        hasColorsRef.current = hasColors;
         const distance = maxDimension * 1.65;
         camera.near = Math.max(maxDimension / 10_000, 0.0001);
         camera.far = Math.max(maxDimension * 100, 10);
@@ -373,10 +372,10 @@ function PointCloudCanvas({
           redrawRef.current = true;
         } else {
           const material = new THREE.PointsMaterial({
-            color: cssColor(mount, "--color-brand", "#D97757"),
+            color: coloredRef.current && hasColors ? "#FFFFFF" : cssColor(mount, "--color-brand", "#D97757"),
             size: maxDimension * pointSizeRef.current * 0.003,
             sizeAttenuation: true,
-            vertexColors: hasColors,
+            vertexColors: coloredRef.current && hasColors,
           });
           materialRef.current = material;
           scene.add(new THREE.Points(geometry, material));
@@ -416,13 +415,26 @@ function PointCloudCanvas({
     redrawRef.current = true;
   }, [pointSize]);
 
+  useEffect(() => {
+    coloredRef.current = colored;
+    const material = materialRef.current;
+    if (material) {
+      material.vertexColors = colored && hasColorsRef.current;
+      const mount = mountRef.current;
+      material.color.set(material.vertexColors ? "#FFFFFF" : mount ? cssColor(mount, "--color-brand", "#D97757") : "#D97757");
+      material.needsUpdate = true;
+    }
+    redrawRef.current = true;
+  }, [colored]);
+
   return <div className="point-cloud-canvas-wrap" ref={mountRef} aria-label={`点云预览：${file.name}`}>
     {loadingLabel ? <div className="point-cloud-loading" role="status">{loadingLabel}</div> : null}
   </div>;
 }
 
 export function PointCloudViewer({ file }: { file: PointCloudSource }) {
-  const [pointSize, setPointSize] = useState(3);
+  const [pointSize, setPointSize] = useState(1);
+  const [colored, setColored] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState<number | null>(0);
@@ -432,12 +444,12 @@ export function PointCloudViewer({ file }: { file: PointCloudSource }) {
     <div className="point-cloud-toolbar">
       <span>{loading ? "正在读取并解析点云…" : details ? `${details.pointCount.toLocaleString()} 个点${details.gaussian ? " · Gaussian 预览" : details.hasColors ? " · 保留文件颜色" : " · 使用主题色"}` : "预览失败"}</span>
       <div className="point-cloud-toolbar-actions">
-        <label>点大小 <input type="range" min="1" max="10" value={pointSize} onChange={event => setPointSize(Number(event.target.value))} /><b>{pointSize}</b></label>
-        <a className="button button-secondary button-sm" href={file.url} download>下载文件</a>
+        <label>点大小 <input type="range" min="0.2" max="10" step="0.2" value={pointSize} onChange={event => setPointSize(Number(event.target.value))} /><b>{pointSize.toFixed(1)}</b></label>
+        <button className="file-manager-filter" type="button" aria-pressed={colored} onClick={() => setColored(value => !value)}>{colored ? "文件颜色" : "主题单色"}</button>
       </div>
     </div>
     {error ? <div className="point-cloud-viewer-error">{error}</div> : null}
-    <PointCloudCanvas file={file} pointSize={pointSize} loadingLabel={loading ? progress === null ? "正在解析点云…" : `正在读取点云… ${progress}%` : ""} onLoading={() => { setLoading(true); setProgress(0); setError(""); setDetails(null); }} onProgress={setProgress} onError={message => { setLoading(false); setError(message); }} onLoaded={value => { setLoading(false); setDetails(value); }} />
+    <PointCloudCanvas file={file} pointSize={pointSize} colored={colored} loadingLabel={loading ? progress === null ? "正在解析点云…" : `正在读取点云… ${progress}%` : ""} onLoading={() => { setLoading(true); setProgress(0); setError(""); setDetails(null); }} onProgress={setProgress} onError={message => { setLoading(false); setError(message); }} onLoaded={value => { setLoading(false); setDetails(value); }} />
     <p className="point-cloud-help">左键拖动旋转视角，滚轮缩放，右键拖动平移；触控板可双指缩放和平移。</p>
   </>;
 }

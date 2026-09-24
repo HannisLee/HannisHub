@@ -164,12 +164,12 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### 点云预览
 
-- 文件浏览页的目录列表与点云查看区并列；用户逐级浏览，点击可预览的点云文件即可在同页查看。预览直接读取文件管理下载接口，不发起全目录点云扫描。
-- 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，保留点大小调整、旋转、缩放、平移与下载操作。
-- `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 可在文件列表中下载，但需要预先转换后再预览。
+- 文件浏览页的目录列表与点云查看区并列；用户可逐级浏览、点击“返回上级”或面包屑跳转，点击点云文件即可在同页预览。预览直接读取文件管理下载接口，不发起全目录点云扫描；页面不显示文件下载按钮。
+- 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，支持 0.2 起的点大小调整、文件颜色与主题单色切换、旋转、缩放和平移。
+- `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 暂不支持直接预览。
 - 文件浏览页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
 - 浏览器端在目录缓存有效期内直接复用已读目录；点云文件下载显示进度。预览区使用更宽的布局和更高的画布，并提供大屏按钮。
-- Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布绘制，普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
+- Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
 
