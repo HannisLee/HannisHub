@@ -59,11 +59,15 @@ export interface FileManagerDatePlyEntry extends FileManagerEntry {
   root_index: number;
   source_path: string;
   date_folder: string;
+  experiment_date: string;
+  iteration_number: number | null;
 }
 
 export interface FileManagerDatePlyResponse {
   entries: FileManagerDatePlyEntry[];
-  date: string;
+  start_date: string;
+  end_date: string;
+  iteration_mode: "latest" | "exact" | "all";
   iteration: number | null;
   cached: boolean;
 }

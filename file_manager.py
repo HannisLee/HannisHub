@@ -6,7 +6,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
@@ -308,6 +308,13 @@ def list_ply_files(root_index: int, relative_path: str, *, refresh: bool = False
     records = _scan_ply_tree(directory, safe_path)
     generated_at = time.time()
     with _CACHE_LOCK:
+        if refresh:
+            for key in list(_PLY_CACHE):
+                cached_root, cached_path = key
+                if cached_root == root and (cached_path == safe_path or not cached_path or not safe_path
+                                            or safe_path.startswith(f"{cached_path}/")
+                                            or cached_path.startswith(f"{safe_path}/")):
+                    del _PLY_CACHE[key]
         _PLY_CACHE[(root, safe_path)] = (generated_at, records)
     prefix = f"{safe_path}/" if safe_path else ""
     return {"entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(prefix):]} for record in records],
@@ -405,6 +412,102 @@ def search_ply_by_date(date: object, iteration: object = 40000) -> dict[str, Any
             entries.append({**entry, "root_index": root_index, "source_path": source_path, "date_folder": date_folder})
     entries.sort(key=lambda entry: (entry["source_path"].lower(), entry["path"].lower()))
     return {"entries": entries, "date": date, "iteration": iteration, "cached": cached}
+
+
+def _parse_range_date(value: object) -> date:
+    """解析日期范围端点使用的完整日期。"""
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise HTTPException(status_code=422, detail="日期范围请使用 YYYY-MM-DD")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="日期范围包含无效日期") from exc
+
+
+def _folder_date(name: str) -> tuple[int | None, int, int] | None:
+    """提取实验目录名开头的完整日期或四位月日。"""
+    for pattern in (r"^(\d{4})[-_](\d{2})[-_](\d{2})(?:$|[-_])",
+                    r"^(\d{4})[-_]?(\d{2})(\d{2})(?:$|[-_])"):
+        if match := re.match(pattern, name):
+            return int(match[1]), int(match[2]), int(match[3])
+    if match := re.match(r"^(\d{2})(\d{2})(?:$|[-_])", name):
+        return None, int(match[1]), int(match[2])
+    return None
+
+
+def _date_in_range(parts: list[str], start: date, end: date) -> tuple[date, str] | None:
+    """从靠近文件的目录开始匹配日期；无年份目录按查询范围推断年份。"""
+    for part in reversed(parts):
+        parsed = _folder_date(part)
+        if parsed is None:
+            continue
+        year, month, day = parsed
+        for candidate_year in ([year] if year is not None else range(end.year, start.year - 1, -1)):
+            try:
+                candidate = date(candidate_year, month, day)
+            except ValueError:
+                continue
+            if start <= candidate <= end:
+                return candidate, part
+    return None
+
+
+def _iteration_in_path(parts: list[str]) -> tuple[int, tuple[str, ...]] | None:
+    """识别 iteration_40000、iter40000 等目录，并给出所属输出组。"""
+    for index in range(len(parts) - 1, -1, -1):
+        if match := re.fullmatch(r"(?:iteration|iter)[_-]?(\d+)", parts[index], re.IGNORECASE):
+            return int(match[1]), tuple(parts[:index])
+    return None
+
+
+def search_ply_by_range(start_date: object, end_date: object, iteration_mode: object = "latest",
+                        iteration: object = None, refresh: bool = False) -> dict[str, Any]:
+    """按日期范围查找 PLY；可选每组最新、指定迭代或全部文件。"""
+    start, end = _parse_range_date(start_date), _parse_range_date(end_date)
+    if start > end:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    if iteration_mode not in ("latest", "exact", "all"):
+        raise HTTPException(status_code=422, detail="迭代过滤方式无效")
+    if iteration_mode == "exact" and (not isinstance(iteration, int) or isinstance(iteration, bool) or iteration < 0):
+        raise HTTPException(status_code=422, detail="指定迭代需要非负整数")
+    if not isinstance(refresh, bool):
+        raise HTTPException(status_code=422, detail="刷新参数无效")
+
+    entries: list[dict[str, Any]] = []
+    seen_files: set[tuple[int, str]] = set()
+    latest_by_group: dict[tuple[int, tuple[str, ...]], int] = {}
+    cached = True
+    for source_path, root_index, relative_path in _date_search_locations(date_search_folders()):
+        result = list_ply_files(root_index, relative_path, refresh=refresh)
+        cached = cached and result["cached"]
+        for entry in result["entries"]:
+            parts = entry["path"].split("/")[:-1]
+            matched = _date_in_range(parts, start, end)
+            if matched is None:
+                continue
+            iteration_info = _iteration_in_path(parts)
+            if iteration_mode == "exact" and (iteration_info is None or iteration_info[0] != iteration):
+                continue
+            if iteration_mode == "latest" and iteration_info is None:
+                continue
+            file_key = (root_index, entry["path"])
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+            matched_date, date_folder = matched
+            entries.append({**entry, "root_index": root_index, "source_path": source_path,
+                            "date_folder": date_folder, "experiment_date": matched_date.isoformat(),
+                            "iteration_number": iteration_info[0] if iteration_info else None})
+            if iteration_mode == "latest" and iteration_info:
+                group_key = (root_index, iteration_info[1])
+                latest_by_group[group_key] = max(latest_by_group.get(group_key, -1), iteration_info[0])
+    if iteration_mode == "latest":
+        entries = [entry for entry in entries
+                   if entry["iteration_number"] == latest_by_group[(entry["root_index"],
+                       _iteration_in_path(entry["path"].split("/")[:-1])[1])]]
+    entries.sort(key=lambda entry: (entry["experiment_date"], entry["source_path"].lower(), entry["path"].lower()), reverse=True)
+    return {"entries": entries, "start_date": start.isoformat(), "end_date": end.isoformat(),
+            "iteration_mode": iteration_mode, "iteration": iteration if iteration_mode == "exact" else None, "cached": cached}
 
 
 def resolve_file(root_index: int, relative_path: str) -> Path:

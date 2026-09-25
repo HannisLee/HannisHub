@@ -508,10 +508,17 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-toolbar .search-input { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-date-search form { display: grid; gap: var(--space-3); }
 .file-manager-date-folders, .file-manager-date-controls label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 12px; }
-.file-manager-date-folders textarea, .file-manager-date-controls input { width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: var(--color-surface-soft); color: var(--color-text-primary); font: inherit; }
+.file-manager-date-folders textarea, .file-manager-date-controls input, .file-manager-date-controls select { width: 100%; min-width: 0; min-height: 34px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: var(--color-surface-soft); color: var(--color-text-primary); font: inherit; }
 .file-manager-date-folders textarea { resize: vertical; font-family: var(--font-mono); line-height: 1.5; }
-.file-manager-date-controls { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto; align-items: end; gap: var(--space-3); }
+.file-manager-date-presets { display: flex; gap: var(--space-2); }
+.file-manager-date-presets button { min-height: 30px; padding: 0 var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
+.file-manager-date-presets button[aria-pressed="true"] { background: var(--color-control-light); color: var(--color-on-light); }
+.file-manager-date-controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); }
+.file-manager-date-controls label { flex: 1 1 155px; }
 .file-manager-date-controls .button { min-height: 34px; }
+.file-manager-date-folder-settings { padding-top: var(--space-2); border-top: 1px solid var(--color-divider); }
+.file-manager-date-folder-settings summary { color: var(--color-text-secondary); cursor: pointer; font-size: 12px; }
+.file-manager-date-folder-settings .file-manager-date-folders { margin-top: var(--space-3); }
 .file-manager-date-hint { margin: var(--space-3) 0 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
 .file-manager-date-summary { margin-top: var(--space-4); padding-bottom: var(--space-2); color: var(--color-text-secondary); font-size: 13px; }
 .file-manager-date-results { display: grid; max-height: 480px; overflow: auto; border-top: 1px solid var(--color-divider); }
@@ -549,6 +556,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-entry-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .file-manager-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .file-manager-preview { min-width: 0; }
+.file-manager-preview.is-empty .point-cloud-canvas-wrap { height: 160px; }
 .file-manager-preview .point-cloud-toolbar { margin-top: 0; }
 .point-cloud-file-identity { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); color: var(--color-text-muted); font-size: 12px; }
 .point-cloud-file-identity strong { color: var(--color-text-primary); font-size: 14px; font-weight: 500; }
@@ -662,8 +670,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
-  .file-manager-date-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .file-manager-date-controls .button { grid-column: 1 / -1; }
+  .file-manager-date-controls .button { width: 100%; }
   .file-manager-date-result { align-items: flex-start; flex-direction: column; }
   .file-manager-toolbar.is-point-cloud { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .file-manager-toolbar select:first-child { grid-column: 1 / -1; }

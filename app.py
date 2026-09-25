@@ -37,6 +37,7 @@ from file_manager import (
     save_roots,
     save_date_search_folders,
     search_ply_by_date,
+    search_ply_by_range,
     sync_roots,
 )
 from point_cloud import resolve_cloud_file
@@ -308,7 +309,11 @@ async def update_file_manager_date_search_folders(payload: dict[str, Any] = Body
 
 @app.post("/api/file-manager/ply-by-date")
 async def file_manager_ply_by_date(payload: dict[str, Any] = Body(...)):
-    """在已保存的项目目录中按日期和迭代查找 PLY。"""
+    """在已保存的项目目录中按日期范围与可选迭代规则查找 PLY。"""
+    if "start_date" in payload or "end_date" in payload:
+        return JSONResponse(await run_in_threadpool(search_ply_by_range, payload.get("start_date"),
+                                                     payload.get("end_date"), payload.get("iteration_mode", "latest"),
+                                                     payload.get("iteration"), payload.get("refresh", False)))
     return JSONResponse(await run_in_threadpool(search_ply_by_date, payload.get("date"), payload.get("iteration", 40000)))
 
 

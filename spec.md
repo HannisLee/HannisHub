@@ -139,7 +139,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，不跟随符号链接 |
 | GET | `/api/file-manager/date-search-folders` | 读取按日期查找 PLY 的项目目录；首次使用时列出已存在且处于开放范围内的 RadioGS、LumiMotion 项目目录 |
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
-| POST | `/api/file-manager/ply-by-date` | 在已保存项目目录中按 `date`（`MMDD` 或 `YYYY-MM-DD`）及 `iteration`（默认 40000，`null` 表示全部）筛选 PLY；返回文件所属顶层目录索引、来源目录、日期目录和完整相对路径，复用递归扫描缓存 |
+| POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
@@ -177,12 +177,12 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### 点云预览
 
-- 文件管理导航分为“文件游览”和“点云预览”两个入口，两页复用目录浏览组件。文件游览页点击可预览文件会带着顶层目录索引与相对路径进入点云页；点云页不显示页面标题，预览、收藏目录和当前目录自上而下排列。文件条目将名称、大小与时间排在单行。预览直接读取文件管理下载接口；点云目录列表递归列出 PLY 文件并提供行内下载按钮，文件游览页仍可进入其他受支持格式的预览，预览画布本身不显示下载按钮。
+- 文件管理导航分为“文件游览”和“点云预览”两个入口，两页复用目录浏览组件。文件游览页点击可预览文件会带着顶层目录索引与相对路径进入点云页；点云页不显示页面标题，日期查找、预览、收藏目录和文件夹探查自上而下排列。文件条目将名称、大小与时间排在单行。预览直接读取文件管理下载接口；点云目录列表递归列出 PLY 文件并提供行内下载按钮，文件游览页仍可进入其他受支持格式的预览，预览画布本身不显示下载按钮。
 - 预览器是独立的 `PointCloudViewer` 组件，复用 Three.js 的 `PLYLoader`、`PCDLoader` 和 `OrbitControls`，支持 0.2 起的点大小调整、文件颜色与主题单色切换、旋转、缩放和平移。
 - `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 暂不支持直接预览。
-- 点云页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
+- 点云页默认自动查找含今天在内的近 7 个自然日；没有通过 URL 指定文件时预览区保持待选择状态，文件夹探查默认从 `RadioGS-stage1/output` 开始。仍由服务端的受限目录配置控制访问。
 - 浏览器端在目录缓存有效期内直接复用已读目录；同步范围默认是 RadioGS-perlight 与 RadioGS-stage1，也可单选，预读时还会缓存递归 PLY 列表。点云页目录工具栏只保留同步范围与同步按钮，目录切换使用收藏、面包屑和文件夹列表；列表顶格显示当前目录的直接子文件夹，缩进显示当前目录及所有子目录的 PLY 文件，文件名后标注相对当前目录的路径，隐藏其他普通文件。文件游览页仍提供顶层目录、搜索和仅点云控件。预览顶部展示展开后的文件路径和所属收藏目录名称；点云文件下载显示进度。预览画布桌面端固定为 720px 高、窄屏固定为 520px 高，并提供大屏按钮；浏览其他目录时保留当前点云，不改变预览高度。
-- 点云页保留当前文件夹的递归 PLY 探查，并新增跨项目目录的日期查找。项目路径每行一个，首次使用时从开放范围内预填 RadioGS 与 LumiMotion 目录，提交查找时保存到 `settings.json`；按实验目录名开头的 `MMDD-...`、`YYYYMMDD-...` 或 `YYYY-MM-DD-...` 匹配日期，不按文件修改时间匹配。默认只返回路径中含 `iteration_40000` 或 `iter40000` 等对应迭代目录的 PLY，迭代次数可修改或留空。结果显示完整路径并提供预览和下载；所有目录仍受已开放顶层目录限制。
+- 点云页保留当前文件夹的递归 PLY 探查作为末尾的备用入口，并在顶部提供跨项目目录的日期范围查找。默认自动查找近 7 天；可一键切到今天，或手动调整开始与结束日期。项目路径每行一个，首次使用时从开放范围内预填 RadioGS 与 LumiMotion 目录，手动查找时保存到 `settings.json` 并刷新磁盘扫描。按实验目录名开头的 `MMDD-...`、`YYYYMMDD-...` 或 `YYYY-MM-DD-...` 匹配日期，不按文件修改时间匹配；四位月日目录缺少年份时按查询范围推断年份。迭代过滤默认选每个点云输出组中数值最大的 `iteration_*` 或 `iter*`；也可指定迭代次数，或列出全部 PLY（包括没有迭代目录的文件）。结果按实验日期倒序显示完整路径、迭代数，提供预览和下载；所有目录仍受已开放顶层目录限制。
 - Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）
