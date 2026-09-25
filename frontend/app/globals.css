@@ -506,6 +506,21 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-toolbar.is-point-cloud select { width: min(180px, 100%); }
 .file-manager-toolbar select { width: 100%; min-height: 30px; font-size: 12px; }
 .file-manager-toolbar .search-input { width: 100%; min-height: 30px; font-size: 12px; }
+.file-manager-date-search form { display: grid; gap: var(--space-3); }
+.file-manager-date-folders, .file-manager-date-controls label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 12px; }
+.file-manager-date-folders textarea, .file-manager-date-controls input { width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: var(--color-surface-soft); color: var(--color-text-primary); font: inherit; }
+.file-manager-date-folders textarea { resize: vertical; font-family: var(--font-mono); line-height: 1.5; }
+.file-manager-date-controls { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto; align-items: end; gap: var(--space-3); }
+.file-manager-date-controls .button { min-height: 34px; }
+.file-manager-date-hint { margin: var(--space-3) 0 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
+.file-manager-date-summary { margin-top: var(--space-4); padding-bottom: var(--space-2); color: var(--color-text-secondary); font-size: 13px; }
+.file-manager-date-results { display: grid; max-height: 480px; overflow: auto; border-top: 1px solid var(--color-divider); }
+.file-manager-date-result { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
+.file-manager-date-result.is-selected { background: var(--color-surface-hover); }
+.file-manager-date-result-info { display: grid; min-width: 0; gap: var(--space-1); }
+.file-manager-date-result-info strong { color: var(--color-text-primary); font-size: 13px; font-weight: 500; }
+.file-manager-date-result-info code { overflow-wrap: anywhere; color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 12px; }
+.file-manager-date-result-info small { color: var(--color-text-muted); font-size: 12px; }
 .file-manager-filter { min-height: 30px; padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
 .file-manager-filter[aria-pressed="true"] { border-color: var(--color-control-border); background: var(--color-control-light); color: var(--color-on-light); }
 .file-manager-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
@@ -647,6 +662,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-group-head { align-items: flex-start; flex-direction: column; }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
+  .file-manager-date-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .file-manager-date-controls .button { grid-column: 1 / -1; }
+  .file-manager-date-result { align-items: flex-start; flex-direction: column; }
   .file-manager-toolbar.is-point-cloud { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .file-manager-toolbar select:first-child { grid-column: 1 / -1; }
   .file-manager-toolbar select:not(:first-child) { grid-column: 1 / 2; }

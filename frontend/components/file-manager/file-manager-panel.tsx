@@ -6,6 +6,7 @@ import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import type {
   FileManagerDirectoryResponse,
+  FileManagerDatePlyResponse,
   FileManagerEntry,
   FileManagerFavorite,
   FileManagerPlyResponse,
@@ -43,6 +44,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [path, setPath] = useState("");
   const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
   const [plyFiles, setPlyFiles] = useState<FileManagerPlyResponse | null>(null);
+  const [dateFoldersText, setDateFoldersText] = useState("");
+  const [dateQuery, setDateQuery] = useState("");
+  const [iterationQuery, setIterationQuery] = useState("40000");
+  const [dateResults, setDateResults] = useState<FileManagerDatePlyResponse | null>(null);
+  const [dateBusy, setDateBusy] = useState(false);
+  const [dateError, setDateError] = useState("");
   const [query, setQuery] = useState("");
   const [onlyPointClouds, setOnlyPointClouds] = useState(false);
   const [previewFile, setPreviewFile] = useState<SelectedFile | null>(null);
@@ -136,6 +143,15 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }, [pointCloudMode]);
 
   useEffect(() => {
+    if (!pointCloudMode) return;
+    let active = true;
+    apiFetch<{ folders: string[] }>(`${API_PATHS.fileManager}/date-search-folders`)
+      .then(value => { if (active) setDateFoldersText(value.folders.join("\n")); })
+      .catch(value => { if (active) setDateError(errorMessage(value)); });
+    return () => { active = false; };
+  }, [pointCloudMode]);
+
+  useEffect(() => {
     if (!roots.length) return;
     void loadDirectory(selectedRootIndex, path);
   }, [roots, selectedRootIndex, path, loadDirectory]);
@@ -222,6 +238,27 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     }
   }
 
+  async function searchDate() {
+    const folders = dateFoldersText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    setDateBusy(true);
+    setDateError("");
+    setDateResults(null);
+    try {
+      const saved = await apiFetch<{ folders: string[] }>(`${API_PATHS.fileManager}/date-search-folders`, {
+        method: "PUT", body: jsonBody({ folders }),
+      });
+      setDateFoldersText(saved.folders.join("\n"));
+      const result = await apiFetch<FileManagerDatePlyResponse>(`${API_PATHS.fileManager}/ply-by-date`, {
+        method: "POST", body: jsonBody({ date: dateQuery.trim(), iteration: iterationQuery.trim() === "" ? null : Number(iterationQuery) }),
+      });
+      setDateResults(result);
+    } catch (value) {
+      setDateError(errorMessage(value));
+    } finally {
+      setDateBusy(false);
+    }
+  }
+
   return (
     <>
       {!pointCloudMode ? <PageHeader kicker="文件管理 / Files" title="文件游览" description="浏览已开放的目录，选择点云文件后进入预览。" /> : null}
@@ -253,6 +290,36 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                 </div>;
               })}
             </div> : <p className="file-manager-favorites-empty">收藏常用目录后，可以从这里快速跳转并修改显示名称。</p>}
+          </Card>
+          <Card className="file-manager-date-search">
+            <CardHeader title="按日期查找 PLY" description="在多个项目目录中匹配实验文件夹名称，默认只找第 40000 次迭代。" />
+            <form onSubmit={event => { event.preventDefault(); void searchDate(); }}>
+              <label className="file-manager-date-folders">探查文件夹（每行一个绝对路径或 ~/ 路径）
+                <textarea value={dateFoldersText} onChange={event => setDateFoldersText(event.target.value)} rows={3} placeholder="~/reproduce/RadioGS-stage1" spellCheck={false} />
+              </label>
+              <div className="file-manager-date-controls">
+                <label>日期（MMDD 或 YYYY-MM-DD）<input value={dateQuery} onChange={event => setDateQuery(event.target.value)} placeholder="0921" inputMode="numeric" required /></label>
+                <label>迭代次数（留空查全部）<input type="number" min="0" step="1" value={iterationQuery} onChange={event => setIterationQuery(event.target.value)} placeholder="全部" /></label>
+                <Button variant="secondary" size="sm" type="submit" disabled={dateBusy || !dateFoldersText.trim() || !dateQuery.trim()}>{dateBusy ? "正在查找…" : "查找 PLY"}</Button>
+              </div>
+            </form>
+            <p className="file-manager-date-hint">日期匹配目录名开头的月日；例如 0921 匹配 0921-05-…。文件夹会保存到服务端，并须位于已开放的顶层目录内。</p>
+            {dateError ? <ErrorState message={dateError} /> : null}
+            {dateResults ? <>
+              <div className="file-manager-date-summary">找到 {dateResults.entries.length} 个 PLY · {dateResults.cached ? "使用目录缓存" : "已扫描目录"}</div>
+              {dateResults.entries.length ? <div className="file-manager-date-results">
+                {dateResults.entries.map(entry => {
+                  const fullPath = `${resolvedRoots[entry.root_index] || roots[entry.root_index]}/${entry.path}`;
+                  return <div className={`file-manager-date-result${previewFile?.rootIndex === entry.root_index && previewFile.path === entry.path ? " is-selected" : ""}`} key={`${entry.root_index}:${entry.path}`}>
+                    <div className="file-manager-date-result-info"><strong>{entry.date_folder} · {entry.name}</strong><code title={fullPath}>{fullPath}</code><small>{formatBytes(entry.size)} · {formatDate(entry.modified)}</small></div>
+                    <div className="file-manager-entry-actions">
+                      <Button variant="secondary" size="sm" type="button" onClick={() => setPreviewFile(selectedFile(entry.root_index, entry.path))}>预览</Button>
+                      <a className="button button-secondary button-sm" href={downloadUrl(entry.root_index, entry.path)} download title={`下载 ${entry.name}`}>下载</a>
+                    </div>
+                  </div>;
+                })}
+              </div> : <EmptyState title="该日期没有匹配的 PLY" detail="可调整日期或迭代次数后再次查找。" />}
+            </> : null}
           </Card>
         </> : null}
         <Card className="file-manager-browser">

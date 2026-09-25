@@ -27,6 +27,7 @@ import llama_manager.app as llama_manager_app
 from file_manager import (
     add_favorite,
     configured_roots,
+    date_search_folders,
     delete_favorite,
     list_directory,
     list_favorites,
@@ -34,6 +35,8 @@ from file_manager import (
     rename_favorite,
     resolve_file,
     save_roots,
+    save_date_search_folders,
+    search_ply_by_date,
     sync_roots,
 )
 from point_cloud import resolve_cloud_file
@@ -289,6 +292,24 @@ async def file_manager_ply_files(
 ):
     """返回当前目录及其所有子目录中的 PLY 文件。"""
     return JSONResponse(await run_in_threadpool(list_ply_files, root, path, refresh=refresh))
+
+
+@app.get("/api/file-manager/date-search-folders")
+async def file_manager_date_search_folders():
+    """返回按日期查找 PLY 的项目目录。"""
+    return JSONResponse({"folders": await run_in_threadpool(date_search_folders)})
+
+
+@app.put("/api/file-manager/date-search-folders")
+async def update_file_manager_date_search_folders(payload: dict[str, Any] = Body(...)):
+    """保存多个位于已开放范围内的项目目录。"""
+    return JSONResponse({"folders": await run_in_threadpool(save_date_search_folders, payload.get("folders"))})
+
+
+@app.post("/api/file-manager/ply-by-date")
+async def file_manager_ply_by_date(payload: dict[str, Any] = Body(...)):
+    """在已保存的项目目录中按日期和迭代查找 PLY。"""
+    return JSONResponse(await run_in_threadpool(search_ply_by_date, payload.get("date"), payload.get("iteration", 40000)))
 
 
 @app.post("/api/file-manager/sync")

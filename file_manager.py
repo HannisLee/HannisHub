@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+from datetime import datetime
 from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,7 @@ DEFAULT_ROOT = "~/reproduce"
 MAX_ROOTS = 24
 MAX_DIRECTORY_ENTRIES = 1_000
 MAX_FAVORITES = 100
+MAX_DATE_SEARCH_FOLDERS = 24
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
     "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
@@ -45,6 +48,12 @@ _PLY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
 _CACHE_LOCK = threading.RLock()
 _SYNC_LOCK = threading.Lock()
 _FAVORITES_LOCK = threading.RLock()
+_DATE_SEARCH_DEFAULTS = (
+    "~/reproduce/RadioGS-perlight",
+    "~/reproduce/RadioGS-stage1",
+    "~/reproduce/LumiMotion",
+    "~/reproduce/LumiMotion-perlight",
+)
 
 
 def _default_roots() -> list[str]:
@@ -303,6 +312,99 @@ def list_ply_files(root_index: int, relative_path: str, *, refresh: bool = False
     prefix = f"{safe_path}/" if safe_path else ""
     return {"entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(prefix):]} for record in records],
             "cached": False, "generated_at": generated_at, "expires_at": generated_at + CACHE_TTL_SECONDS}
+
+
+def _date_search_locations(values: object) -> list[tuple[str, int, str]]:
+    """校验多个探查目录，并映射到已开放顶层目录的索引与相对路径。"""
+    if not isinstance(values, list) or not 1 <= len(values) <= MAX_DATE_SEARCH_FOLDERS:
+        raise HTTPException(status_code=422, detail=f"请提供 1 到 {MAX_DATE_SEARCH_FOLDERS} 个探查目录")
+    roots = [_resolve_root(text) for text in configured_roots()]
+    locations: list[tuple[str, int, str]] = []
+    seen: set[Path] = set()
+    for value in values:
+        text = _normalize_root_text(value)
+        directory = Path(text).expanduser().resolve()
+        if not directory.is_dir():
+            raise HTTPException(status_code=422, detail=f"探查目录不存在：{text}")
+        match = next(((index, root) for index, root in enumerate(roots) if directory.is_relative_to(root)), None)
+        if match is None:
+            raise HTTPException(status_code=422, detail=f"探查目录不在已开放范围：{text}")
+        if directory in seen:
+            continue
+        seen.add(directory)
+        index, root = match
+        locations.append((text, index, directory.relative_to(root).as_posix() if directory != root else ""))
+    return locations
+
+
+def date_search_folders() -> list[str]:
+    """读取已保存的探查目录；首次使用时采用已存在的示例项目。"""
+    saved = get_settings_section("ply_date_search")
+    if isinstance(saved, list):
+        return [value for value in saved if isinstance(value, str)]
+    roots = [_resolve_root(text) for text in configured_roots()]
+    return [text for text in _DATE_SEARCH_DEFAULTS
+            if (directory := Path(text).expanduser().resolve()).is_dir()
+            and any(directory.is_relative_to(root) for root in roots)]
+
+
+def save_date_search_folders(values: object) -> list[str]:
+    """将已授权的多个探查目录保存到 settings.json。"""
+    folders = [text for text, _, _ in _date_search_locations(values)]
+    update_settings_section("ply_date_search", folders)
+    return folders
+
+
+def _date_prefix(value: object) -> tuple[str, str]:
+    """解析 YYYY-MM-DD 或 MMDD；旧实验目录只有月日时按月日匹配。"""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="日期请使用 YYYY-MM-DD 或 MMDD")
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            datetime.strptime(value, "%Y-%m-%d")
+            return value[:4], value[5:7] + value[8:10]
+        if re.fullmatch(r"\d{4}", value):
+            datetime.strptime("2000" + value, "%Y%m%d")
+            return "", value
+    except ValueError:
+        pass
+    raise HTTPException(status_code=422, detail="日期请使用有效的 YYYY-MM-DD 或 MMDD")
+
+
+def _matches_date_folder(name: str, year: str, month_day: str) -> bool:
+    """只匹配目录名开头的日期，避免文件路径中的其他数字误命中。"""
+    short = re.match(rf"^{month_day}(?:$|[-_])", name)
+    year_pattern = year or r"\d{4}"
+    long = re.match(rf"^{year_pattern}(?:[-_]?{month_day}|[-_]{month_day[:2]}[-_]{month_day[2:]})(?:$|[-_])", name)
+    return bool(short or long)
+
+
+def search_ply_by_date(date: object, iteration: object = 40000) -> dict[str, Any]:
+    """跨已保存目录查找指定日期和迭代的 PLY，复用一小时扫描缓存。"""
+    year, month_day = _date_prefix(date)
+    if iteration is not None and (not isinstance(iteration, int) or isinstance(iteration, bool) or iteration < 0):
+        raise HTTPException(status_code=422, detail="迭代次数必须是非负整数，或留空表示全部")
+    locations = _date_search_locations(date_search_folders())
+    entries: list[dict[str, Any]] = []
+    seen_files: set[tuple[int, str]] = set()
+    cached = True
+    for source_path, root_index, relative_path in locations:
+        result = list_ply_files(root_index, relative_path)
+        cached = cached and result["cached"]
+        for entry in result["entries"]:
+            parts = entry["path"].split("/")[:-1]
+            date_folder = next((part for part in parts if _matches_date_folder(part, year, month_day)), None)
+            if date_folder is None:
+                continue
+            if iteration is not None and not any(re.fullmatch(rf"(?:iteration|iter)[_-]?{iteration}", part, re.IGNORECASE) for part in parts):
+                continue
+            file_key = (root_index, entry["path"])
+            if file_key in seen_files:
+                continue
+            seen_files.add(file_key)
+            entries.append({**entry, "root_index": root_index, "source_path": source_path, "date_folder": date_folder})
+    entries.sort(key=lambda entry: (entry["source_path"].lower(), entry["path"].lower()))
+    return {"entries": entries, "date": date, "iteration": iteration, "cached": cached}
 
 
 def resolve_file(root_index: int, relative_path: str) -> Path:

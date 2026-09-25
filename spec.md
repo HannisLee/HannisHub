@@ -137,6 +137,9 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
 | GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，不跟随符号链接 |
+| GET | `/api/file-manager/date-search-folders` | 读取按日期查找 PLY 的项目目录；首次使用时列出已存在且处于开放范围内的 RadioGS、LumiMotion 项目目录 |
+| PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
+| POST | `/api/file-manager/ply-by-date` | 在已保存项目目录中按 `date`（`MMDD` 或 `YYYY-MM-DD`）及 `iteration`（默认 40000，`null` 表示全部）筛选 PLY；返回文件所属顶层目录索引、来源目录、日期目录和完整相对路径，复用递归扫描缓存 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
@@ -179,6 +182,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - `PLY`、`PCD`、`XYZ`、`XYZN`、`XYZRGB`、`PTS` 支持直接加载；`LAS`、`LAZ` 暂不支持直接预览。
 - 点云页暂时默认打开 `~/reproduce/RadioGS-stage1/output/0921-05-cv3-d4rt-48clip-depth-normal/point_cloud/iteration_40000/point_cloud.ply`；移除页面内的暴露范围编辑窗口，仍由服务端的受限目录配置控制访问。
 - 浏览器端在目录缓存有效期内直接复用已读目录；同步范围默认是 RadioGS-perlight 与 RadioGS-stage1，也可单选，预读时还会缓存递归 PLY 列表。点云页目录工具栏只保留同步范围与同步按钮，目录切换使用收藏、面包屑和文件夹列表；列表顶格显示当前目录的直接子文件夹，缩进显示当前目录及所有子目录的 PLY 文件，文件名后标注相对当前目录的路径，隐藏其他普通文件。文件游览页仍提供顶层目录、搜索和仅点云控件。预览顶部展示展开后的文件路径和所属收藏目录名称；点云文件下载显示进度。预览画布桌面端固定为 720px 高、窄屏固定为 520px 高，并提供大屏按钮；浏览其他目录时保留当前点云，不改变预览高度。
+- 点云页保留当前文件夹的递归 PLY 探查，并新增跨项目目录的日期查找。项目路径每行一个，首次使用时从开放范围内预填 RadioGS 与 LumiMotion 目录，提交查找时保存到 `settings.json`；按实验目录名开头的 `MMDD-...`、`YYYYMMDD-...` 或 `YYYY-MM-DD-...` 匹配日期，不按文件修改时间匹配。默认只返回路径中含 `iteration_40000` 或 `iter40000` 等对应迭代目录的 PLY，迭代次数可修改或留空。结果显示完整路径并提供预览和下载；所有目录仍受已开放顶层目录限制。
 - Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
 ## 模型管理子服务后端架构（llama_manager/app.py）

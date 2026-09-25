@@ -55,6 +55,19 @@ export interface FileManagerPlyResponse {
   expires_at: number;
 }
 
+export interface FileManagerDatePlyEntry extends FileManagerEntry {
+  root_index: number;
+  source_path: string;
+  date_folder: string;
+}
+
+export interface FileManagerDatePlyResponse {
+  entries: FileManagerDatePlyEntry[];
+  date: string;
+  iteration: number | null;
+  cached: boolean;
+}
+
 export interface FileManagerSyncResponse {
   targets: string[];
   directory_count: number;
