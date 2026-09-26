@@ -429,24 +429,19 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-editor-card .segmented button { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor-card .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor { min-height: clamp(480px, 62vh, 760px); font: 400 15px/1.65 var(--font-mono); }
-.prompt-polish-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
+.prompt-polish-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); }
 .prompt-polish-button {
-  display: grid;
-  min-width: 0;
-  min-height: 58px;
-  align-content: center;
-  gap: 2px;
-  padding: var(--space-2) var(--space-3);
+  min-height: 28px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-soft);
-  color: var(--color-text-primary);
-  text-align: left;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 .prompt-polish-button:hover:not(:disabled) { border-color: var(--color-brand); background: var(--color-surface-hover); }
-.prompt-polish-button span { font-size: 13px; font-weight: 500; }
-.prompt-polish-button small { overflow: hidden; color: var(--color-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-polish-standard { border-color: var(--color-control-border); }
 .prompt-polish-deep { color: var(--color-brand); }
 .editor-meta {
@@ -710,7 +705,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-meta { grid-template-columns: 1fr; justify-items: start; }
   .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
-  .prompt-polish-actions, .prompt-settings-grid { grid-template-columns: 1fr; }
+  .prompt-settings-grid { grid-template-columns: 1fr; }
+  .prompt-polish-actions { flex: 1 1 auto; }
+  .prompt-polish-button { flex: 1 1 0; }
   .prompt-archive-list { height: min(68vh, 620px); }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
   .file-manager-date-controls .button { width: 100%; }

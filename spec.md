@@ -646,7 +646,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 ## 在线提示词输入子服务（prompt_service）
 
-`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、三档 AI 润色、无分组归档、复制、恢复和删除。三档润色复用项目统一的 OpenAI 兼容 API 与模型配置，润色指令保存在根目录 `ai_settings.json`；归档内容保存到 `prompt_service/settings.json`，数据结构：
+`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、三档 AI 润色、无分组归档、复制、恢复和删除。轻度、标准、深度按钮固定在编辑器顶部的原文/润色稿切换左侧，长文本无需滚动到底部即可操作。三档润色复用项目统一的 OpenAI 兼容 API 与模型配置，润色指令保存在根目录 `ai_settings.json`；归档内容保存到 `prompt_service/settings.json`，数据结构：
 
 ```json
 {

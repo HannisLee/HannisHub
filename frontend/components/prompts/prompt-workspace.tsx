@@ -16,10 +16,10 @@ const DRAFT_KEY = "hannishub_prompt_draft";
 const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
 const ARCHIVE_MAX_COUNT = 500;
 
-const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string; detail: string }> = [
-  { id: "light", label: "轻度润色", detail: "修正表达，尽量保留原文" },
-  { id: "standard", label: "标准润色", detail: "梳理结构、目标与约束" },
-  { id: "deep", label: "深度润色", detail: "重构为工程化高质量提示词" },
+const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string }> = [
+  { id: "light", label: "轻度" },
+  { id: "standard", label: "标准" },
+  { id: "deep", label: "深度" },
 ];
 
 const EMPTY_POLISH_PROMPTS: PromptPolishPrompts = { light: "", standard: "", deep: "" };
@@ -279,6 +279,19 @@ export function PromptWorkspace() {
           description={stale && polished ? "原文已修改，润色稿可能不是最新版本。" : "三档润色均使用项目设置中已保存的 AI 模型。"}
           actions={
             <div className="editor-actions">
+              <div className="prompt-polish-actions" aria-label="润色强度">
+                {POLISH_LEVELS.map(level => (
+                  <button
+                    className={`prompt-polish-button prompt-polish-${level.id}`}
+                    type="button"
+                    onClick={() => void runPolish(level.id)}
+                    disabled={busy || !raw.trim()}
+                    key={level.id}
+                  >
+                    {polishing === level.id ? `${level.label}…` : level.label}
+                  </button>
+                ))}
+              </div>
               <div className="segmented" role="tablist" aria-label="文本模式">
                 <button type="button" role="tab" aria-selected={mode === "raw"} onClick={() => setMode("raw")} disabled={busy}>原文</button>
                 <button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => setMode("polished")} disabled={busy || !polished}>润色稿</button>
@@ -303,20 +316,6 @@ export function PromptWorkspace() {
           spellCheck={false}
           disabled={busy}
         />
-        <div className="prompt-polish-actions" aria-label="润色强度">
-          {POLISH_LEVELS.map(level => (
-            <button
-              className={`prompt-polish-button prompt-polish-${level.id}`}
-              type="button"
-              onClick={() => void runPolish(level.id)}
-              disabled={busy || !raw.trim()}
-              key={level.id}
-            >
-              <span>{polishing === level.id ? "处理中…" : level.label}</span>
-              <small>{level.detail}</small>
-            </button>
-          ))}
-        </div>
         <div className="editor-meta">
           <span>{currentValue.length.toLocaleString("zh-CN")} 字符</span>
           <span>{mode === "polished" ? "正在编辑润色稿" : "三档润色始终基于原文"}</span>
@@ -381,7 +380,7 @@ export function PromptWorkspace() {
           <div className="prompt-settings-grid">
             {POLISH_LEVELS.map(level => (
               <label className="prompt-settings-field" key={level.id}>
-                <span><strong>{level.label}</strong><small>{level.detail}</small></span>
+                <span><strong>{level.label}</strong></span>
                 <textarea
                   value={polishPrompts[level.id]}
                   onChange={event => setPolishPrompts(current => ({ ...current, [level.id]: event.target.value }))}
