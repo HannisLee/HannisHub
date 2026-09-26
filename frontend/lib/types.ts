@@ -295,6 +295,21 @@ export interface PromptItem {
   updated_at?: string;
 }
 
+export type PromptPolishLevel = "light" | "standard" | "deep";
+
+export type PromptPolishPrompts = Record<PromptPolishLevel, string>;
+
+export interface PromptPolishSettings {
+  prompts: PromptPolishPrompts;
+  defaults: PromptPolishPrompts;
+}
+
+export interface PromptPolishResult {
+  content: string;
+  level: PromptPolishLevel;
+  model: string;
+}
+
 export interface ApiErrorShape {
   detail?: string;
   error?: string;

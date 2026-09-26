@@ -220,6 +220,12 @@ async def icon():
     return FileResponse(ROOT_DIR / "llama_manager" / "icon.png", media_type="image/png")
 
 
+@app.get("/icon.svg", include_in_schema=False)
+async def unified_icon():
+    """返回统一红黑浏览器标签页图标。"""
+    return FileResponse(ROOT_DIR / "frontend" / "app" / "icon.svg", media_type="image/svg+xml")
+
+
 @app.get("/api/health")
 async def health():
     """Hub 健康检查。"""

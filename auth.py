@@ -26,6 +26,7 @@ PUBLIC_PATHS = {
     "/login/",
     "/favicon.ico",
     "/icon.png",
+    "/icon.svg",
 }
 
 _SETTINGS_LOCK = threading.RLock()

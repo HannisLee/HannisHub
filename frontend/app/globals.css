@@ -429,6 +429,26 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-editor-card .segmented button { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor-card .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor { min-height: clamp(480px, 62vh, 760px); font: 400 15px/1.65 var(--font-mono); }
+.prompt-polish-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
+.prompt-polish-button {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  align-content: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-soft);
+  color: var(--color-text-primary);
+  text-align: left;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.prompt-polish-button:hover:not(:disabled) { border-color: var(--color-brand); background: var(--color-surface-hover); }
+.prompt-polish-button span { font-size: 13px; font-weight: 500; }
+.prompt-polish-button small { overflow: hidden; color: var(--color-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-polish-standard { border-color: var(--color-control-border); }
+.prompt-polish-deep { color: var(--color-brand); }
 .editor-meta {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -451,22 +471,28 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-layout .inline-form { gap: var(--space-1); }
 .prompt-layout .inline-form input { min-height: 30px; font-size: 12px; }
 .prompt-layout .button-sm { min-height: 30px; padding: 0 var(--space-2); font-size: 12px; }
-.prompt-groups { display: grid; gap: var(--space-3); }
-.prompt-group { padding: var(--space-3); border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-surface-soft); }
-.prompt-group.is-active { border-color: var(--color-control-border); }
-.prompt-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.group-select { display: flex; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--color-text-primary); text-align: left; }
-.group-grip { color: var(--color-text-muted); letter-spacing: -0.12em; }
-.prompt-items { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.prompt-archive-card { overflow: hidden; }
+.prompt-archive-list { display: grid; height: clamp(520px, 68vh, 760px); align-content: start; gap: var(--space-2); padding-right: var(--space-2); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .prompt-item { border: 1px solid var(--color-divider); border-radius: var(--radius-sm); background: var(--color-bg); }
 .prompt-item summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-text-primary); cursor: pointer; font-size: 13px; list-style: none; }
 .prompt-item summary::-webkit-details-marker { display: none; }
+.prompt-item[open] { border-color: var(--color-control-border); }
+.prompt-item-chevron { flex: 0 0 auto; color: var(--color-text-muted); transition: transform 160ms ease; }
+.prompt-item[open] .prompt-item-chevron { transform: rotate(180deg); }
 .prompt-page { padding-top: var(--space-8); }
 .prompt-item-copy { display: grid; gap: 2px; min-width: 0; }
 .prompt-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-item summary small { color: var(--color-text-muted); font-size: 12px; }
 .prompt-item-body { display: grid; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); }
 .prompt-item-body pre { max-height: 280px; margin: 0; padding-top: var(--space-3); overflow: auto; border-top: 1px solid var(--color-divider); color: var(--color-text-secondary); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-settings-card { margin-top: var(--space-4); padding: var(--space-5); }
+.prompt-settings-card .card-header { margin-bottom: var(--space-4); }
+.prompt-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.prompt-settings-field { display: grid; min-width: 0; gap: var(--space-2); }
+.prompt-settings-field > span { display: grid; gap: 2px; }
+.prompt-settings-field strong { color: var(--color-text-primary); font-size: 13px; }
+.prompt-settings-field small { color: var(--color-text-muted); font-size: 11px; }
+.prompt-settings-field textarea { min-height: 210px; resize: vertical; color: var(--color-text-secondary); font: 400 12px/1.6 var(--font-mono); }
 
 .ai-prompt-editor { min-height: 220px; font-size: 14px; line-height: 1.65; }
 .ai-action-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -555,15 +581,31 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-entry-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .file-manager-entry-actions .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .file-manager-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); align-items: start; }
-.file-manager-preview { min-width: 0; }
-.file-manager-preview.is-empty .point-cloud-canvas-wrap { height: 160px; }
+.file-manager-compare .card-header { align-items: center; }
+.file-manager-compare-actions { display: flex; align-items: center; gap: var(--space-2); }
+.file-manager-preview-target { display: inline-flex; gap: var(--space-1); padding: var(--space-1); border-radius: var(--radius-lg); background: var(--color-surface-hover); }
+.file-manager-preview-target button { min-height: 30px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); font-size: 12px; }
+.file-manager-preview-target button[aria-pressed="true"] { background: var(--color-control-light); color: var(--color-on-light); }
+.file-manager-compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.file-manager-preview { min-width: 0; padding: var(--space-4); border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-surface-soft); transition: border-color 160ms ease, background-color 160ms ease; }
+.file-manager-preview.is-active { border-color: var(--color-brand); background: var(--color-surface-hover); }
+.file-manager-preview-head { display: flex; min-height: 30px; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); }
+.file-manager-preview-label { display: inline-flex; min-height: 30px; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--color-text-secondary); font-size: 12px; }
+.file-manager-preview-label span { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-primary); }
+.file-manager-preview-label[aria-pressed="true"] { color: var(--color-text-primary); }
+.file-manager-preview-label[aria-pressed="true"] span { border-color: var(--color-brand); color: var(--color-brand); }
+.point-cloud-viewer { display: flex; min-width: 0; flex-direction: column; }
 .file-manager-preview .point-cloud-toolbar { margin-top: 0; }
 .point-cloud-file-identity { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); color: var(--color-text-muted); font-size: 12px; }
 .point-cloud-file-identity strong { color: var(--color-text-primary); font-size: 14px; font-weight: 500; }
 .point-cloud-file-identity span { min-width: 0; overflow-wrap: anywhere; }
 .file-manager-preview .point-cloud-file-identity + .point-cloud-toolbar { margin-top: var(--space-2); }
-.file-manager-preview.is-expanded { position: fixed; z-index: 30; inset: var(--space-5); display: flex; flex-direction: column; overflow: auto; }
-.file-manager-preview.is-expanded .point-cloud-canvas-wrap { flex: 1 1 auto; height: auto; min-height: 0; }
+.file-manager-compare .point-cloud-toolbar { align-items: flex-start; flex-direction: column; }
+.file-manager-compare .point-cloud-toolbar-actions { width: 100%; flex-wrap: wrap; }
+.file-manager-compare .point-cloud-canvas-wrap { height: 520px; }
+.file-manager-preview.is-expanded { position: fixed; z-index: 30; inset: var(--space-5); display: flex; flex-direction: column; overflow: auto; padding: var(--space-6); border-color: var(--color-border); background: var(--color-surface); }
+.file-manager-preview.is-expanded .point-cloud-viewer { flex: 1 1 auto; min-height: 0; }
+.file-manager-preview.is-expanded .point-cloud-canvas-wrap { flex: 1 1 auto; height: auto; min-height: 360px; }
 .file-manager-favorites .card-header { align-items: center; margin-bottom: var(--space-3); }
 .file-manager-favorite-list { display: grid; border-top: 1px solid var(--color-divider); }
 .file-manager-favorite { display: flex; min-width: 0; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
@@ -668,10 +710,15 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-meta { grid-template-columns: 1fr; justify-items: start; }
   .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
-  .prompt-group-head { align-items: flex-start; flex-direction: column; }
+  .prompt-polish-actions, .prompt-settings-grid { grid-template-columns: 1fr; }
+  .prompt-archive-list { height: min(68vh, 620px); }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
   .file-manager-date-controls .button { width: 100%; }
   .file-manager-date-result { align-items: flex-start; flex-direction: column; }
+  .file-manager-compare-grid { grid-template-columns: 1fr; }
+  .file-manager-compare-actions { width: 100%; flex-wrap: wrap; }
+  .file-manager-preview-target { flex: 1 1 auto; }
+  .file-manager-preview-target button { flex: 1; }
   .file-manager-toolbar.is-point-cloud { display: flex; flex-wrap: wrap; justify-content: flex-start; }
   .file-manager-toolbar select:first-child { grid-column: 1 / -1; }
   .file-manager-toolbar select:not(:first-child) { grid-column: 1 / 2; }

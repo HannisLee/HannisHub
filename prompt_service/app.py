@@ -1,7 +1,8 @@
-"""在线提示词输入服务：大输入框、原文/润色切换与分组归档历史管理。"""
+"""在线提示词输入服务：三档 AI 润色与无分组归档历史管理。"""
 
 import json
 import os
+import sys
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +13,13 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 APP_DIR = Path(__file__).resolve().parent
+ROOT_DIR = APP_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    # 独立启动子服务时补充项目根目录，以复用统一 AI 配置模块。
+    sys.path.insert(0, str(ROOT_DIR))
+
+import ai_settings
+
 SETTINGS_PATH = APP_DIR / "settings.json"
 PROMPT_MAX_CHARS = 2_000_000
 PROMPT_MAX_COUNT = 500
@@ -207,9 +215,39 @@ async def list_prompts():
     )
 
 
+@router.post("/polish")
+async def polish_prompt(request: Request):
+    """使用项目统一 AI 配置按 light、standard、deep 三档润色。"""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="请求体必须是有效 JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
+    return JSONResponse(await ai_settings.polish_prompt(payload.get("content"), payload.get("level")))
+
+
+@router.get("/polish-settings")
+async def read_polish_settings():
+    """读取提示词工作区的三档润色指令。"""
+    return JSONResponse(ai_settings.get_public_prompt_polish_settings())
+
+
+@router.put("/polish-settings")
+async def update_polish_settings(request: Request):
+    """保存提示词工作区的三档润色指令。"""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="请求体必须是有效 JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
+    return JSONResponse(ai_settings.save_prompt_polish_prompts(payload.get("prompts")))
+
+
 @router.post("/prompts")
 async def create_prompt(request: Request):
-    """归档当前提示词到指定分组（默认无分组）。"""
+    """归档当前提示词；新界面统一使用无分组列表。"""
     try:
         payload = await request.json()
     except Exception as exc:
@@ -220,11 +258,10 @@ async def create_prompt(request: Request):
     now = _now_iso()
     with _SETTINGS_LOCK:
         data = _read_settings()
-        group_id = _resolve_group_id(data["groups"], payload.get("group_id"))
         item = {
             "id": f"prompt_{uuid.uuid4().hex[:12]}",
             "content": content,
-            "group_id": group_id,
+            "group_id": UNGROUPED_ID,
             "created_at": now,
             "updated_at": now,
         }
