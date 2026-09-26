@@ -18,8 +18,8 @@ const ARCHIVE_MAX_COUNT = 500;
 
 const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string }> = [
   { id: "light", label: "轻度" },
-  { id: "standard", label: "标准" },
-  { id: "deep", label: "深度" },
+  { id: "standard", label: "中度" },
+  { id: "deep", label: "重度" },
 ];
 
 const EMPTY_POLISH_PROMPTS: PromptPolishPrompts = { light: "", standard: "", deep: "" };
