@@ -444,7 +444,7 @@ export function PointCloudViewer({ file, filePath, favoriteName, expanded, onTog
   const [progress, setProgress] = useState<number | null>(0);
   const [details, setDetails] = useState<ViewerDetails | null>(null);
 
-  return <>
+  return <div className="point-cloud-viewer">
     <div className="point-cloud-file-identity">
       {favoriteName ? <strong>{favoriteName}</strong> : null}
       <span title={filePath}>{filePath}</span>
@@ -460,5 +460,5 @@ export function PointCloudViewer({ file, filePath, favoriteName, expanded, onTog
     {error ? <div className="point-cloud-viewer-error">{error}</div> : null}
     <PointCloudCanvas file={file} pointSize={pointSize} colored={colored} loadingLabel={loading ? progress === null ? "正在解析点云…" : `正在读取点云… ${progress}%` : ""} onLoading={() => { setLoading(true); setProgress(0); setError(""); setDetails(null); }} onProgress={setProgress} onError={message => { setLoading(false); setError(message); }} onLoaded={value => { setLoading(false); setDetails(value); }} />
     <p className="point-cloud-help">左键拖动旋转视角，滚轮缩放，右键拖动平移；触控板可双指缩放和平移。</p>
-  </>;
+  </div>;
 }

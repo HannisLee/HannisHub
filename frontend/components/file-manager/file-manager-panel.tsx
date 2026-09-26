@@ -65,7 +65,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [dateError, setDateError] = useState("");
   const [query, setQuery] = useState("");
   const [onlyPointClouds, setOnlyPointClouds] = useState(false);
-  const [previewFile, setPreviewFile] = useState<SelectedFile | null>(null);
+  const [previewFiles, setPreviewFiles] = useState<[SelectedFile | null, SelectedFile | null]>([null, null]);
+  const [activePreview, setActivePreview] = useState<0 | 1>(0);
   const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
   const [favoriteError, setFavoriteError] = useState("");
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -75,7 +76,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [syncing, setSyncing] = useState(false);
   const [syncTarget, setSyncTarget] = useState("all");
   const [syncMessage, setSyncMessage] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [expandedPreview, setExpandedPreview] = useState<0 | 1 | null>(null);
   const [error, setError] = useState("");
   const requestId = useRef(0);
   const dateRequestId = useRef(0);
@@ -130,7 +131,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
           if (params.has("root") && Number.isInteger(requestedRoot) && requestedRoot >= 0 && requestedRoot < nextRoots.length && VIEWABLE_EXTENSIONS.has(requestedFile.split(".").at(-1)?.toLowerCase() || "")) {
             setSelectedRootIndex(requestedRoot);
             setPath(requestedFile.split("/").slice(0, -1).join("/"));
-            setPreviewFile(selectedFile(requestedRoot, requestedFile));
+            setPreviewFiles([selectedFile(requestedRoot, requestedFile), null]);
+            setActivePreview(1);
           } else {
             const defaultRoot = nextRoots.findIndex(root => root === "~/reproduce" || root.endsWith("/reproduce"));
             if (defaultRoot >= 0) {
@@ -193,10 +195,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }, [directory, plyFiles, pointCloudMode, onlyPointClouds, query]);
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
   const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
-  const previewFavorite = previewFile ? favorites
-    .filter(item => item.root_path === roots[previewFile.rootIndex] && (previewFile.path.startsWith(`${item.path}/`) || item.path === ""))
-    .sort((left, right) => right.path.length - left.path.length)[0] : undefined;
-  const previewPath = previewFile ? `${resolvedRoots[previewFile.rootIndex] || roots[previewFile.rootIndex] || ""}/${previewFile.path}` : "";
+  const previewDetails = previewFiles.map(previewFile => ({
+    favorite: previewFile ? favorites
+      .filter(item => item.root_path === roots[previewFile.rootIndex] && (previewFile.path.startsWith(`${item.path}/`) || item.path === ""))
+      .sort((left, right) => right.path.length - left.path.length)[0] : undefined,
+    path: previewFile ? `${resolvedRoots[previewFile.rootIndex] || roots[previewFile.rootIndex] || ""}/${previewFile.path}` : "",
+  }));
 
   function goToDirectory(nextPath: string, rootIndex = selectedRootIndex) {
     if (nextPath === path && rootIndex === selectedRootIndex) return;
@@ -208,7 +212,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   function openPreview(entry: FileManagerEntry) {
     if (!VIEWABLE_EXTENSIONS.has(entry.extension)) return;
     if (pointCloudMode) {
-      setPreviewFile(selectedFile(selectedRootIndex, entry.path));
+      loadPreview(selectedFile(selectedRootIndex, entry.path));
     } else {
       router.push(`/files/point-clouds?${new URLSearchParams({ root: String(selectedRootIndex), file: entry.path })}`);
     }
@@ -313,8 +317,23 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }
 
   function previewDateFile(rootIndex: number, filePath: string) {
-    setPreviewFile(selectedFile(rootIndex, filePath));
-    window.requestAnimationFrame(() => document.querySelector(".file-manager-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    loadPreview(selectedFile(rootIndex, filePath));
+    window.requestAnimationFrame(() => document.querySelector(".file-manager-compare")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function loadPreview(file: SelectedFile) {
+    setPreviewFiles(current => current.map((item, index) => index === activePreview ? file : item) as [SelectedFile | null, SelectedFile | null]);
+  }
+
+  function clearPreview(index: 0 | 1) {
+    setPreviewFiles(current => current.map((item, itemIndex) => itemIndex === index ? null : item) as [SelectedFile | null, SelectedFile | null]);
+    if (expandedPreview === index) setExpandedPreview(null);
+  }
+
+  function swapPreviews() {
+    setPreviewFiles(current => [current[1], current[0]]);
+    setActivePreview(current => current === 0 ? 1 : 0);
+    setExpandedPreview(current => current === null ? null : current === 0 ? 1 : 0);
   }
 
   return (
@@ -323,8 +342,48 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
       {error ? <ErrorState message={error} /> : null}
       <div className="file-manager-workspace">
         {pointCloudMode ? <>
+          <Card className="file-manager-compare">
+            <CardHeader
+              title="点云对比预览"
+              description={`当前载入目标：${activePreview === 0 ? "左侧 A" : "右侧 B"}。两侧视角可分别拖动、缩放和平移。`}
+              actions={<div className="file-manager-compare-actions">
+                <div className="file-manager-preview-target" aria-label="选择预览载入目标">
+                  <button type="button" aria-pressed={activePreview === 0} onClick={() => setActivePreview(0)}>左侧 A</button>
+                  <button type="button" aria-pressed={activePreview === 1} onClick={() => setActivePreview(1)}>右侧 B</button>
+                </div>
+                <Button variant="quiet" size="sm" type="button" onClick={swapPreviews} disabled={!previewFiles[0] && !previewFiles[1]}>交换左右</Button>
+              </div>}
+            />
+            <div className="file-manager-compare-grid">
+              {([0, 1] as const).map(index => {
+                const previewFile = previewFiles[index];
+                const expanded = expandedPreview === index;
+                return <section
+                  className={`file-manager-preview${activePreview === index ? " is-active" : ""}${expanded ? " is-expanded" : ""}${previewFile ? "" : " is-empty"}`}
+                  key={index}
+                  onPointerDownCapture={() => setActivePreview(index)}
+                  aria-label={`${index === 0 ? "左侧 A" : "右侧 B"} 点云预览`}
+                >
+                  <div className="file-manager-preview-head">
+                    <button type="button" className="file-manager-preview-label" aria-pressed={activePreview === index} onClick={() => setActivePreview(index)}>
+                      <span>{index === 0 ? "A" : "B"}</span>{index === 0 ? "左侧预览" : "右侧预览"}
+                    </button>
+                    {previewFile ? <Button variant="quiet" size="sm" type="button" onClick={() => clearPreview(index)}>清空</Button> : null}
+                  </div>
+                  {previewFile ? <PointCloudViewer
+                    key={`${previewFile.rootIndex}:${previewFile.path}`}
+                    file={previewFile}
+                    filePath={previewDetails[index].path}
+                    favoriteName={previewDetails[index].favorite?.name}
+                    expanded={expanded}
+                    onToggleExpanded={() => setExpandedPreview(value => value === index ? null : index)}
+                  /> : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title={`${index === 0 ? "左侧 A" : "右侧 B"} 等待选择`} detail={`先选中此视图，再从下方日期结果或文件夹中载入点云。`} /></div>}
+                </section>;
+              })}
+            </div>
+          </Card>
           <Card className="file-manager-date-search">
-            <CardHeader title="按日期查找 PLY" description="默认查看近 7 天，并显示每组点云的最新迭代。" />
+            <CardHeader title="按日期查找 PLY" description={`默认查看近 7 天；点击“预览”会载入${activePreview === 0 ? "左侧 A" : "右侧 B"}。`} />
             <form onSubmit={event => { event.preventDefault(); void searchDate(true); }}>
               <div className="file-manager-date-presets" aria-label="常用日期范围">
                 <button type="button" aria-pressed={datePreset === "week"} onClick={() => selectDatePreset("week")}>近 7 天</button>
@@ -352,20 +411,17 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               {dateResults.entries.length ? <div className="file-manager-date-results">
                 {dateResults.entries.map(entry => {
                   const fullPath = `${resolvedRoots[entry.root_index] || roots[entry.root_index]}/${entry.path}`;
-                  return <div className={`file-manager-date-result${previewFile?.rootIndex === entry.root_index && previewFile.path === entry.path ? " is-selected" : ""}`} key={`${entry.root_index}:${entry.path}`}>
-                    <div className="file-manager-date-result-info"><strong>{entry.experiment_date} · {entry.date_folder}{entry.iteration_number !== null ? ` · iter ${entry.iteration_number}` : ""}</strong><code title={fullPath}>{fullPath}</code><small>{formatBytes(entry.size)} · {formatDate(entry.modified)}</small></div>
+                  const selectedIndex = previewFiles.findIndex(file => file?.rootIndex === entry.root_index && file.path === entry.path);
+                  return <div className={`file-manager-date-result${selectedIndex >= 0 ? " is-selected" : ""}`} key={`${entry.root_index}:${entry.path}`}>
+                    <div className="file-manager-date-result-info"><strong>{entry.experiment_date} · {entry.date_folder}{entry.iteration_number !== null ? ` · iter ${entry.iteration_number}` : ""}{selectedIndex >= 0 ? ` · 已在 ${selectedIndex === 0 ? "A" : "B"}` : ""}</strong><code title={fullPath}>{fullPath}</code><small>{formatBytes(entry.size)} · {formatDate(entry.modified)}</small></div>
                     <div className="file-manager-entry-actions">
-                      <Button variant="secondary" size="sm" type="button" onClick={() => previewDateFile(entry.root_index, entry.path)}>预览</Button>
+                      <Button variant="secondary" size="sm" type="button" onClick={() => previewDateFile(entry.root_index, entry.path)}>预览至 {activePreview === 0 ? "A" : "B"}</Button>
                       <a className="button button-secondary button-sm" href={downloadUrl(entry.root_index, entry.path)} download title={`下载 ${entry.name}`}>下载</a>
                     </div>
                   </div>;
                 })}
               </div> : <EmptyState title="所选日期没有匹配的 PLY" detail="可扩大日期范围，或将迭代过滤改为“全部 PLY”。" />}
             </> : null}
-          </Card>
-          <Card className={`file-manager-preview${expanded ? " is-expanded" : ""}${previewFile ? "" : " is-empty"}`}>
-            {previewFile ? <PointCloudViewer key={`${previewFile.rootIndex}:${previewFile.path}`} file={previewFile} filePath={previewPath} favoriteName={previewFavorite?.name} expanded={expanded} onToggleExpanded={() => setExpanded(value => !value)} />
-              : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title="选择点云文件" detail="从上方日期结果选择 PLY，或从下方文件夹探查。" /></div>}
           </Card>
           <Card className="file-manager-favorites">
             <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={() => currentFavorite ? (setEditingId(currentFavorite.id), setEditName(currentFavorite.name)) : addCurrentFavorite()} disabled={!roots.length || !directory || loading || favoriteBusy}>{currentFavorite ? "修改当前目录名称" : "收藏当前目录"}</Button>} />
@@ -431,7 +487,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
           {loading ? <LoadingState label="正在读取目录…" /> : !roots.length ? <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" /> : filteredEntries.length ? (
             <div className="file-manager-list">
               {filteredEntries.map((entry: FileManagerEntry) => (
-                <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFile?.rootIndex === selectedRootIndex && previewFile.path === entry.path ? " is-selected" : ""}`} key={entry.path}>
+                <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} key={entry.path}>
                   <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
                     <span className="file-manager-entry-mark">{entry.type === "directory" ? "◇" : entry.type === "file" ? "·" : "×"}</span>
                     <span className="file-manager-entry-details">
@@ -444,7 +500,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                   </button>
                   <span className="file-manager-entry-actions">
                     {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
-                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>预览</button> : null}
+                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>{pointCloudMode ? `预览至 ${activePreview === 0 ? "A" : "B"}` : "预览"}</button> : null}
                     {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
                     {pointCloudMode && entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
                   </span>
