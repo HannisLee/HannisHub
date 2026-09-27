@@ -251,21 +251,21 @@ async def update_ai_settings(payload: dict[str, Any] = Body(...)):
 
 
 @app.post("/api/ai-settings/test")
-async def test_ai_settings_api():
-    """使用已保存配置测试 OpenAI 兼容接口连接。"""
-    return JSONResponse(await ai_settings.test_connection())
+async def test_ai_settings_api(payload: dict[str, Any] = Body(default={})):
+    """测试指定 OpenAI 兼容接口连接。"""
+    return JSONResponse(await ai_settings.test_connection(payload.get("target")))
 
 
 @app.post("/api/ai-settings/models")
-async def discover_ai_models():
-    """探查 OpenAI 兼容接口的可用模型列表。"""
-    return JSONResponse(await ai_settings.discover_models())
+async def discover_ai_models(payload: dict[str, Any] = Body(default={})):
+    """探查指定 OpenAI 兼容接口的可用模型列表。"""
+    return JSONResponse(await ai_settings.discover_models(payload.get("target")))
 
 
 @app.post("/api/ai-settings/model-test")
 async def test_ai_model(payload: dict[str, Any] = Body(...)):
-    """使用当前或指定模型发送一次最小请求，验证模型可用。"""
-    return JSONResponse(await ai_settings.test_model(payload.get("model")))
+    """使用指定 API 与模型发送一次最小请求，验证模型可用。"""
+    return JSONResponse(await ai_settings.test_model(payload.get("model"), payload.get("target")))
 
 
 @app.get("/api/file-manager/settings")

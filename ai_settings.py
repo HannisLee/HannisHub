@@ -22,6 +22,31 @@ LEGACY_LLAMA_SETTINGS_PATH = ROOT_DIR / "llama_manager" / "settings.json"
 OPENAI_API_BASE_URL_KEY = "openai_api_base_url"
 OPENAI_API_MODEL_KEY = "openai_api_model"
 OPENAI_API_KEY_KEY = "openai_api_key"
+OPENAI_PRIMARY_API_BASE_URL_KEY = "openai_primary_api_base_url"
+OPENAI_PRIMARY_API_MODEL_KEY = "openai_primary_api_model"
+OPENAI_PRIMARY_API_KEY_KEY = "openai_primary_api_key"
+OPENAI_BACKUP_API_BASE_URL_KEY = "openai_backup_api_base_url"
+OPENAI_BACKUP_API_MODEL_KEY = "openai_backup_api_model"
+OPENAI_BACKUP_API_KEY_KEY = "openai_backup_api_key"
+PRIMARY_API_TARGET = "primary"
+BACKUP_API_TARGET = "backup"
+API_TARGETS = (PRIMARY_API_TARGET, BACKUP_API_TARGET)
+API_TARGET_LABELS = {
+    PRIMARY_API_TARGET: "主 API",
+    BACKUP_API_TARGET: "备用 API",
+}
+API_TARGET_KEYS = {
+    PRIMARY_API_TARGET: {
+        "base_url": OPENAI_PRIMARY_API_BASE_URL_KEY,
+        "model": OPENAI_PRIMARY_API_MODEL_KEY,
+        "api_key": OPENAI_PRIMARY_API_KEY_KEY,
+    },
+    BACKUP_API_TARGET: {
+        "base_url": OPENAI_BACKUP_API_BASE_URL_KEY,
+        "model": OPENAI_BACKUP_API_MODEL_KEY,
+        "api_key": OPENAI_BACKUP_API_KEY_KEY,
+    },
+}
 ASR_EXTRACTION_PROMPT_KEY = "asr_extraction_prompt"
 PROMPT_POLISH_PROMPTS_KEY = "prompt_polish_prompts"
 DEFAULT_ASR_EXTRACTION_PROMPT = (
@@ -86,7 +111,7 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def _load_ai_settings() -> dict[str, Any]:
-    """读取本地 AI 配置，并从模型管理旧配置中无损迁移已保存的值。"""
+    """读取本地 AI 配置，并无损迁移旧版单 API 配置到主 API。"""
     with _SETTINGS_LOCK:
         data = _read_json(AI_SETTINGS_PATH)
         legacy = _read_json(LEGACY_LLAMA_SETTINGS_PATH)
@@ -101,18 +126,60 @@ def _load_ai_settings() -> dict[str, Any]:
             if not data.get(key) and isinstance(value, str) and value.strip():
                 data[key] = value.strip()
                 changed = True
+        legacy_primary_keys = (
+            (OPENAI_API_BASE_URL_KEY, OPENAI_PRIMARY_API_BASE_URL_KEY),
+            (OPENAI_API_MODEL_KEY, OPENAI_PRIMARY_API_MODEL_KEY),
+            (OPENAI_API_KEY_KEY, OPENAI_PRIMARY_API_KEY_KEY),
+        )
+        for old_key, primary_key in legacy_primary_keys:
+            value = data.get(old_key) or legacy.get(old_key)
+            if not data.get(primary_key) and isinstance(value, str) and value.strip():
+                data[primary_key] = value.strip().rstrip("/") if old_key == OPENAI_API_BASE_URL_KEY else value.strip()
+                changed = True
         if changed:
             _write_json(AI_SETTINGS_PATH, data)
         return data
 
 
-def get_ai_config() -> dict[str, str]:
-    """供后端任务使用的完整 AI 配置；密钥不会返回给前端。"""
-    data = _load_ai_settings()
+def _normalize_target(value: object) -> str:
+    """校验 API 目标名称。"""
+    target = str(value or PRIMARY_API_TARGET).strip().lower()
+    if target not in API_TARGETS:
+        raise HTTPException(status_code=400, detail="API 目标必须是 primary 或 backup")
+    return target
+
+
+def _api_connection(data: dict[str, Any], target: str) -> dict[str, str]:
+    """从配置中提取指定 API 的完整连接信息。"""
+    keys = API_TARGET_KEYS[target]
     return {
-        OPENAI_API_BASE_URL_KEY: str(data.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/"),
-        OPENAI_API_MODEL_KEY: str(data.get(OPENAI_API_MODEL_KEY) or "").strip(),
-        OPENAI_API_KEY_KEY: str(data.get(OPENAI_API_KEY_KEY) or "").strip(),
+        "target": target,
+        "label": API_TARGET_LABELS[target],
+        "base_url": str(data.get(keys["base_url"]) or "").strip().rstrip("/"),
+        "model": str(data.get(keys["model"]) or "").strip(),
+        "api_key": str(data.get(keys["api_key"]) or "").strip(),
+    }
+
+
+def get_ai_connections() -> list[dict[str, str]]:
+    """按主、备用顺序返回完整 API 连接配置，供后端任务自动回退。"""
+    data = _load_ai_settings()
+    return [_api_connection(data, target) for target in API_TARGETS]
+
+
+def get_ai_config() -> dict[str, str]:
+    """兼容旧调用方返回主 API，并附带两套完整配置；密钥不会返回给前端。"""
+    primary, backup = get_ai_connections()
+    return {
+        OPENAI_API_BASE_URL_KEY: primary["base_url"],
+        OPENAI_API_MODEL_KEY: primary["model"],
+        OPENAI_API_KEY_KEY: primary["api_key"],
+        OPENAI_PRIMARY_API_BASE_URL_KEY: primary["base_url"],
+        OPENAI_PRIMARY_API_MODEL_KEY: primary["model"],
+        OPENAI_PRIMARY_API_KEY_KEY: primary["api_key"],
+        OPENAI_BACKUP_API_BASE_URL_KEY: backup["base_url"],
+        OPENAI_BACKUP_API_MODEL_KEY: backup["model"],
+        OPENAI_BACKUP_API_KEY_KEY: backup["api_key"],
         ASR_EXTRACTION_PROMPT_KEY: get_asr_extraction_prompt(),
     }
 
@@ -120,11 +187,14 @@ def get_ai_config() -> dict[str, str]:
 def get_public_ai_settings() -> dict[str, Any]:
     """返回前端设置页可展示的 AI 配置；只暴露密钥是否已配置。"""
     data = _load_ai_settings()
-    return {
-        OPENAI_API_BASE_URL_KEY: str(data.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/"),
-        OPENAI_API_MODEL_KEY: str(data.get(OPENAI_API_MODEL_KEY) or "").strip(),
-        "openai_api_key_configured": bool(str(data.get(OPENAI_API_KEY_KEY) or "").strip()),
-    }
+    result: dict[str, Any] = {}
+    for target in API_TARGETS:
+        connection = _api_connection(data, target)
+        keys = API_TARGET_KEYS[target]
+        result[keys["base_url"]] = connection["base_url"]
+        result[keys["model"]] = connection["model"]
+        result[f"openai_{target}_api_key_configured"] = bool(connection["api_key"])
+    return result
 
 
 def _normalize_prompt_polish_prompts(value: object) -> dict[str, str]:
@@ -184,30 +254,44 @@ def _validate_base_url(value: str) -> str:
 
 
 def save_ai_settings(payload: object) -> dict[str, Any]:
-    """保存 AI API 与提示词配置；密钥留空表示保持不变。"""
+    """保存主、备用 AI API 与提示词配置；密钥留空表示保持不变。"""
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail="AI 设置必须是 JSON 对象")
+    payload = dict(payload)
+    # 保持旧客户端可用：旧字段等同于主 API 字段。
+    for old_key, primary_key in (
+        (OPENAI_API_BASE_URL_KEY, OPENAI_PRIMARY_API_BASE_URL_KEY),
+        (OPENAI_API_MODEL_KEY, OPENAI_PRIMARY_API_MODEL_KEY),
+        (OPENAI_API_KEY_KEY, OPENAI_PRIMARY_API_KEY_KEY),
+    ):
+        if primary_key not in payload and old_key in payload:
+            payload[primary_key] = payload[old_key]
+    if "clear_openai_api_key" in payload and "clear_openai_primary_api_key" not in payload:
+        payload["clear_openai_primary_api_key"] = payload["clear_openai_api_key"]
+
     with _SETTINGS_LOCK:
         data = _load_ai_settings()
+        for target in API_TARGETS:
+            keys = API_TARGET_KEYS[target]
+            if keys["base_url"] in payload:
+                base_url = str(payload.get(keys["base_url"]) or "").strip().rstrip("/")
+                if base_url:
+                    base_url = _validate_base_url(base_url)
+                data[keys["base_url"]] = base_url
 
-        if OPENAI_API_BASE_URL_KEY in payload:
-            base_url = str(payload.get(OPENAI_API_BASE_URL_KEY) or "").strip().rstrip("/")
-            if base_url:
-                base_url = _validate_base_url(base_url)
-            data[OPENAI_API_BASE_URL_KEY] = base_url
+            if keys["model"] in payload:
+                model = str(payload.get(keys["model"]) or "").strip()
+                if len(model) > 240:
+                    raise HTTPException(status_code=400, detail=f"{API_TARGET_LABELS[target]}模型名称不能超过 240 个字符")
+                data[keys["model"]] = model
 
-        if OPENAI_API_MODEL_KEY in payload:
-            model = str(payload.get(OPENAI_API_MODEL_KEY) or "").strip()
-            if len(model) > 240:
-                raise HTTPException(status_code=400, detail="AI 模型名称不能超过 240 个字符")
-            data[OPENAI_API_MODEL_KEY] = model
-
-        if payload.get("clear_openai_api_key"):
-            data.pop(OPENAI_API_KEY_KEY, None)
-        else:
-            api_key = payload.get(OPENAI_API_KEY_KEY)
-            if isinstance(api_key, str) and api_key.strip():
-                data[OPENAI_API_KEY_KEY] = api_key.strip()
+            clear_key = f"clear_openai_{target}_api_key"
+            if payload.get(clear_key):
+                data.pop(keys["api_key"], None)
+            else:
+                api_key = payload.get(keys["api_key"])
+                if isinstance(api_key, str) and api_key.strip():
+                    data[keys["api_key"]] = api_key.strip()
 
         if ASR_EXTRACTION_PROMPT_KEY in payload:
             data[ASR_EXTRACTION_PROMPT_KEY] = normalize_asr_extraction_prompt(
@@ -241,13 +325,29 @@ def save_asr_extraction_prompt(prompt: object) -> str:
     return value
 
 
-async def discover_models() -> dict[str, Any]:
-    """请求 OpenAI 兼容接口的 /models，返回可选择的模型列表。"""
-    config = get_ai_config()
-    base_url = config[OPENAI_API_BASE_URL_KEY]
-    api_key = config[OPENAI_API_KEY_KEY]
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先保存 AI API 地址")
+def _connection_for_target(target: object) -> dict[str, str]:
+    """读取指定 API 连接并检查地址是否已配置。"""
+    normalized_target = _normalize_target(target)
+    connection = get_ai_connections()[API_TARGETS.index(normalized_target)]
+    if not connection["base_url"]:
+        raise HTTPException(status_code=400, detail=f"请先保存{connection['label']}地址")
+    return connection
+
+
+def _api_error_detail(response: httpx.Response) -> str:
+    """从 OpenAI 兼容接口错误中提取可展示的简短说明。"""
+    try:
+        payload = response.json()
+        return str(payload.get("error", {}).get("message") or payload.get("detail") or "")[:300]
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+async def discover_models(target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
+    """请求指定 OpenAI 兼容接口的 /models，返回可选择的模型列表。"""
+    connection = _connection_for_target(target)
+    base_url = connection["base_url"]
+    api_key = connection["api_key"]
 
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
@@ -256,7 +356,9 @@ async def discover_models() -> dict[str, Any]:
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"连接失败：{str(exc)[:300]}") from exc
     if response.is_error:
-        raise HTTPException(status_code=502, detail=f"模型列表接口返回 HTTP {response.status_code}")
+        detail = _api_error_detail(response)
+        suffix = f"：{detail}" if detail else ""
+        raise HTTPException(status_code=502, detail=f"模型列表接口返回 HTTP {response.status_code}{suffix}")
 
     try:
         payload = response.json()
@@ -271,26 +373,26 @@ async def discover_models() -> dict[str, Any]:
 
     return {
         "ok": True,
-        "message": f"连接成功，发现 {len(models)} 个模型",
+        "target": connection["target"],
+        "target_label": connection["label"],
+        "message": f"{connection['label']}连接成功，发现 {len(models)} 个模型",
         "models": models,
     }
 
 
-async def test_connection() -> dict[str, Any]:
-    """测试 AI API 连接，并返回模型列表供前端填充。"""
-    return await discover_models()
+async def test_connection(target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
+    """测试指定 AI API 连接，并返回模型列表供前端填充。"""
+    return await discover_models(target)
 
 
-async def test_model(model: object) -> dict[str, Any]:
-    """使用指定模型发送一次最小对话请求，验证模型可用性。"""
+async def test_model(model: object, target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
+    """使用指定 API 与模型发送一次最小对话请求，验证模型可用性。"""
     model_name = str(model or "").strip()
     if not model_name:
         raise HTTPException(status_code=400, detail="请先选择或输入要测试的模型")
-    config = get_ai_config()
-    base_url = config[OPENAI_API_BASE_URL_KEY]
-    api_key = config[OPENAI_API_KEY_KEY]
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先保存 AI API 地址")
+    connection = _connection_for_target(target)
+    base_url = connection["base_url"]
+    api_key = connection["api_key"]
 
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     payload = {
@@ -305,7 +407,9 @@ async def test_model(model: object) -> dict[str, Any]:
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"模型测试请求失败：{str(exc)[:300]}") from exc
     if response.is_error:
-        raise HTTPException(status_code=502, detail=f"模型测试返回 HTTP {response.status_code}")
+        detail = _api_error_detail(response)
+        suffix = f"：{detail}" if detail else ""
+        raise HTTPException(status_code=502, detail=f"模型测试返回 HTTP {response.status_code}{suffix}")
 
     try:
         result = response.json()
@@ -317,12 +421,70 @@ async def test_model(model: object) -> dict[str, Any]:
 
     return {
         "ok": True,
-        "message": "模型可用",
+        "target": connection["target"],
+        "target_label": connection["label"],
+        "message": f"{connection['label']}模型可用",
         "response": content.strip()[:500],
     }
 
 
-async def polish_prompt(content: object, level: object) -> dict[str, str]:
+async def chat_completion(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.2,
+    max_tokens: int | None = None,
+) -> dict[str, str | bool]:
+    """依次请求主、备用 API，在连接或响应异常时自动回退。"""
+    connections = [
+        connection
+        for connection in get_ai_connections()
+        if connection["base_url"] and connection["model"]
+    ]
+    if not connections:
+        raise HTTPException(status_code=400, detail="请先为主 API 或备用 API 保存地址和模型")
+
+    failures: list[str] = []
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+        for index, connection in enumerate(connections):
+            headers = {"Authorization": f"Bearer {connection['api_key']}"} if connection["api_key"] else {}
+            payload: dict[str, Any] = {
+                "model": connection["model"],
+                "messages": messages,
+                "temperature": temperature,
+            }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
+            try:
+                response = await client.post(f"{connection['base_url']}/chat/completions", headers=headers, json=payload)
+            except httpx.RequestError as exc:
+                failures.append(f"{connection['label']}请求失败：{str(exc)[:180]}")
+                continue
+            if response.is_error:
+                detail = _api_error_detail(response)
+                suffix = f"：{detail}" if detail else ""
+                failures.append(f"{connection['label']}返回 HTTP {response.status_code}{suffix}")
+                continue
+            try:
+                result = response.json()
+                content = result["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError, ValueError):
+                failures.append(f"{connection['label']}返回格式不符合 OpenAI 兼容规范")
+                continue
+            if not isinstance(content, str) or not content.strip():
+                failures.append(f"{connection['label']}未返回有效文字")
+                continue
+            return {
+                "content": content.strip(),
+                "model": connection["model"],
+                "target": connection["target"],
+                "target_label": connection["label"],
+                "used_fallback": index > 0,
+            }
+
+    raise HTTPException(status_code=502, detail="；".join(failures)[:900])
+
+
+async def polish_prompt(content: object, level: object) -> dict[str, Any]:
     """使用统一 AI 配置按指定档位润色提示词。"""
     source = str(content or "").strip()
     polish_level = str(level or "").strip()
@@ -336,19 +498,8 @@ async def polish_prompt(content: object, level: object) -> dict[str, str]:
     if polish_level not in PROMPT_POLISH_LEVELS:
         raise HTTPException(status_code=400, detail="润色档位必须是 light、standard 或 deep")
 
-    config = get_ai_config()
-    base_url = config[OPENAI_API_BASE_URL_KEY]
-    model = config[OPENAI_API_MODEL_KEY]
-    api_key = config[OPENAI_API_KEY_KEY]
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先在项目设置中保存 AI API 地址")
-    if not model:
-        raise HTTPException(status_code=400, detail="请先在项目设置中选择 AI 模型")
-
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    payload = {
-        "model": model,
-        "messages": [
+    result = await chat_completion(
+        [
             {"role": "system", "content": get_prompt_polish_prompts()[polish_level]},
             {
                 "role": "user",
@@ -358,28 +509,12 @@ async def polish_prompt(content: object, level: object) -> dict[str, str]:
                 ),
             },
         ],
-        "temperature": 0.2,
+        temperature=0.2,
+    )
+    return {
+        "content": str(result["content"]),
+        "level": polish_level,
+        "model": str(result["model"]),
+        "target": str(result["target"]),
+        "used_fallback": bool(result["used_fallback"]),
     }
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"润色请求失败：{str(exc)[:300]}") from exc
-    if response.is_error:
-        detail = ""
-        try:
-            error_payload = response.json()
-            detail = str(error_payload.get("error", {}).get("message") or error_payload.get("detail") or "")
-        except (AttributeError, TypeError, ValueError):
-            detail = ""
-        suffix = f"：{detail[:300]}" if detail else ""
-        raise HTTPException(status_code=502, detail=f"润色接口返回 HTTP {response.status_code}{suffix}")
-
-    try:
-        result = response.json()
-        polished = result["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="润色接口返回格式不符合 OpenAI 兼容规范") from exc
-    if not isinstance(polished, str) or not polished.strip():
-        raise HTTPException(status_code=502, detail="润色接口没有返回有效文字")
-    return {"content": polished.strip(), "level": polish_level, "model": model}

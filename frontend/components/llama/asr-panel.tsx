@@ -30,7 +30,7 @@ export function AsrPanel() {
       setInfo(asr);
       setRecords(history.records || []);
       setPrompt(extractionSettings.prompt || "");
-      setAiModel(aiSettings.openai_api_model || "");
+      setAiModel(aiSettings.openai_primary_api_model || aiSettings.openai_backup_api_model || "");
       setStatus("");
       setError("");
     } catch (value) { setError(errorMessage(value)); }
@@ -96,7 +96,7 @@ export function AsrPanel() {
         {uploads.length ? <div className="upload-list">{uploads.map(item => <div className="upload-row" key={item.id}><div><strong>{item.name}</strong><span>{item.status} · {item.detail}</span></div><ProgressBar value={item.progress} /></div>)}</div> : null}
       </Card>
       <Card>
-        <CardHeader title="提炼提示词" description="仅用于 ASR 转写结果的信息提炼；接口和模型在 AI 能力设置中统一配置。" actions={<Button size="sm" onClick={() => void savePrompt()}>保存提示词</Button>} />
+        <CardHeader title="提炼提示词" description="仅用于 ASR 转写结果的信息提炼；接口和模型在 AI 能力设置中统一配置，并按主 API、备用 API 自动回退。" actions={<Button size="sm" onClick={() => void savePrompt()}>保存提示词</Button>} />
         <Field label="System 提示词">
           <textarea className="ai-prompt-editor" rows={10} value={prompt} onChange={event => setPrompt(event.target.value)} />
         </Field>

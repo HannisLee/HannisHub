@@ -128,11 +128,11 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
-| GET | `/api/ai-settings` | 读取 AI 能力配置；API 密钥只返回是否已配置，不回显明文 |
-| PUT | `/api/ai-settings` | 保存 OpenAI 兼容 API 地址、模型与密钥到本地 `ai_settings.json` |
-| POST | `/api/ai-settings/test` | 使用已保存配置请求 OpenAI 兼容 API 的 `/models`，测试连接并返回模型列表 |
-| POST | `/api/ai-settings/models` | 探查 OpenAI 兼容接口的可用模型列表，供前端模型下拉选择 |
-| POST | `/api/ai-settings/model-test` | 使用当前或指定模型发送一次最小对话请求，验证模型可用性 |
+| GET | `/api/ai-settings` | 读取主 API 与备用 API 配置；密钥只返回是否已配置，不回显明文 |
+| PUT | `/api/ai-settings` | 保存主 API 与备用 API 的 OpenAI 兼容地址、模型与密钥到本地 `ai_settings.json` |
+| POST | `/api/ai-settings/test` | 接收 `target`（`primary` 或 `backup`），请求指定 API 的 `/models` 测试连接并返回模型列表 |
+| POST | `/api/ai-settings/models` | 接收 `target`，探查指定 OpenAI 兼容接口的可用模型列表，供对应模型下拉选择 |
+| POST | `/api/ai-settings/model-test` | 接收 `target` 与 `model`，使用指定 API 发送一次最小对话请求验证模型可用性 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
@@ -150,11 +150,11 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### AI 能力设置
 
-- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；配置包含 OpenAI 兼容 API 地址、模型名称、API 密钥和各业务提示词。API 与模型在 `/settings` 统一配置，提示词放在对应业务页面。模型探查结果会在“可支持的模型”按钮区展示，点击按钮即自动填入模型选择，同时保留自定义模型名称输入。
-- `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，仅返回 `openai_api_key_configured`。
-- 首次读取时会从旧版 `llama_manager/settings.json` 无损迁移已存在的 AI 配置；迁移只复制，不删除旧字段，便于回滚。
-- `/settings` 提供“测试链接”“探查模型列表”和“测试模型”三类操作；模型输入框关联探查结果下拉，同时允许直接输入自定义模型名。
-- ASR 提炼通过同一份配置调用 OpenAI 兼容接口；ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。后续需要 AI 能力的模块也应复用该模块，而不是各自保存密钥。
+- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；主 API 与备用 API 各自保存 OpenAI 兼容地址、模型名称和 API 密钥，配置页面以全宽上下卡片展示。模型探查结果在对应 API 的“可支持的模型”按钮区展示，点击按钮即自动填入该 API 的模型选择，同时保留自定义模型名称输入。
+- AI 任务按主 API、备用 API 的顺序执行；主 API 的网络连接失败、HTTP 错误、响应格式错误或未返回有效文字时，自动以备用 API 的模型重试。未完整配置的 API 会跳过，不会阻塞另一套已完整配置的 API。
+- `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，只分别返回 `openai_primary_api_key_configured` 和 `openai_backup_api_key_configured`。
+- 首次读取时会把既有单 API 配置或旧版 `llama_manager/settings.json` 的 AI 配置无损迁移为主 API；旧字段保留，便于回滚。
+- `/settings` 对每套 API 分别提供“测试链接”“探查模型列表”和“测试模型”操作；ASR 提炼与提示词润色均复用带自动回退的统一调用。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。
 - API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
 
 ### 登录与会话
@@ -514,9 +514,12 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `openai_api_base_url` | string | `""` | OpenAI 兼容 API 基地址，例如 `https://api.openai.com/v1` |
-| `openai_api_model` | string | `""` | AI 任务使用的模型名称 |
-| `openai_api_key` | string | `""` | OpenAI 兼容 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
+| `openai_primary_api_base_url` | string | `""` | 主 OpenAI 兼容 API 基地址，例如 `https://api.openai.com/v1` |
+| `openai_primary_api_model` | string | `""` | 主 API 使用的模型名称 |
+| `openai_primary_api_key` | string | `""` | 主 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
+| `openai_backup_api_base_url` | string | `""` | 备用 OpenAI 兼容 API 基地址；主 API 失败时使用 |
+| `openai_backup_api_model` | string | `""` | 备用 API 使用的模型名称 |
+| `openai_backup_api_key` | string | `""` | 备用 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
 | `asr_extraction_prompt` | string | 默认提炼提示词 | ASR 转写提炼使用的 system 提示词 |
 | `prompt_polish_prompts` | object | 内置三档指令 | 提示词工作区轻度、标准、深度三档润色使用的 system 提示词 |
 

@@ -1,18 +1,27 @@
+export type AiApiTarget = "primary" | "backup";
+
 export interface AiSettings {
-  openai_api_base_url: string;
-  openai_api_model: string;
-  openai_api_key_configured: boolean;
+  openai_primary_api_base_url: string;
+  openai_primary_api_model: string;
+  openai_primary_api_key_configured: boolean;
+  openai_backup_api_base_url: string;
+  openai_backup_api_model: string;
+  openai_backup_api_key_configured: boolean;
 }
 
 export interface AiConnectionTestResult {
   ok?: boolean;
   message: string;
+  target?: AiApiTarget;
+  target_label?: string;
   models?: string[];
 }
 
 export interface AiModelTestResult {
   ok?: boolean;
   message: string;
+  target?: AiApiTarget;
+  target_label?: string;
   response?: string;
 }
 

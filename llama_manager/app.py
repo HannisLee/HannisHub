@@ -2152,40 +2152,16 @@ async def _extract_asr_history(record_id: str) -> tuple[dict, str]:
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="转写文本为空，无法提取")
 
-    config = ai_settings.get_ai_config()
-    base_url = config[ai_settings.OPENAI_API_BASE_URL_KEY]
-    api_key = config[ai_settings.OPENAI_API_KEY_KEY]
-    model = config[ai_settings.OPENAI_API_MODEL_KEY]
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先在 AI 设置中保存 API 地址")
-    if not model:
-        raise HTTPException(status_code=400, detail="请先在 AI 设置中选择模型")
-
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    payload = {
-        "model": model,
-        "messages": [
+    result = await ai_settings.chat_completion(
+        [
             {"role": "system", "content": _get_asr_extraction_prompt()},
             {"role": "user", "content": f"请处理以下音频转写：\n\n{source_text}"},
         ],
-        "temperature": 0.2,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"信息提取请求失败：{str(exc)[:300]}") from exc
-    if response.is_error:
-        raise HTTPException(status_code=502, detail=f"信息提取服务返回 HTTP {response.status_code}")
-    try:
-        response_data = response.json()
-        text = response_data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="信息提取服务返回格式不符合 OpenAI 兼容规范") from exc
-    if not isinstance(text, str) or not text.strip():
-        raise HTTPException(status_code=502, detail="信息提取服务未返回有效文字")
-    snapshot = _save_asr_extraction(record_id, text.strip())
-    return snapshot, text.strip()
+        temperature=0.2,
+    )
+    text = str(result["content"])
+    snapshot = _save_asr_extraction(record_id, text)
+    return snapshot, text
 
 
 def _delete_asr_history_record(record_id: str) -> dict:
