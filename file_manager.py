@@ -23,6 +23,8 @@ MAX_ROOTS = 24
 MAX_DIRECTORY_ENTRIES = 1_000
 MAX_FAVORITES = 100
 MAX_DATE_SEARCH_FOLDERS = 24
+MAX_MARKDOWN_FILES = 2_000
+MAX_MARKDOWN_FILE_BYTES = 3 * 1024 * 1024
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
     "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
@@ -45,6 +47,7 @@ class DirectoryRecord:
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
 _PLY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
+_MARKDOWN_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
 _CACHE_LOCK = threading.RLock()
 _SYNC_LOCK = threading.Lock()
 _FAVORITES_LOCK = threading.RLock()
@@ -319,6 +322,93 @@ def list_ply_files(root_index: int, relative_path: str, *, refresh: bool = False
     prefix = f"{safe_path}/" if safe_path else ""
     return {"entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(prefix):]} for record in records],
             "cached": False, "generated_at": generated_at, "expires_at": generated_at + CACHE_TTL_SECONDS}
+
+
+def _scan_markdown_tree(directory: Path, relative_path: str) -> tuple[list[DirectoryRecord], bool]:
+    """递归读取 Markdown 文件，不跟随符号链接且限制返回数量。"""
+    records: list[DirectoryRecord] = []
+    pending = [(directory, relative_path)]
+    while pending:
+        current, current_path = pending.pop()
+        try:
+            with os.scandir(current) as iterator:
+                for item in iterator:
+                    try:
+                        child_path = f"{current_path}/{item.name}" if current_path else item.name
+                        if len(child_path) > 4_096:
+                            continue
+                        if item.is_dir(follow_symlinks=False):
+                            if item.name not in IGNORED_DIRECTORY_NAMES:
+                                pending.append((Path(item.path), child_path))
+                        elif item.is_file(follow_symlinks=False):
+                            extension = Path(item.name).suffix.lower().removeprefix(".")
+                            if extension in {"md", "markdown", "mdown", "mkdn"}:
+                                stat = item.stat(follow_symlinks=False)
+                                records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, extension))
+                                if len(records) >= MAX_MARKDOWN_FILES:
+                                    records.sort(key=lambda record: (record.path.lower(), record.path))
+                                    return records, True
+                    except OSError:
+                        continue
+        except OSError as exc:
+            if current == directory:
+                raise HTTPException(status_code=404, detail="目录不存在或无法读取") from exc
+            continue
+    records.sort(key=lambda record: (record.path.lower(), record.path))
+    return records, False
+
+
+def list_markdown_files(root_index: int, relative_path: str, *, refresh: bool = False) -> dict[str, Any]:
+    """返回受限目录及其子目录中的 Markdown 文件，供文档查看器使用。"""
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    root = _resolve_root(roots[root_index])
+    safe_path = _normalize_relative_path(relative_path)
+    directory = _resolve_directory(root, safe_path)
+    key = (root, safe_path)
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _MARKDOWN_CACHE.get(key)
+        if not refresh and cached and now - cached[0] < CACHE_TTL_SECONDS:
+            records = cached[1]
+            return {
+                "root_index": root_index, "path": safe_path,
+                "entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(safe_path) + 1:] if safe_path else record.path} for record in records],
+                "cached": True, "generated_at": cached[0], "expires_at": cached[0] + CACHE_TTL_SECONDS,
+                "truncated": len(records) >= MAX_MARKDOWN_FILES,
+            }
+    records, truncated = _scan_markdown_tree(directory, safe_path)
+    generated_at = time.time()
+    with _CACHE_LOCK:
+        _MARKDOWN_CACHE[key] = (generated_at, records)
+    return {
+        "root_index": root_index, "path": safe_path,
+        "entries": [{**_entry_payload(record, root_index), "relative_path": record.path[len(safe_path) + 1:] if safe_path else record.path} for record in records],
+        "cached": False, "generated_at": generated_at, "expires_at": generated_at + CACHE_TTL_SECONDS,
+        "truncated": truncated,
+    }
+
+
+def read_markdown_file(root_index: int, relative_path: str) -> dict[str, Any]:
+    """读取一个大小受限的 UTF-8 Markdown 文件，避免将任意大文件送入浏览器。"""
+    file_path = resolve_file(root_index, relative_path)
+    if file_path.suffix.lower() not in {".md", ".markdown", ".mdown", ".mkdn"}:
+        raise HTTPException(status_code=422, detail="只能查看 Markdown 文件")
+    try:
+        stat = file_path.stat()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="文件不存在或无法读取") from exc
+    if stat.st_size > MAX_MARKDOWN_FILE_BYTES:
+        raise HTTPException(status_code=413, detail=f"Markdown 文件不能超过 {MAX_MARKDOWN_FILE_BYTES // (1024 * 1024)} MB")
+    try:
+        content = file_path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="文件不存在或无法读取") from exc
+    return {
+        "root_index": root_index, "path": _normalize_relative_path(relative_path), "name": file_path.name,
+        "content": content, "size": stat.st_size, "modified": stat.st_mtime,
+    }
 
 
 def _date_search_locations(values: object) -> list[tuple[str, int, str]]:
@@ -611,6 +701,7 @@ def clear_directory_cache() -> None:
     with _CACHE_LOCK:
         _DIRECTORY_CACHE.clear()
         _PLY_CACHE.clear()
+        _MARKDOWN_CACHE.clear()
 
 
 def sync_roots(targets: object = None) -> dict[str, Any]:

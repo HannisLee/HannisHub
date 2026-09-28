@@ -30,10 +30,12 @@ from file_manager import (
     date_search_folders,
     delete_favorite,
     list_directory,
+    list_markdown_files,
     list_favorites,
     list_ply_files,
     rename_favorite,
     resolve_file,
+    read_markdown_file,
     save_roots,
     save_date_search_folders,
     search_ply_by_date,
@@ -202,6 +204,12 @@ async def files_page():
     return await _new_frontend_route("files")
 
 
+@app.get("/files/documents", include_in_schema=False)
+@app.get("/files/documents/", include_in_schema=False)
+async def files_documents_page():
+    return await _new_frontend_route("files/documents")
+
+
 @app.get("/files/point-clouds", include_in_schema=False)
 @app.get("/files/point-clouds/", include_in_schema=False)
 async def files_point_clouds_page():
@@ -301,6 +309,25 @@ async def file_manager_ply_files(
     return JSONResponse(await run_in_threadpool(list_ply_files, root, path, refresh=refresh))
 
 
+@app.get("/api/file-manager/markdown-files")
+async def file_manager_markdown_files(
+    root: int = Query(..., ge=0),
+    path: str = Query("", max_length=4_096),
+    refresh: bool = Query(False),
+):
+    """递归列出当前受限目录内的 Markdown 文档。"""
+    return JSONResponse(await run_in_threadpool(list_markdown_files, root, path, refresh=refresh))
+
+
+@app.get("/api/file-manager/markdown")
+async def file_manager_markdown(
+    root: int = Query(..., ge=0),
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """读取单个受限 Markdown 文档的 UTF-8 内容。"""
+    return JSONResponse(await run_in_threadpool(read_markdown_file, root, path))
+
+
 @app.get("/api/file-manager/date-search-folders")
 async def file_manager_date_search_folders():
     """返回按日期查找 PLY 的项目目录。"""
@@ -361,6 +388,16 @@ async def file_manager_download(
     """流式下载受限目录内的普通文件。"""
     file_path = resolve_file(root, path)
     return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/file-manager/resource")
+async def file_manager_resource(
+    root: int = Query(..., ge=0),
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """返回受限目录中的原始资源，供 Markdown 内的相对图片与链接引用。"""
+    file_path = resolve_file(root, path)
+    return FileResponse(file_path, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/point-clouds/file")

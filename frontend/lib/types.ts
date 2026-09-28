@@ -64,6 +64,25 @@ export interface FileManagerPlyResponse {
   expires_at: number;
 }
 
+export interface MarkdownFileResponse {
+  root_index: number;
+  path: string;
+  entries: FileManagerEntry[];
+  cached: boolean;
+  generated_at: number;
+  expires_at: number;
+  truncated: boolean;
+}
+
+export interface MarkdownDocument {
+  root_index: number;
+  path: string;
+  name: string;
+  content: string;
+  size: number;
+  modified: number;
+}
+
 export interface FileManagerDatePlyEntry extends FileManagerEntry {
   root_index: number;
   source_path: string;

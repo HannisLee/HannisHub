@@ -137,6 +137,8 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
 | GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，不跟随符号链接 |
+| GET | `/api/file-manager/markdown-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的 Markdown 文件，最多返回 2,000 篇，供文档查看模块建立阅读目录 |
+| GET | `/api/file-manager/markdown?root=<index>&path=<relative_path>` | 读取单个不超过 3 MB 的 UTF-8 Markdown 文件并返回内容、路径与元信息 |
 | GET | `/api/file-manager/date-search-folders` | 读取按日期查找 PLY 的项目目录；首次使用时列出已存在且处于开放范围内的 RadioGS、LumiMotion 项目目录 |
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
 | POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
@@ -146,6 +148,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
 | DELETE | `/api/file-manager/favorites/{favorite_id}` | 移除目录收藏 |
 | GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
+| GET | `/api/file-manager/resource?root=<index>&path=<relative_path>` | 内联返回受限目录内的原始资源，供 Markdown 相对图片与附件链接加载 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 兼容旧版点云文件地址；新预览器直接使用文件管理下载接口，仍拒绝越界路径 |
 
 ### AI 能力设置
@@ -173,6 +176,7 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 服务端对目录列表维护 1 小时线程安全缓存。目录缓存同时记录目录 mtime；手动同步会清除所选项目旧缓存并递归预读目录树。浏览器端复用有效缓存，手动同步后清除浏览器缓存并刷新当前目录。
 - 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
+- “文档查看”页复用相同的受限目录边界。顶部文件夹选择器可在已开放目录内逐层选择，随后递归列出 Markdown 文档并在阅读区渲染标题、段落、列表、代码块、表格、引用和链接；相对图片与附件通过受限资源接口解析，不会暴露开放目录外的文件。单次扫描最多返回 2,000 篇文档，单篇读取上限为 3 MB。
 - 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重复路径拒绝收藏；读取时将旧顶层路径映射到当前开放范围，无法访问的目录暂不展示。
 
 ### 点云预览
