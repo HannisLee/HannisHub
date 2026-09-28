@@ -3,10 +3,35 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { API_PATHS, apiFetch } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { FileManagerDirectoryResponse, MarkdownDocument, MarkdownFileResponse } from "../../lib/types";
+import type { FileManagerDirectoryResponse, FileManagerEntry, MarkdownDocument } from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
 type MarkdownLinkHandler = (path: string) => void;
+
+const DEFAULT_DOCUMENT_FOLDER = "/home/lihan/reproduce/RadioGS-stage1";
+const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkdn"]);
+
+function isMarkdownFile(entry: FileManagerEntry): boolean {
+  return entry.type === "file" && MARKDOWN_EXTENSIONS.has(entry.extension);
+}
+
+function datePrefixValue(name: string): number | null {
+  const match = name.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})/);
+  if (!match) return null;
+  const value = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(value) ? null : value;
+}
+
+function compareDocumentEntries(left: FileManagerEntry, right: FileManagerEntry): number {
+  if (left.type !== right.type) return left.type === "directory" ? -1 : 1;
+  const leftDate = datePrefixValue(left.name);
+  const rightDate = datePrefixValue(right.name);
+  if (leftDate !== null && rightDate !== null && leftDate !== rightDate) return rightDate - leftDate;
+  if (leftDate !== null && rightDate === null) return -1;
+  if (rightDate !== null && leftDate === null) return 1;
+  if (left.modified !== right.modified) return right.modified - left.modified;
+  return left.name.localeCompare(right.name, "zh-CN", { numeric: true });
+}
 
 function resourceUrl(rootIndex: number, path: string): string {
   return `${API_PATHS.fileManager}/resource?${new URLSearchParams({ root: String(rootIndex), path })}`;
@@ -181,7 +206,7 @@ export function DocumentViewer() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerPath, setPickerPath] = useState("");
   const [pickerDirectory, setPickerDirectory] = useState<FileManagerDirectoryResponse | null>(null);
-  const [files, setFiles] = useState<MarkdownFileResponse | null>(null);
+  const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
   const [selectedPath, setSelectedPath] = useState("");
   const [markdownDocument, setMarkdownDocument] = useState<MarkdownDocument | null>(null);
   const [filter, setFilter] = useState("");
@@ -195,8 +220,16 @@ export function DocumentViewer() {
     apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
       .then(value => {
         if (!active) return;
-        setRoots(value.roots || []);
-        setResolvedRoots(value.resolved_roots || value.roots || []);
+        const nextRoots = value.roots || [];
+        const nextResolvedRoots = value.resolved_roots || nextRoots;
+        const defaultRootIndex = nextResolvedRoots.findIndex(root => DEFAULT_DOCUMENT_FOLDER === root || DEFAULT_DOCUMENT_FOLDER.startsWith(`${root.replace(/\/+$/, "")}/`));
+        setRoots(nextRoots);
+        setResolvedRoots(nextResolvedRoots);
+        if (defaultRootIndex >= 0) {
+          const rootPath = nextResolvedRoots[defaultRootIndex].replace(/\/+$/, "");
+          setRootIndex(defaultRootIndex);
+          setFolder(DEFAULT_DOCUMENT_FOLDER.slice(rootPath.length).replace(/^\/+/, ""));
+        }
         if (!value.roots?.length) setLoadingFiles(false);
       })
       .catch(value => { if (active) { setError(errorMessage(value)); setLoadingFiles(false); } });
@@ -206,12 +239,13 @@ export function DocumentViewer() {
   useEffect(() => {
     if (!roots.length) return;
     let active = true;
-    apiFetch<MarkdownFileResponse>(`${API_PATHS.fileManager}/markdown-files?${new URLSearchParams({ root: String(rootIndex), path: folder })}`)
+    apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: folder })}`)
       .then(value => {
         if (!active) return;
-        setFiles(value);
+        setDirectory(value);
         setSelectedPath(current => {
-          const nextPath = value.entries.some(entry => entry.path === current) ? current : value.entries[0]?.path || "";
+          const markdownFiles = value.entries.filter(isMarkdownFile);
+          const nextPath = markdownFiles.some(entry => entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
           if (nextPath !== current) {
             setMarkdownDocument(null);
             setLoadingDocument(Boolean(nextPath));
@@ -245,16 +279,19 @@ export function DocumentViewer() {
     return () => { active = false; };
   }, [pickerOpen, roots, rootIndex, pickerPath]);
 
-  const visibleFiles = useMemo(() => {
+  const visibleEntries = useMemo(() => {
     const query = filter.trim().toLowerCase();
-    return (files?.entries || []).filter(file => !query || `${file.name} ${file.relative_path || file.path}`.toLowerCase().includes(query));
-  }, [files, filter]);
+    return (directory?.entries || [])
+      .filter(entry => entry.type === "directory" || isMarkdownFile(entry))
+      .filter(entry => !query || `${entry.name} ${entry.path}`.toLowerCase().includes(query))
+      .sort(compareDocumentEntries);
+  }, [directory, filter]);
   const pickerFolders = useMemo(() => pickerDirectory?.entries.filter(entry => entry.type === "directory") || [], [pickerDirectory]);
   const folderLabel = `${resolvedRoots[rootIndex] || roots[rootIndex] || ""}${folder ? `/${folder}` : ""}`;
 
   function chooseRoot(nextRoot: number) {
     setLoadingFiles(true);
-    setFiles(null);
+    setDirectory(null);
     setRootIndex(nextRoot);
     setFolder("");
     setPickerPath("");
@@ -265,7 +302,7 @@ export function DocumentViewer() {
 
   function applyFolder() {
     setLoadingFiles(true);
-    setFiles(null);
+    setDirectory(null);
     setFolder(pickerPath);
     setSelectedPath("");
     setMarkdownDocument(null);
@@ -274,12 +311,20 @@ export function DocumentViewer() {
   }
 
   function openMarkdown(path: string) {
-    if (!files?.entries.some(file => file.path === path)) {
-      setError("链接指向的 Markdown 文档不在当前所选文件夹中");
-      return;
-    }
+    const parentPath = path.split("/").slice(0, -1).join("/");
+    if (parentPath !== folder) openDirectory(parentPath, path);
     selectDocument(path);
     window.requestAnimationFrame(() => window.document.querySelector(".document-reader")?.scrollTo({ top: 0, behavior: "smooth" }));
+  }
+
+  function openDirectory(path: string, documentPath = "") {
+    setLoadingFiles(true);
+    setDirectory(null);
+    setFolder(path);
+    setFilter("");
+    setMarkdownDocument(null);
+    setSelectedPath(documentPath);
+    setLoadingDocument(Boolean(documentPath));
   }
 
   function selectDocument(path: string) {
@@ -317,7 +362,7 @@ export function DocumentViewer() {
     </div>
 
     {pickerOpen ? <section className="document-folder-picker" aria-label="选择文档文件夹">
-      <div className="document-picker-head"><div><strong>选择文档文件夹</strong><span>当前文件夹及其子目录中的 Markdown 文件会被加入阅读列表。</span></div><Button variant="quiet" size="sm" type="button" onClick={() => setPickerOpen(false)}>关闭</Button></div>
+      <div className="document-picker-head"><div><strong>选择文档文件夹</strong><span>左侧会以文件夹层级展示当前目录中的 Markdown 文档。</span></div><Button variant="quiet" size="sm" type="button" onClick={() => setPickerOpen(false)}>关闭</Button></div>
       <div className="document-picker-breadcrumb"><button type="button" onClick={() => changePickerPath("")}>{resolvedRoots[rootIndex] || roots[rootIndex]}</button>{pickerPath.split("/").filter(Boolean).map((segment, index, segments) => <span key={`${index}-${segment}`}><b>/</b><button type="button" onClick={() => changePickerPath(segments.slice(0, index + 1).join("/"))}>{segment}</button></span>)}</div>
       <div className="document-picker-list">
         {pickerPath ? <button type="button" className="document-picker-row" onClick={() => changePickerPath(pickerPath.split("/").slice(0, -1).join("/"))}><span>↑</span>上一级</button> : null}
@@ -329,10 +374,11 @@ export function DocumentViewer() {
     {error ? <ErrorState message={error} /> : null}
     <div className="document-workspace">
       <aside className="document-index">
-        <div className="document-index-head"><div><strong>文档列表</strong><span>{loadingFiles ? "正在读取…" : `${files?.entries.length || 0} 篇`}</span></div><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选文档" aria-label="筛选文档" /></div>
-        {files?.truncated ? <p className="document-notice">文档数量超过 2,000 篇，当前仅显示前 2,000 篇。</p> : null}
+        <div className="document-index-head"><div><strong>文档目录</strong><span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(isMarkdownFile).length} 篇`}</span></div><div className="document-index-breadcrumb"><button type="button" onClick={() => openDirectory("")}>{resolvedRoots[rootIndex] || roots[rootIndex]}</button>{folder.split("/").filter(Boolean).map((segment, index, segments) => <span key={`${index}-${segment}`}><b>/</b><button type="button" onClick={() => openDirectory(segments.slice(0, index + 1).join("/"))}>{segment}</button></span>)}</div><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选当前目录" aria-label="筛选当前目录" /></div>
         <div className="document-file-list">
-          {loadingFiles ? <LoadingState label="正在扫描 Markdown 文档…" /> : visibleFiles.length ? visibleFiles.map(file => <button className={`document-file${file.path === selectedPath ? " is-selected" : ""}`} type="button" key={file.path} onClick={() => selectDocument(file.path)} title={file.path}><strong>{file.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</strong><span>{file.relative_path || file.path}</span></button>) : <EmptyState title={files?.entries.length ? "没有匹配的文档" : "这个文件夹没有 Markdown 文档"} detail={files?.entries.length ? "可调整上方筛选条件。" : "点击顶部“选择文件夹”切换到包含 .md 文件的位置。"} />}
+          {loadingFiles ? <LoadingState label="正在读取当前文件夹…" /> : folder ? <button type="button" className="document-file document-folder-entry" onClick={() => openDirectory(folder.split("/").slice(0, -1).join("/"))}><strong>↑ 上一级</strong><span>返回父文件夹</span></button> : null}
+          {!loadingFiles && visibleEntries.length ? visibleEntries.map(entry => entry.type === "directory" ? <button className="document-file document-folder-entry" type="button" key={entry.path} onClick={() => openDirectory(entry.path)} title={entry.path}><strong>□ {entry.name}</strong><span>文件夹</span></button> : <button className={`document-file${entry.path === selectedPath ? " is-selected" : ""}`} type="button" key={entry.path} onClick={() => selectDocument(entry.path)} title={entry.path}><strong>{entry.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</strong><span>{formatDate(entry.modified)}</span></button>) : null}
+          {!loadingFiles && !visibleEntries.length ? <EmptyState title={directory?.entries.length ? "没有匹配的文档" : "这个文件夹没有 Markdown 文档"} detail={directory?.entries.length ? "可调整上方筛选条件。" : "点击顶部“选择文件夹”切换到包含 .md 文件的位置。"} /> : null}
         </div>
       </aside>
       <main className="document-reader">

@@ -644,14 +644,19 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .document-index-head > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .document-index-head strong { color: var(--color-text-primary); font-size: 15px; font-weight: 500; }
 .document-index-head span, .document-notice { color: var(--color-text-muted); font-size: 12px; }
+.document-index-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; }
+.document-index-breadcrumb span { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-1); }
+.document-index-breadcrumb button { max-width: 200px; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--color-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.document-index-breadcrumb button:hover { color: var(--color-text-primary); text-decoration: underline; }
 .document-index-head input { min-height: 34px; font-size: 13px; }
 .document-notice { margin: 0; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-divider); line-height: 1.5; }
 .document-file-list { min-height: 0; overflow: auto; }
 .document-file { display: grid; width: 100%; gap: var(--space-1); padding: var(--space-3) var(--space-5); border: 0; border-bottom: 1px solid var(--color-divider); background: transparent; color: var(--color-text-secondary); text-align: left; }
 .document-file:hover { background: var(--color-surface-hover); }
 .document-file.is-selected { box-shadow: inset 2px 0 var(--color-brand); background: var(--color-surface-hover); }
-.document-file strong { overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.document-file strong { display: -webkit-box; overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .document-file span { overflow: hidden; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.document-folder-entry strong { color: var(--color-text-secondary); }
 .document-reader { min-width: 0; max-height: calc(100vh - 190px); overflow: auto; padding: var(--space-10) clamp(var(--space-6), 5vw, var(--space-16)); scroll-behavior: smooth; }
 .document-reader > .empty-state, .document-reader > .loading-state { min-height: 420px; }
 .document-reader-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); margin: 0 auto var(--space-10); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-divider); }
