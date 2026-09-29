@@ -331,16 +331,20 @@ export interface PromptItem {
 export type PromptPolishLevel = "light" | "standard" | "deep";
 
 export type PromptPolishPrompts = Record<PromptPolishLevel, string>;
+export type PromptReasoningEffort = "auto" | "low" | "medium" | "high";
 
 export interface PromptPolishSettings {
   prompts: PromptPolishPrompts;
   defaults: PromptPolishPrompts;
+  reasoning_effort: PromptReasoningEffort;
+  reasoning_effort_options?: Record<PromptReasoningEffort, string>;
 }
 
 export interface PromptPolishResult {
   content: string;
   level: PromptPolishLevel;
   model: string;
+  reasoning_effort?: PromptReasoningEffort;
 }
 
 export interface ApiErrorShape {

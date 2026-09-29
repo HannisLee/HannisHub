@@ -39,6 +39,20 @@ AI_MAX_CONFIG_COUNT = 32
 AI_MAX_MODEL_COUNT = 200
 ASR_EXTRACTION_PROMPT_KEY = "asr_extraction_prompt"
 PROMPT_POLISH_PROMPTS_KEY = "prompt_polish_prompts"
+PROMPT_REASONING_EFFORT_KEY = "prompt_reasoning_effort"
+REASONING_EFFORT_AUTO = "auto"
+PROMPT_REASONING_EFFORTS = frozenset({
+    REASONING_EFFORT_AUTO,
+    "low",
+    "medium",
+    "high",
+})
+PROMPT_REASONING_EFFORT_LABELS = {
+    REASONING_EFFORT_AUTO: "模型默认",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+}
 DEFAULT_ASR_EXTRACTION_PROMPT = (
     "以下内容是一个抖音视频的音频转写。请去除口头禅、重复、无关寒暄和其他冗余内容，"
     "准确提炼视频真正要传达的关键信息。请用清晰、简洁的中文输出；保留必要的事实、观点、"
@@ -370,19 +384,40 @@ def get_prompt_polish_prompts() -> dict[str, str]:
 
 
 def get_public_prompt_polish_settings() -> dict[str, Any]:
-    """返回提示词页面可编辑的三档指令和只读默认值。"""
+    """返回提示词页面可编辑的三档指令、推理强度和只读默认值。"""
     return {
         "prompts": get_prompt_polish_prompts(),
         "defaults": dict(DEFAULT_PROMPT_POLISH_PROMPTS),
+        "reasoning_effort": get_prompt_reasoning_effort(),
+        "reasoning_effort_options": dict(PROMPT_REASONING_EFFORT_LABELS),
     }
 
 
-def save_prompt_polish_prompts(value: object) -> dict[str, Any]:
-    """保存提示词工作区的三档润色指令。"""
+def normalize_prompt_reasoning_effort(value: object) -> str:
+    """校验提示词润色使用的推理强度。"""
+    effort = str(value or REASONING_EFFORT_AUTO).strip().lower()
+    if effort not in PROMPT_REASONING_EFFORTS:
+        raise HTTPException(status_code=400, detail="推理强度必须是 auto、low、medium 或 high")
+    return effort
+
+
+def get_prompt_reasoning_effort() -> str:
+    """读取提示词润色推理强度；auto 表示不传参数，由模型使用自身默认值。"""
+    value = _load_ai_settings().get(PROMPT_REASONING_EFFORT_KEY)
+    return value if isinstance(value, str) and value in PROMPT_REASONING_EFFORTS else REASONING_EFFORT_AUTO
+
+
+def save_prompt_polish_prompts(
+    value: object,
+    reasoning_effort: object = None,
+) -> dict[str, Any]:
+    """保存提示词工作区的三档润色指令和推理强度。"""
     prompts = _normalize_prompt_polish_prompts(value)
     with _SETTINGS_LOCK:
         data = _load_ai_settings()
         data[PROMPT_POLISH_PROMPTS_KEY] = prompts
+        if reasoning_effort is not None:
+            data[PROMPT_REASONING_EFFORT_KEY] = normalize_prompt_reasoning_effort(reasoning_effort)
         _write_json(AI_SETTINGS_PATH, data)
     return get_public_prompt_polish_settings()
 
@@ -611,7 +646,8 @@ async def chat_completion(
     temperature: float = 0.2,
     max_tokens: int | None = None,
     config_id: object = None,
-) -> dict[str, str | bool]:
+    reasoning_effort: object = None,
+) -> dict[str, Any]:
     """使用当前启用或指定的 AI 配置请求对话接口。"""
     connection = get_active_ai_connection(config_id)
     if not connection["base_url"] or not connection["model"]:
@@ -620,6 +656,8 @@ async def chat_completion(
             detail=f"请先为当前 AI 配置「{connection['name']}」保存地址和模型",
         )
 
+    requested_effort = normalize_prompt_reasoning_effort(reasoning_effort)
+    effective_effort = requested_effort
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
         headers = {"Authorization": f"Bearer {connection['api_key']}"} if connection["api_key"] else {}
         payload: dict[str, Any] = {
@@ -629,6 +667,8 @@ async def chat_completion(
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if requested_effort != REASONING_EFFORT_AUTO:
+            payload["reasoning_effort"] = requested_effort
         try:
             response = await client.post(f"{connection['base_url']}/chat/completions", headers=headers, json=payload)
         except httpx.RequestError as exc:
@@ -636,6 +676,18 @@ async def chat_completion(
                 status_code=502,
                 detail=f"「{connection['name']}」请求失败：{str(exc)[:300]}",
             ) from exc
+        # 部分 OpenAI 兼容服务不支持 medium 等个别 reasoning_effort 取值。
+        # 去掉可选参数重试一次；若请求本身仍有错误，则展示第二次请求的真实错误。
+        if response.status_code == 400 and "reasoning_effort" in payload:
+            payload.pop("reasoning_effort")
+            effective_effort = REASONING_EFFORT_AUTO
+            try:
+                response = await client.post(f"{connection['base_url']}/chat/completions", headers=headers, json=payload)
+            except httpx.RequestError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"「{connection['name']}」请求失败：{str(exc)[:300]}",
+                ) from exc
         if response.is_error:
             detail = _api_error_detail(response)
             suffix = f"：{detail}" if detail else ""
@@ -661,6 +713,7 @@ async def chat_completion(
             "target": "active",
             "target_label": connection["name"],
             "used_fallback": False,
+            "reasoning_effort": effective_effort,
         }
 
 
@@ -690,6 +743,7 @@ async def polish_prompt(content: object, level: object) -> dict[str, Any]:
             },
         ],
         temperature=0.2,
+        reasoning_effort=get_prompt_reasoning_effort(),
     )
     return {
         "content": str(result["content"]),
@@ -697,4 +751,5 @@ async def polish_prompt(content: object, level: object) -> dict[str, Any]:
         "model": str(result["model"]),
         "target": str(result["target"]),
         "used_fallback": bool(result["used_fallback"]),
+        "reasoning_effort": str(result["reasoning_effort"]),
     }

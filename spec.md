@@ -523,6 +523,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `ai_configs` | array | `[]` | 命名 AI 配置数组，最多 32 条，每条结构见下表 |
 | `asr_extraction_prompt` | string | 默认提炼提示词 | ASR 转写提炼使用的 system 提示词 |
 | `prompt_polish_prompts` | object | 内置三档指令 | 提示词工作区轻度、标准、深度三档润色使用的 system 提示词 |
+| `prompt_reasoning_effort` | string | `"auto"` | 提示词润色推理强度，可选 `auto`、`low`、`medium`、`high`；`auto` 不传推理参数 |
 
 `ai_configs[]` 单条配置字段：
 
@@ -688,8 +689,8 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | POST | `/api/prompts` | 归档新提示词，请求体 `{ "content": string }` |
 | PUT | `/api/prompts/{prompt_id}` | 更新指定归档提示词内容 |
 | DELETE | `/api/prompts/{prompt_id}` | 删除指定归档提示词 |
-| POST | `/api/polish` | 使用统一 AI 配置润色提示词，请求体 `{ "content": string, "level": "light" \| "standard" \| "deep" }` |
-| GET | `/api/polish-settings` | 读取三档润色指令与内置默认值 |
-| PUT | `/api/polish-settings` | 保存三档润色指令，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string } }` |
+| POST | `/api/polish` | 使用统一 AI 配置润色提示词，请求体 `{ "content": string, "level": "light" \| "standard" \| "deep" }`；实际推理强度读取润色设置 |
+| GET | `/api/polish-settings` | 读取三档润色指令、推理强度与内置默认值 |
+| PUT | `/api/polish-settings` | 保存三档润色指令与推理强度，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string }, "reasoning_effort": "auto" \| "low" \| "medium" \| "high" }` |
 
-服务端限制：归档提示词最长 200 万字符，单次 AI 润色最多 20 万字符，最多保留 500 条归档，超出时自动删除最早记录。归档页面使用固定高度的内部滚动列表，不再按分组拆分。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。
+服务端限制：归档提示词最长 200 万字符，单次 AI 润色最多 20 万字符，最多保留 500 条归档，超出时自动删除最早记录。归档页面使用固定高度的内部滚动列表，折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。

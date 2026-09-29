@@ -242,7 +242,12 @@ async def update_polish_settings(request: Request):
         raise HTTPException(status_code=400, detail="请求体必须是有效 JSON") from exc
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
-    return JSONResponse(ai_settings.save_prompt_polish_prompts(payload.get("prompts")))
+    return JSONResponse(
+        ai_settings.save_prompt_polish_prompts(
+            payload.get("prompts"),
+            payload.get("reasoning_effort"),
+        )
+    )
 
 
 @router.post("/prompts")

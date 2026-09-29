@@ -9,6 +9,7 @@ import type {
   PromptPolishPrompts,
   PromptPolishResult,
   PromptPolishSettings,
+  PromptReasoningEffort,
 } from "../../lib/types";
 import { Button, Card, CardHeader, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
@@ -20,6 +21,13 @@ const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string }> = [
   { id: "light", label: "轻度" },
   { id: "standard", label: "中度" },
   { id: "deep", label: "重度" },
+];
+
+const REASONING_EFFORT_LEVELS: Array<{ id: PromptReasoningEffort; label: string; description: string }> = [
+  { id: "auto", label: "模型默认", description: "不传推理参数，由当前模型自行决定" },
+  { id: "low", label: "低", description: "尽量减少思考，速度通常最快" },
+  { id: "medium", label: "中", description: "在速度与推理质量之间折中" },
+  { id: "high", label: "高", description: "允许更充分思考，速度可能较慢" },
 ];
 
 const EMPTY_POLISH_PROMPTS: PromptPolishPrompts = { light: "", standard: "", deep: "" };
@@ -39,6 +47,7 @@ export function PromptWorkspace() {
   const [items, setItems] = useState<PromptItem[]>([]);
   const [polishPrompts, setPolishPrompts] = useState<PromptPolishPrompts>(EMPTY_POLISH_PROMPTS);
   const [defaultPolishPrompts, setDefaultPolishPrompts] = useState<PromptPolishPrompts>(EMPTY_POLISH_PROMPTS);
+  const [reasoningEffort, setReasoningEffort] = useState<PromptReasoningEffort>("auto");
   const [loading, setLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -69,6 +78,7 @@ export function PromptWorkspace() {
       const data = await apiFetch<PromptPolishSettings>(`${API_PATHS.prompts}/polish-settings`);
       setPolishPrompts(data.prompts);
       setDefaultPolishPrompts(data.defaults);
+      setReasoningEffort(data.reasoning_effort || "auto");
       setError("");
     } catch (value) {
       setError(errorMessage(value));
@@ -169,7 +179,8 @@ export function PromptWorkspace() {
       setPolished(result.content);
       setMode("polished");
       setStale(false);
-      setMessage(`润色完成 · ${result.model}`);
+      const effortLabel = REASONING_EFFORT_LEVELS.find(item => item.id === result.reasoning_effort)?.label;
+      setMessage(`润色完成 · ${result.model}${effortLabel ? ` · 推理 ${effortLabel}` : ""}`);
     } catch (value) {
       setError(errorMessage(value));
       setMessage("润色未完成，原文保持不变");
@@ -255,11 +266,12 @@ export function PromptWorkspace() {
     try {
       const data = await apiFetch<PromptPolishSettings>(`${API_PATHS.prompts}/polish-settings`, {
         method: "PUT",
-        body: jsonBody({ prompts: polishPrompts }),
+        body: jsonBody({ prompts: polishPrompts, reasoning_effort: reasoningEffort }),
       });
       setPolishPrompts(data.prompts);
       setDefaultPolishPrompts(data.defaults);
-      setMessage("三档润色提示词已保存");
+      setReasoningEffort(data.reasoning_effort || "auto");
+      setMessage("三档润色提示词与推理强度已保存");
     } catch (value) {
       setError(errorMessage(value));
     } finally {
@@ -335,7 +347,7 @@ export function PromptWorkspace() {
                 <details className="prompt-item" key={item.id}>
                   <summary>
                     <span className="prompt-item-copy">
-                      <small>{formatDate(item.updated_at)} · {item.content.length.toLocaleString("zh-CN")} 字符</small>
+                      <small className="prompt-item-meta">{formatDate(item.updated_at)} · {item.content.length.toLocaleString("zh-CN")} 字符</small>
                       <strong className="prompt-item-title">{truncate(item.content.split(/\r?\n/).find(line => line.trim()) || item.content, 100)}</strong>
                     </span>
                     <span className="prompt-item-chevron" aria-hidden="true">⌄</span>
@@ -358,7 +370,7 @@ export function PromptWorkspace() {
       <Card className="prompt-settings-card">
         <CardHeader
           title="润色提示词设置"
-          description="分别控制轻度、标准和深度三档。API 地址、密钥和模型继续使用项目设置中的统一配置。"
+          description="分别控制轻度、标准和深度三档。API 地址、密钥和模型继续使用 AI 能力设置中的当前配置。"
           actions={
             <div className="row-actions">
               <Button
@@ -366,7 +378,8 @@ export function PromptWorkspace() {
                 size="sm"
                 onClick={() => {
                   setPolishPrompts({ ...defaultPolishPrompts });
-                  setMessage("已恢复默认内容，保存后生效");
+                  setReasoningEffort("auto");
+                  setMessage("已恢复默认内容与推理强度，保存后生效");
                 }}
                 disabled={settingsLoading || settingsSaving || !defaultPolishPrompts.light}
               >恢复默认</Button>
@@ -377,20 +390,35 @@ export function PromptWorkspace() {
           }
         />
         {settingsLoading ? <LoadingState /> : (
-          <div className="prompt-settings-grid">
-            {POLISH_LEVELS.map(level => (
-              <label className="prompt-settings-field" key={level.id}>
-                <span><strong>{level.label}</strong></span>
-                <textarea
-                  value={polishPrompts[level.id]}
-                  onChange={event => setPolishPrompts(current => ({ ...current, [level.id]: event.target.value }))}
-                  maxLength={8000}
-                  spellCheck={false}
+          <>
+            <div className="prompt-reasoning-setting">
+              <label className="prompt-reasoning-field">
+                <span><strong>推理强度</strong></span>
+                <select
+                  value={reasoningEffort}
+                  onChange={event => setReasoningEffort(event.target.value as PromptReasoningEffort)}
                   disabled={settingsSaving}
-                />
+                >
+                  {REASONING_EFFORT_LEVELS.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}
+                </select>
               </label>
-            ))}
-          </div>
+              <small>{REASONING_EFFORT_LEVELS.find(item => item.id === reasoningEffort)?.description}</small>
+            </div>
+            <div className="prompt-settings-grid">
+              {POLISH_LEVELS.map(level => (
+                <label className="prompt-settings-field" key={level.id}>
+                  <span><strong>{level.label}</strong></span>
+                  <textarea
+                    value={polishPrompts[level.id]}
+                    onChange={event => setPolishPrompts(current => ({ ...current, [level.id]: event.target.value }))}
+                    maxLength={8000}
+                    spellCheck={false}
+                    disabled={settingsSaving}
+                  />
+                </label>
+              ))}
+            </div>
+          </>
         )}
       </Card>
     </div>
