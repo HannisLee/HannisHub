@@ -129,6 +129,7 @@ export function AiSettingsPanel() {
       setClearKeyIds({});
       setStatus(successMessage);
       setError("");
+      return data;
     } catch (value) {
       setError(errorMessage(value));
       throw value;
@@ -193,18 +194,19 @@ export function AiSettingsPanel() {
   }
 
   async function discoverModelList(config: AiConnectionConfig, isConnectionTest = false) {
-    if (config.id.startsWith("local-")) {
-      setError("请先保存新增配置，再探查或测试模型");
-      return;
-    }
     if (isConnectionTest) setTestingConnection(config.id);
     else setDiscoveringModels(config.id);
     try {
+      const savedSettings = await saveSettings(
+        settings,
+        isConnectionTest ? `已保存「${config.name}」，正在测试链接…` : `已保存「${config.name}」，正在探查模型…`,
+      );
+      const savedConfig = savedSettings.ai_configs.find(item => item.id === config.id) || config;
       const result = await apiFetch<AiConnectionTestResult>(`${API_PATHS.aiSettings}/models`, {
         method: "POST",
-        body: jsonBody({ config_id: config.id }),
+        body: jsonBody({ config_id: savedConfig.id }),
       });
-      applyDiscoveredConfig(config.id, result);
+      applyDiscoveredConfig(savedConfig.id, result);
       setStatus(result.message);
       setError("");
     } catch (value) {
@@ -221,15 +223,13 @@ export function AiSettingsPanel() {
       setError(`请先为「${config.name}」选择或输入模型名称`);
       return;
     }
-    if (config.id.startsWith("local-")) {
-      setError("请先保存新增配置，再测试模型");
-      return;
-    }
     setTestingModel(config.id);
     try {
+      const savedSettings = await saveSettings(settings, `已保存「${config.name}」，正在测试模型…`);
+      const savedConfig = savedSettings.ai_configs.find(item => item.id === config.id) || config;
       const result = await apiFetch<AiModelTestResult>(`${API_PATHS.aiSettings}/model-test`, {
         method: "POST",
-        body: jsonBody({ config_id: config.id, model: config.model }),
+        body: jsonBody({ config_id: savedConfig.id, model: savedConfig.model }),
       });
       setModelStatus(result.response ? `${result.message}：${result.response}` : result.message);
       setError("");
@@ -357,13 +357,13 @@ export function AiSettingsPanel() {
           </section>
 
           <div className="ai-action-grid field-wide">
-            <Button variant="secondary" size="sm" onClick={() => void discoverModelList(config, true)} disabled={Boolean(testingConnection || discoveringModels)}>
+            <Button variant="secondary" size="sm" onClick={() => void discoverModelList(config, true)} disabled={saving || Boolean(testingConnection || discoveringModels)}>
               {testingConnection === config.id ? "测试链接中…" : "测试链接"}
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => void discoverModelList(config)} disabled={Boolean(testingConnection || discoveringModels)}>
+            <Button variant="secondary" size="sm" onClick={() => void discoverModelList(config)} disabled={saving || Boolean(testingConnection || discoveringModels)}>
               {discoveringModels === config.id ? "探查中…" : "探查模型列表"}
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => void testCurrentModel(config)} disabled={Boolean(testingModel)}>
+            <Button variant="secondary" size="sm" onClick={() => void testCurrentModel(config)} disabled={saving || Boolean(testingModel)}>
               {testingModel === config.id ? "测试模型中…" : "测试模型"}
             </Button>
           </div>
