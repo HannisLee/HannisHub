@@ -268,6 +268,9 @@ export function AiSettingsPanel() {
           description={isActive ? "当前 AI 任务正在使用这个配置。" : "编辑配置后点击“保存配置”；要启用它请点击“设为当前使用”。"}
           actions={
             <>
+              <Button size="sm" onClick={() => void save()} disabled={saving}>
+                {saving ? "保存中…" : "保存配置"}
+              </Button>
               <Button size="sm" variant="secondary" onClick={() => void activateConfig(config.id)} disabled={isActive || saving}>
                 {isActive ? "当前使用" : "设为当前使用"}
               </Button>
@@ -374,7 +377,6 @@ export function AiSettingsPanel() {
       kicker="设置 / AI"
       title="AI 能力设置"
       description="维护任意多个 OpenAI 兼容 API 配置，并随时切换当前使用的配置。每个配置都有独立的模型、密钥和可持久保存的可选模型列表。"
-      actions={<Button onClick={() => void save()} disabled={loading || saving}>{saving ? "保存中…" : "保存配置"}</Button>}
     />
     {error ? <ErrorState message={error} /> : null}
     {status ? <div className="inline-message"><Badge tone="success">接口</Badge>{status}</div> : null}
