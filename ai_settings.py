@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -28,25 +31,12 @@ OPENAI_PRIMARY_API_KEY_KEY = "openai_primary_api_key"
 OPENAI_BACKUP_API_BASE_URL_KEY = "openai_backup_api_base_url"
 OPENAI_BACKUP_API_MODEL_KEY = "openai_backup_api_model"
 OPENAI_BACKUP_API_KEY_KEY = "openai_backup_api_key"
-PRIMARY_API_TARGET = "primary"
-BACKUP_API_TARGET = "backup"
-API_TARGETS = (PRIMARY_API_TARGET, BACKUP_API_TARGET)
-API_TARGET_LABELS = {
-    PRIMARY_API_TARGET: "主 API",
-    BACKUP_API_TARGET: "备用 API",
-}
-API_TARGET_KEYS = {
-    PRIMARY_API_TARGET: {
-        "base_url": OPENAI_PRIMARY_API_BASE_URL_KEY,
-        "model": OPENAI_PRIMARY_API_MODEL_KEY,
-        "api_key": OPENAI_PRIMARY_API_KEY_KEY,
-    },
-    BACKUP_API_TARGET: {
-        "base_url": OPENAI_BACKUP_API_BASE_URL_KEY,
-        "model": OPENAI_BACKUP_API_MODEL_KEY,
-        "api_key": OPENAI_BACKUP_API_KEY_KEY,
-    },
-}
+AI_CONFIGS_KEY = "ai_configs"
+ACTIVE_AI_CONFIG_ID_KEY = "active_ai_config_id"
+AI_CONFIG_NAME_MAX_CHARS = 80
+AI_MODEL_NAME_MAX_CHARS = 240
+AI_MAX_CONFIG_COUNT = 32
+AI_MAX_MODEL_COUNT = 200
 ASR_EXTRACTION_PROMPT_KEY = "asr_extraction_prompt"
 PROMPT_POLISH_PROMPTS_KEY = "prompt_polish_prompts"
 DEFAULT_ASR_EXTRACTION_PROMPT = (
@@ -110,91 +100,243 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def _new_config_id() -> str:
+    """生成前端可安全展示的配置 ID。"""
+    return f"ai_{uuid.uuid4().hex[:12]}"
+
+
+def _normalize_model_list(value: object) -> list[str]:
+    """规范化可选模型列表，保留用户手工加入的未知模型名。"""
+    raw_models = value if isinstance(value, list) else []
+    models: list[str] = []
+    seen: set[str] = set()
+    for item in raw_models:
+        model = str(item or "").strip()
+        if not model or model in seen or len(model) > AI_MODEL_NAME_MAX_CHARS:
+            continue
+        seen.add(model)
+        models.append(model)
+        if len(models) >= AI_MAX_MODEL_COUNT:
+            break
+    return models
+
+
+def _normalize_config(value: object) -> dict[str, Any]:
+    """规范化一条 AI 配置；允许保存未完成的草稿，但使用前会再次校验。"""
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail="AI 配置必须是 JSON 对象")
+    config_id = str(value.get("id") or "").strip()
+    if config_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", config_id):
+        config_id = ""
+    base_url = str(value.get("base_url") or "").strip().rstrip("/")
+    if base_url:
+        base_url = _validate_base_url(base_url)
+    created_at = value.get("created_at")
+    return {
+        "id": config_id,
+        "name": str(value.get("name") or "").strip(),
+        "base_url": base_url,
+        "model": str(value.get("model") or "").strip()[:AI_MODEL_NAME_MAX_CHARS],
+        "api_key": str(value.get("api_key") or "").strip(),
+        "models": _normalize_model_list(value.get("models")),
+        "created_at": created_at if isinstance(created_at, (int, float)) else time.time(),
+    }
+
+
+def _legacy_connection(data: dict[str, Any], legacy: dict[str, Any], keys: tuple[str, str, str], name: str) -> dict[str, Any] | None:
+    """从旧版主/备用或单 API 字段提取一条连接。"""
+    base_url = str(data.get(keys[0]) or legacy.get(keys[0]) or "").strip().rstrip("/")
+    model = str(data.get(keys[1]) or legacy.get(keys[1]) or "").strip()
+    api_key = str(data.get(keys[2]) or legacy.get(keys[2]) or "").strip()
+    if not base_url and not model:
+        return None
+    hostname = (urlparse(base_url).hostname or "") if base_url else ""
+    if "deepseek" in hostname:
+        display_name = "DeepSeek"
+    elif "openai" in hostname:
+        display_name = "OpenAI"
+    elif "anthropic" in hostname:
+        display_name = "Anthropic"
+    elif hostname:
+        display_name = hostname
+    else:
+        display_name = name
+    return {
+        "id": _new_config_id(),
+        "name": display_name,
+        "base_url": base_url,
+        "model": model,
+        "api_key": api_key,
+        "models": [model] if model else [],
+        "created_at": time.time(),
+    }
+
+
+def _migrate_legacy_configs(data: dict[str, Any], legacy: dict[str, Any]) -> list[dict[str, Any]]:
+    """把旧版 primary/backup/单 API 字段迁移为多条配置。"""
+    primary = _legacy_connection(
+        data,
+        legacy,
+        (
+            OPENAI_PRIMARY_API_BASE_URL_KEY,
+            OPENAI_PRIMARY_API_MODEL_KEY,
+            OPENAI_PRIMARY_API_KEY_KEY,
+        ),
+        "主 API",
+    )
+    # primary 字段已经存在时，更老的单 API 字段只是历史迁移来源，不再重复生成配置。
+    candidates = [primary] if primary else [
+        _legacy_connection(
+            data,
+            legacy,
+            (OPENAI_API_BASE_URL_KEY, OPENAI_API_MODEL_KEY, OPENAI_API_KEY_KEY),
+            "OpenAI 兼容 API",
+        )
+    ]
+    backup = _legacy_connection(
+        data,
+        legacy,
+        (
+            OPENAI_BACKUP_API_BASE_URL_KEY,
+            OPENAI_BACKUP_API_MODEL_KEY,
+            OPENAI_BACKUP_API_KEY_KEY,
+        ),
+        "备用 API",
+    )
+    if backup:
+        candidates.append(backup)
+    configs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for config in candidates:
+        if config is None:
+            continue
+        identity = (config["base_url"], config["model"], config["api_key"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        configs.append(config)
+    return configs
+
+
 def _load_ai_settings() -> dict[str, Any]:
-    """读取本地 AI 配置，并无损迁移旧版单 API 配置到主 API。"""
+    """读取本地 AI 配置，并把旧版字段无损迁移为多配置结构。"""
     with _SETTINGS_LOCK:
         data = _read_json(AI_SETTINGS_PATH)
         legacy = _read_json(LEGACY_LLAMA_SETTINGS_PATH)
         changed = not AI_SETTINGS_PATH.is_file()
-        for key in (
+
+        if not data.get(ASR_EXTRACTION_PROMPT_KEY):
+            legacy_prompt = legacy.get(ASR_EXTRACTION_PROMPT_KEY)
+            if isinstance(legacy_prompt, str) and legacy_prompt.strip():
+                data[ASR_EXTRACTION_PROMPT_KEY] = legacy_prompt.strip()
+                changed = True
+
+        raw_configs = data.get(AI_CONFIGS_KEY)
+        if isinstance(raw_configs, list):
+            configs: list[dict[str, Any]] = []
+            used_ids: set[str] = set()
+            for raw_config in raw_configs:
+                config = _normalize_config(raw_config)
+                if not config["id"] or config["id"] in used_ids:
+                    config["id"] = _new_config_id()
+                used_ids.add(config["id"])
+                configs.append(config)
+        else:
+            configs = _migrate_legacy_configs(data, legacy)
+
+        for old_key in (
             OPENAI_API_BASE_URL_KEY,
             OPENAI_API_MODEL_KEY,
             OPENAI_API_KEY_KEY,
-            ASR_EXTRACTION_PROMPT_KEY,
+            OPENAI_PRIMARY_API_BASE_URL_KEY,
+            OPENAI_PRIMARY_API_MODEL_KEY,
+            OPENAI_PRIMARY_API_KEY_KEY,
+            OPENAI_BACKUP_API_BASE_URL_KEY,
+            OPENAI_BACKUP_API_MODEL_KEY,
+            OPENAI_BACKUP_API_KEY_KEY,
         ):
-            value = legacy.get(key)
-            if not data.get(key) and isinstance(value, str) and value.strip():
-                data[key] = value.strip()
+            if old_key in data:
+                data.pop(old_key)
                 changed = True
-        legacy_primary_keys = (
-            (OPENAI_API_BASE_URL_KEY, OPENAI_PRIMARY_API_BASE_URL_KEY),
-            (OPENAI_API_MODEL_KEY, OPENAI_PRIMARY_API_MODEL_KEY),
-            (OPENAI_API_KEY_KEY, OPENAI_PRIMARY_API_KEY_KEY),
-        )
-        for old_key, primary_key in legacy_primary_keys:
-            value = data.get(old_key) or legacy.get(old_key)
-            if not data.get(primary_key) and isinstance(value, str) and value.strip():
-                data[primary_key] = value.strip().rstrip("/") if old_key == OPENAI_API_BASE_URL_KEY else value.strip()
-                changed = True
+
+        active_id = str(data.get(ACTIVE_AI_CONFIG_ID_KEY) or "").strip()
+        if configs and (not active_id or all(config["id"] != active_id for config in configs)):
+            active_id = configs[0]["id"]
+
+        data[AI_CONFIGS_KEY] = configs
+        data[ACTIVE_AI_CONFIG_ID_KEY] = active_id if configs else ""
+        changed = changed or data != _read_json(AI_SETTINGS_PATH)
         if changed:
             _write_json(AI_SETTINGS_PATH, data)
         return data
 
 
-def _normalize_target(value: object) -> str:
-    """校验 API 目标名称。"""
-    target = str(value or PRIMARY_API_TARGET).strip().lower()
-    if target not in API_TARGETS:
-        raise HTTPException(status_code=400, detail="API 目标必须是 primary 或 backup")
-    return target
+def get_ai_connections() -> list[dict[str, Any]]:
+    """返回全部 AI 配置的完整连接信息，仅供后端内部使用。"""
+    return list(_load_ai_settings().get(AI_CONFIGS_KEY, []))
 
 
-def _api_connection(data: dict[str, Any], target: str) -> dict[str, str]:
-    """从配置中提取指定 API 的完整连接信息。"""
-    keys = API_TARGET_KEYS[target]
-    return {
-        "target": target,
-        "label": API_TARGET_LABELS[target],
-        "base_url": str(data.get(keys["base_url"]) or "").strip().rstrip("/"),
-        "model": str(data.get(keys["model"]) or "").strip(),
-        "api_key": str(data.get(keys["api_key"]) or "").strip(),
+def get_active_ai_connection(config_id: object = None) -> dict[str, Any]:
+    """获取当前使用的配置；显式传入 ID 时获取指定配置。"""
+    connections = get_ai_connections()
+    requested_id = str(config_id or "").strip()
+    if requested_id:
+        for connection in connections:
+            if connection["id"] == requested_id:
+                return connection
+        raise HTTPException(status_code=404, detail="指定的 AI 配置不存在")
+    active_id = str(_load_ai_settings().get(ACTIVE_AI_CONFIG_ID_KEY) or "")
+    for connection in connections:
+        if connection["id"] == active_id:
+            return connection
+    return connections[0] if connections else {
+        "id": "",
+        "name": "AI 配置",
+        "base_url": "",
+        "model": "",
+        "api_key": "",
+        "models": [],
+        "created_at": 0,
     }
 
 
-def get_ai_connections() -> list[dict[str, str]]:
-    """按主、备用顺序返回完整 API 连接配置，供后端任务自动回退。"""
-    data = _load_ai_settings()
-    return [_api_connection(data, target) for target in API_TARGETS]
-
-
 def get_ai_config() -> dict[str, str]:
-    """兼容旧调用方返回主 API，并附带两套完整配置；密钥不会返回给前端。"""
-    primary, backup = get_ai_connections()
+    """兼容旧调用方：把当前启用配置映射回旧字段。"""
+    connection = get_active_ai_connection()
     return {
-        OPENAI_API_BASE_URL_KEY: primary["base_url"],
-        OPENAI_API_MODEL_KEY: primary["model"],
-        OPENAI_API_KEY_KEY: primary["api_key"],
-        OPENAI_PRIMARY_API_BASE_URL_KEY: primary["base_url"],
-        OPENAI_PRIMARY_API_MODEL_KEY: primary["model"],
-        OPENAI_PRIMARY_API_KEY_KEY: primary["api_key"],
-        OPENAI_BACKUP_API_BASE_URL_KEY: backup["base_url"],
-        OPENAI_BACKUP_API_MODEL_KEY: backup["model"],
-        OPENAI_BACKUP_API_KEY_KEY: backup["api_key"],
+        OPENAI_API_BASE_URL_KEY: str(connection["base_url"]),
+        OPENAI_API_MODEL_KEY: str(connection["model"]),
+        OPENAI_API_KEY_KEY: str(connection["api_key"]),
+        OPENAI_PRIMARY_API_BASE_URL_KEY: str(connection["base_url"]),
+        OPENAI_PRIMARY_API_MODEL_KEY: str(connection["model"]),
+        OPENAI_PRIMARY_API_KEY_KEY: str(connection["api_key"]),
+        OPENAI_BACKUP_API_BASE_URL_KEY: "",
+        OPENAI_BACKUP_API_MODEL_KEY: "",
+        OPENAI_BACKUP_API_KEY_KEY: "",
         ASR_EXTRACTION_PROMPT_KEY: get_asr_extraction_prompt(),
     }
 
 
+def _public_connection(connection: dict[str, Any]) -> dict[str, Any]:
+    """转换可返回给前端的配置，永不回显密钥。"""
+    return {
+        "id": str(connection["id"]),
+        "name": str(connection["name"]),
+        "base_url": str(connection["base_url"]),
+        "model": str(connection["model"]),
+        "models": list(connection.get("models", [])),
+        "api_key_configured": bool(connection.get("api_key")),
+        "created_at": connection.get("created_at", 0),
+    }
+
+
 def get_public_ai_settings() -> dict[str, Any]:
-    """返回前端设置页可展示的 AI 配置；只暴露密钥是否已配置。"""
+    """返回前端设置页可展示的多配置 AI 设置；只暴露密钥是否已配置。"""
     data = _load_ai_settings()
-    result: dict[str, Any] = {}
-    for target in API_TARGETS:
-        connection = _api_connection(data, target)
-        keys = API_TARGET_KEYS[target]
-        result[keys["base_url"]] = connection["base_url"]
-        result[keys["model"]] = connection["model"]
-        result[f"openai_{target}_api_key_configured"] = bool(connection["api_key"])
-    return result
+    return {
+        AI_CONFIGS_KEY: [_public_connection(config) for config in data.get(AI_CONFIGS_KEY, [])],
+        ACTIVE_AI_CONFIG_ID_KEY: str(data.get(ACTIVE_AI_CONFIG_ID_KEY) or ""),
+    }
 
 
 def _normalize_prompt_polish_prompts(value: object) -> dict[str, str]:
@@ -254,44 +396,58 @@ def _validate_base_url(value: str) -> str:
 
 
 def save_ai_settings(payload: object) -> dict[str, Any]:
-    """保存主、备用 AI API 与提示词配置；密钥留空表示保持不变。"""
+    """保存多条 AI API 配置与提示词；密钥留空表示保持不变。"""
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail="AI 设置必须是 JSON 对象")
     payload = dict(payload)
-    # 保持旧客户端可用：旧字段等同于主 API 字段。
-    for old_key, primary_key in (
-        (OPENAI_API_BASE_URL_KEY, OPENAI_PRIMARY_API_BASE_URL_KEY),
-        (OPENAI_API_MODEL_KEY, OPENAI_PRIMARY_API_MODEL_KEY),
-        (OPENAI_API_KEY_KEY, OPENAI_PRIMARY_API_KEY_KEY),
-    ):
-        if primary_key not in payload and old_key in payload:
-            payload[primary_key] = payload[old_key]
-    if "clear_openai_api_key" in payload and "clear_openai_primary_api_key" not in payload:
-        payload["clear_openai_primary_api_key"] = payload["clear_openai_api_key"]
 
     with _SETTINGS_LOCK:
         data = _load_ai_settings()
-        for target in API_TARGETS:
-            keys = API_TARGET_KEYS[target]
-            if keys["base_url"] in payload:
-                base_url = str(payload.get(keys["base_url"]) or "").strip().rstrip("/")
-                if base_url:
-                    base_url = _validate_base_url(base_url)
-                data[keys["base_url"]] = base_url
+        if AI_CONFIGS_KEY in payload:
+            raw_configs = payload.get(AI_CONFIGS_KEY)
+            if not isinstance(raw_configs, list):
+                raise HTTPException(status_code=422, detail="AI 配置列表必须是数组")
+            if len(raw_configs) > AI_MAX_CONFIG_COUNT:
+                raise HTTPException(status_code=400, detail=f"最多保存 {AI_MAX_CONFIG_COUNT} 个 AI 配置")
 
-            if keys["model"] in payload:
-                model = str(payload.get(keys["model"]) or "").strip()
-                if len(model) > 240:
-                    raise HTTPException(status_code=400, detail=f"{API_TARGET_LABELS[target]}模型名称不能超过 240 个字符")
-                data[keys["model"]] = model
+            existing = {
+                config["id"]: config
+                for config in data.get(AI_CONFIGS_KEY, [])
+            }
+            configs: list[dict[str, Any]] = []
+            used_ids: set[str] = set()
+            for index, raw_config in enumerate(raw_configs):
+                config = _normalize_config(raw_config)
+                old_config = existing.get(config["id"]) if config["id"] else None
+                if old_config is None:
+                    if not config["id"] or config["id"] in used_ids:
+                        config["id"] = _new_config_id()
+                if not config["id"]:
+                    config["id"] = _new_config_id()
+                if config["id"] in used_ids:
+                    raise HTTPException(status_code=400, detail=f"第 {index + 1} 个 AI 配置的 ID 重复")
+                used_ids.add(config["id"])
 
-            clear_key = f"clear_openai_{target}_api_key"
-            if payload.get(clear_key):
-                data.pop(keys["api_key"], None)
-            else:
-                api_key = payload.get(keys["api_key"])
-                if isinstance(api_key, str) and api_key.strip():
-                    data[keys["api_key"]] = api_key.strip()
+                if not config["name"]:
+                    config["name"] = f"配置 {index + 1}"
+                if len(config["name"]) > AI_CONFIG_NAME_MAX_CHARS:
+                    raise HTTPException(status_code=400, detail=f"{config['name']}：配置名称不能超过 {AI_CONFIG_NAME_MAX_CHARS} 个字符")
+
+                if raw_config.get("clear_api_key"):
+                    config["api_key"] = ""
+                elif not config["api_key"] and old_config is not None:
+                    config["api_key"] = str(old_config.get("api_key") or "")
+                if old_config is not None:
+                    config["created_at"] = old_config.get("created_at", config["created_at"])
+                configs.append(config)
+
+            active_id = str(payload.get(ACTIVE_AI_CONFIG_ID_KEY) or "").strip()
+            if active_id and active_id not in used_ids:
+                raise HTTPException(status_code=400, detail="当前使用的 AI 配置不存在")
+            if not active_id:
+                active_id = str(configs[0]["id"]) if configs else ""
+            data[AI_CONFIGS_KEY] = configs
+            data[ACTIVE_AI_CONFIG_ID_KEY] = active_id
 
         if ASR_EXTRACTION_PROMPT_KEY in payload:
             data[ASR_EXTRACTION_PROMPT_KEY] = normalize_asr_extraction_prompt(
@@ -325,12 +481,11 @@ def save_asr_extraction_prompt(prompt: object) -> str:
     return value
 
 
-def _connection_for_target(target: object) -> dict[str, str]:
-    """读取指定 API 连接并检查地址是否已配置。"""
-    normalized_target = _normalize_target(target)
-    connection = get_ai_connections()[API_TARGETS.index(normalized_target)]
+def _connection_for_config(config_id: object) -> dict[str, Any]:
+    """读取指定或当前启用的 API 连接，并检查地址是否已配置。"""
+    connection = get_active_ai_connection(config_id)
     if not connection["base_url"]:
-        raise HTTPException(status_code=400, detail=f"请先保存{connection['label']}地址")
+        raise HTTPException(status_code=400, detail=f"请先为「{connection['name']}」保存 API 地址")
     return connection
 
 
@@ -343,9 +498,26 @@ def _api_error_detail(response: httpx.Response) -> str:
         return ""
 
 
-async def discover_models(target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
-    """请求指定 OpenAI 兼容接口的 /models，返回可选择的模型列表。"""
-    connection = _connection_for_target(target)
+def _save_discovered_models(config_id: str, discovered_models: list[str]) -> dict[str, Any]:
+    """合并保存探查结果与手工维护的可选模型，并在需要时选择默认模型。"""
+    with _SETTINGS_LOCK:
+        data = _load_ai_settings()
+        configs = data.get(AI_CONFIGS_KEY, [])
+        for config in configs:
+            if config["id"] != config_id:
+                continue
+            models = _normalize_model_list(config.get("models", []) + discovered_models)
+            config["models"] = models
+            if not config.get("model") and models:
+                config["model"] = models[0]
+            _write_json(AI_SETTINGS_PATH, data)
+            return _public_connection(config)
+    raise HTTPException(status_code=404, detail="指定的 AI 配置不存在")
+
+
+async def discover_models(config_id: object = None) -> dict[str, Any]:
+    """请求指定 OpenAI 兼容接口的 /models，并保存可选模型列表。"""
+    connection = _connection_for_config(config_id)
     base_url = connection["base_url"]
     api_key = connection["api_key"]
 
@@ -371,26 +543,29 @@ async def discover_models(target: object = PRIMARY_API_TARGET) -> dict[str, Any]
     except (AttributeError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail="模型列表接口返回格式不符合 OpenAI 兼容规范") from exc
 
+    saved_config = _save_discovered_models(str(connection["id"]), models)
+    available_models = list(saved_config["models"])
     return {
         "ok": True,
-        "target": connection["target"],
-        "target_label": connection["label"],
-        "message": f"{connection['label']}连接成功，发现 {len(models)} 个模型",
-        "models": models,
+        "config_id": str(connection["id"]),
+        "config_name": str(connection["name"]),
+        "message": f"「{connection['name']}」连接成功，发现 {len(models)} 个模型，当前共有 {len(available_models)} 个可选项",
+        "models": available_models,
+        "config": saved_config,
     }
 
 
-async def test_connection(target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
+async def test_connection(config_id: object = None) -> dict[str, Any]:
     """测试指定 AI API 连接，并返回模型列表供前端填充。"""
-    return await discover_models(target)
+    return await discover_models(config_id)
 
 
-async def test_model(model: object, target: object = PRIMARY_API_TARGET) -> dict[str, Any]:
+async def test_model(model: object, config_id: object = None) -> dict[str, Any]:
     """使用指定 API 与模型发送一次最小对话请求，验证模型可用性。"""
     model_name = str(model or "").strip()
     if not model_name:
         raise HTTPException(status_code=400, detail="请先选择或输入要测试的模型")
-    connection = _connection_for_target(target)
+    connection = _connection_for_config(config_id)
     base_url = connection["base_url"]
     api_key = connection["api_key"]
 
@@ -399,7 +574,9 @@ async def test_model(model: object, target: object = PRIMARY_API_TARGET) -> dict
         "model": model_name,
         "messages": [{"role": "user", "content": "请只回复 OK。"}],
         "temperature": 0,
-        "max_tokens": 16,
+        # DeepSeek 的推理模型会先输出 reasoning_content；16 个 token 可能只够思考，
+        # 最终 content 为空，被误判为模型不可用。给健康检查留出足够输出空间。
+        "max_tokens": 128,
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=8.0)) as client:
@@ -421,9 +598,9 @@ async def test_model(model: object, target: object = PRIMARY_API_TARGET) -> dict
 
     return {
         "ok": True,
-        "target": connection["target"],
-        "target_label": connection["label"],
-        "message": f"{connection['label']}模型可用",
+        "config_id": str(connection["id"]),
+        "config_name": str(connection["name"]),
+        "message": f"「{connection['name']}」模型可用",
         "response": content.strip()[:500],
     }
 
@@ -433,55 +610,58 @@ async def chat_completion(
     *,
     temperature: float = 0.2,
     max_tokens: int | None = None,
+    config_id: object = None,
 ) -> dict[str, str | bool]:
-    """依次请求主、备用 API，在连接或响应异常时自动回退。"""
-    connections = [
-        connection
-        for connection in get_ai_connections()
-        if connection["base_url"] and connection["model"]
-    ]
-    if not connections:
-        raise HTTPException(status_code=400, detail="请先为主 API 或备用 API 保存地址和模型")
+    """使用当前启用或指定的 AI 配置请求对话接口。"""
+    connection = get_active_ai_connection(config_id)
+    if not connection["base_url"] or not connection["model"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"请先为当前 AI 配置「{connection['name']}」保存地址和模型",
+        )
 
-    failures: list[str] = []
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-        for index, connection in enumerate(connections):
-            headers = {"Authorization": f"Bearer {connection['api_key']}"} if connection["api_key"] else {}
-            payload: dict[str, Any] = {
-                "model": connection["model"],
-                "messages": messages,
-                "temperature": temperature,
-            }
-            if max_tokens is not None:
-                payload["max_tokens"] = max_tokens
-            try:
-                response = await client.post(f"{connection['base_url']}/chat/completions", headers=headers, json=payload)
-            except httpx.RequestError as exc:
-                failures.append(f"{connection['label']}请求失败：{str(exc)[:180]}")
-                continue
-            if response.is_error:
-                detail = _api_error_detail(response)
-                suffix = f"：{detail}" if detail else ""
-                failures.append(f"{connection['label']}返回 HTTP {response.status_code}{suffix}")
-                continue
-            try:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError, ValueError):
-                failures.append(f"{connection['label']}返回格式不符合 OpenAI 兼容规范")
-                continue
-            if not isinstance(content, str) or not content.strip():
-                failures.append(f"{connection['label']}未返回有效文字")
-                continue
-            return {
-                "content": content.strip(),
-                "model": connection["model"],
-                "target": connection["target"],
-                "target_label": connection["label"],
-                "used_fallback": index > 0,
-            }
-
-    raise HTTPException(status_code=502, detail="；".join(failures)[:900])
+        headers = {"Authorization": f"Bearer {connection['api_key']}"} if connection["api_key"] else {}
+        payload: dict[str, Any] = {
+            "model": connection["model"],
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        try:
+            response = await client.post(f"{connection['base_url']}/chat/completions", headers=headers, json=payload)
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"「{connection['name']}」请求失败：{str(exc)[:300]}",
+            ) from exc
+        if response.is_error:
+            detail = _api_error_detail(response)
+            suffix = f"：{detail}" if detail else ""
+            raise HTTPException(
+                status_code=502,
+                detail=f"「{connection['name']}」返回 HTTP {response.status_code}{suffix}",
+            )
+        try:
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"「{connection['name']}」返回格式不符合 OpenAI 兼容规范",
+            ) from exc
+        if not isinstance(content, str) or not content.strip():
+            raise HTTPException(status_code=502, detail=f"「{connection['name']}」未返回有效文字")
+        return {
+            "content": content.strip(),
+            "model": connection["model"],
+            "config_id": connection["id"],
+            "config_name": connection["name"],
+            "target": "active",
+            "target_label": connection["name"],
+            "used_fallback": False,
+        }
 
 
 async def polish_prompt(content: object, level: object) -> dict[str, Any]:

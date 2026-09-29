@@ -128,11 +128,11 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 | POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 修改管理员密码 |
-| GET | `/api/ai-settings` | 读取主 API 与备用 API 配置；密钥只返回是否已配置，不回显明文 |
-| PUT | `/api/ai-settings` | 保存主 API 与备用 API 的 OpenAI 兼容地址、模型与密钥到本地 `ai_settings.json` |
-| POST | `/api/ai-settings/test` | 接收 `target`（`primary` 或 `backup`），请求指定 API 的 `/models` 测试连接并返回模型列表 |
-| POST | `/api/ai-settings/models` | 接收 `target`，探查指定 OpenAI 兼容接口的可用模型列表，供对应模型下拉选择 |
-| POST | `/api/ai-settings/model-test` | 接收 `target` 与 `model`，使用指定 API 发送一次最小对话请求验证模型可用性 |
+| GET | `/api/ai-settings` | 读取多条 AI 配置与当前启用配置 ID；密钥只返回是否已配置，不回显明文 |
+| PUT | `/api/ai-settings` | 保存多条 AI 配置、各自模型列表、密钥状态与当前启用配置到本地 `ai_settings.json` |
+| POST | `/api/ai-settings/test` | 接收 `config_id`，请求指定配置的 `/models` 测试连接并返回合并后的可选模型列表 |
+| POST | `/api/ai-settings/models` | 接收 `config_id`，探查指定 OpenAI 兼容接口的模型，并与手工维护列表合并持久保存 |
+| POST | `/api/ai-settings/model-test` | 接收 `config_id` 与 `model`，使用指定配置发送一次最小对话请求验证模型可用性 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
@@ -153,11 +153,12 @@ GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊
 
 ### AI 能力设置
 
-- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；主 API 与备用 API 各自保存 OpenAI 兼容地址、模型名称和 API 密钥，配置页面以全宽上下卡片展示。模型探查结果在对应 API 的“可支持的模型”按钮区展示，点击按钮即自动填入该 API 的模型选择，同时保留自定义模型名称输入。
-- AI 任务按主 API、备用 API 的顺序执行；主 API 的网络连接失败、HTTP 错误、响应格式错误或未返回有效文字时，自动以备用 API 的模型重试。未完整配置的 API 会跳过，不会阻塞另一套已完整配置的 API。
-- `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，只分别返回 `openai_primary_api_key_configured` 和 `openai_backup_api_key_configured`。
-- 首次读取时会把既有单 API 配置或旧版 `llama_manager/settings.json` 的 AI 配置无损迁移为主 API；旧字段保留，便于回滚。
-- `/settings` 对每套 API 分别提供“测试链接”“探查模型列表”和“测试模型”操作；ASR 提炼与提示词润色均复用带自动回退的统一调用。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。
+- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；页面支持添加任意多个命名配置，每条配置独立保存 OpenAI 兼容地址、当前模型、API 密钥和可选模型列表，并通过“设为当前使用”随时切换。
+- AI 任务只使用 `active_ai_config_id` 指向的配置，不做主备自动回退；配置删除或切换后，后续任务立即按新的当前配置执行。
+- 模型探查结果会与用户手工添加的未知模型名合并并持久保存；点击可选模型会填入当前模型，当前模型输入框也允许直接填写不在列表中的名称。
+- `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，只返回每条配置的 `api_key_configured`。
+- 首次读取时会把既有单 API、主/备用 API 或旧版 `llama_manager/settings.json` 的 AI 配置迁移为一条或多条新配置；迁移完成后旧扁平字段会从 JSON 中移除，保持单一存储结构。
+- `/settings` 对每条配置提供“测试链接”“探查模型列表”“添加模型”和“测试模型”操作；ASR 提炼与提示词润色均复用当前启用配置。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。
 - API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
 
 ### 登录与会话
@@ -518,14 +519,22 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `openai_primary_api_base_url` | string | `""` | 主 OpenAI 兼容 API 基地址，例如 `https://api.openai.com/v1` |
-| `openai_primary_api_model` | string | `""` | 主 API 使用的模型名称 |
-| `openai_primary_api_key` | string | `""` | 主 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
-| `openai_backup_api_base_url` | string | `""` | 备用 OpenAI 兼容 API 基地址；主 API 失败时使用 |
-| `openai_backup_api_model` | string | `""` | 备用 API 使用的模型名称 |
-| `openai_backup_api_key` | string | `""` | 备用 API 密钥；仅后端保存，API 读取时只返回是否已配置 |
+| `active_ai_config_id` | string | `""` | 当前 AI 任务使用的配置 ID；为空表示尚未启用任何配置 |
+| `ai_configs` | array | `[]` | 命名 AI 配置数组，最多 32 条，每条结构见下表 |
 | `asr_extraction_prompt` | string | 默认提炼提示词 | ASR 转写提炼使用的 system 提示词 |
 | `prompt_polish_prompts` | object | 内置三档指令 | 提示词工作区轻度、标准、深度三档润色使用的 system 提示词 |
+
+`ai_configs[]` 单条配置字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 配置 ID，由后端生成或保留前端本地生成的安全 ID |
+| `name` | string | 配置显示名称，最多 80 个字符 |
+| `base_url` | string | OpenAI 兼容 API 基地址，例如 `https://api.deepseek.com/v1` |
+| `model` | string | 此配置当前使用的模型名称 |
+| `api_key` | string | API 密钥；仅后端保存，API 读取时只返回 `api_key_configured` |
+| `models` | string[] | 探查结果与手工添加模型合并后的可选列表，每条最多 240 个字符、总共最多 200 个 |
+| `created_at` | number | 配置创建时间的 Unix 时间戳 |
 
 ### llama_manager/settings.json
 

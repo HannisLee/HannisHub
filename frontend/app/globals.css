@@ -491,6 +491,25 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 
 .ai-prompt-editor { min-height: 220px; font-size: 14px; line-height: 1.65; }
 .ai-action-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ai-config-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ai-config-chip {
+  display: grid;
+  min-width: 180px;
+  max-width: 280px;
+  gap: 3px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  text-align: left;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.ai-config-chip > span { min-width: 0; overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ai-config-chip > small { min-width: 0; overflow: hidden; color: var(--color-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ai-config-chip:hover { border-color: var(--color-control-border); background: var(--color-surface); }
+.ai-config-chip.is-selected { border-color: var(--color-control-border); background: var(--color-surface-hover); }
+.ai-config-chip.is-active { border-color: var(--color-brand); }
 .ai-models { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-surface-soft); }
 .ai-models-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .ai-models-head span { color: var(--color-text-secondary); font-size: 14px; }
@@ -511,10 +530,15 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   line-height: 1.4;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
-.ai-model-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-model-chip > button { display: inline-flex; min-width: 0; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.ai-model-chip > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-model-remove { flex: 0 0 auto; margin-left: var(--space-2); border: 0; background: transparent; color: var(--color-text-muted); font-size: 15px; line-height: 1; }
+.ai-model-remove:hover { color: var(--color-error); }
 .ai-model-chip:hover { border-color: var(--color-control-border); background: var(--color-surface); color: var(--color-text-primary); }
 .ai-model-chip.is-selected { border-color: var(--color-brand); background: var(--color-surface-hover); color: var(--color-text-primary); }
 .ai-models-empty { margin: 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.55; }
+.ai-model-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-2); }
+.ai-model-add textarea { min-height: 76px; resize: vertical; font-family: var(--font-mono); font-size: 12px; }
 
 .content-container.file-manager-page { width: min(100% - 64px, 1700px); padding-top: var(--space-5); }
 .file-manager-page .page-header { margin-bottom: var(--space-5); }

@@ -248,32 +248,32 @@ async def services():
 
 @app.get("/api/ai-settings")
 async def read_ai_settings():
-    """读取 AI 能力配置；密钥只返回是否已配置。"""
+    """读取多 AI 配置；密钥只返回是否已配置。"""
     return JSONResponse(ai_settings.get_public_ai_settings())
 
 
 @app.put("/api/ai-settings")
 async def update_ai_settings(payload: dict[str, Any] = Body(...)):
-    """保存 AI 能力配置到本地 ai_settings.json。"""
+    """保存多 AI 配置到本地 ai_settings.json。"""
     return JSONResponse(ai_settings.save_ai_settings(payload))
 
 
 @app.post("/api/ai-settings/test")
 async def test_ai_settings_api(payload: dict[str, Any] = Body(default={})):
     """测试指定 OpenAI 兼容接口连接。"""
-    return JSONResponse(await ai_settings.test_connection(payload.get("target")))
+    return JSONResponse(await ai_settings.test_connection(payload.get("config_id")))
 
 
 @app.post("/api/ai-settings/models")
 async def discover_ai_models(payload: dict[str, Any] = Body(default={})):
     """探查指定 OpenAI 兼容接口的可用模型列表。"""
-    return JSONResponse(await ai_settings.discover_models(payload.get("target")))
+    return JSONResponse(await ai_settings.discover_models(payload.get("config_id")))
 
 
 @app.post("/api/ai-settings/model-test")
 async def test_ai_model(payload: dict[str, Any] = Body(...)):
     """使用指定 API 与模型发送一次最小请求，验证模型可用。"""
-    return JSONResponse(await ai_settings.test_model(payload.get("model"), payload.get("target")))
+    return JSONResponse(await ai_settings.test_model(payload.get("model"), payload.get("config_id")))
 
 
 @app.get("/api/file-manager/settings")
