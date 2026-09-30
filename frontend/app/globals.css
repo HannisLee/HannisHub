@@ -395,6 +395,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .download-row > div:first-child > span { color: var(--color-text-secondary); font-size: 13px; }
 .download-row-end { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
 .log-viewer, .text-preview { max-height: 400px; margin: var(--space-5) 0 0; padding: var(--space-4); overflow: auto; border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.text-preview { display: block; width: 100%; min-height: 160px; resize: vertical; }
+.text-preview:focus { border-color: var(--color-text-muted); background: var(--color-surface); outline: none; }
 
 .asr-service { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); color: var(--color-text-secondary); }
 .upload-drop { display: grid; min-height: 184px; place-items: center; align-content: center; gap: var(--space-3); padding: var(--space-6); border: 1px dashed var(--color-control-border); border-radius: var(--radius-lg); color: var(--color-text-secondary); text-align: center; transition: background-color 160ms ease, border-color 160ms ease; }

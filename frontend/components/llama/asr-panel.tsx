@@ -111,6 +111,28 @@ export function AsrPanel() {
   async function showText(recordId: string, suffix: "text" | "extraction") {
     try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/${suffix}`); setExtraction(current => ({ ...current, [recordId]: data.text })); } catch (value) { setError(errorMessage(value)); }
   }
+
+  async function copyRecordText(record: AsrRecord) {
+    const text = extraction[record.id] || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("已复制当前展开框中的文本");
+      setError("");
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setStatus(copied ? "已复制当前展开框中的文本" : "复制失败，请在文本框内全选后复制");
+      setError(copied ? "" : "复制失败，请在文本框内全选后复制");
+    }
+  }
+
   async function extract(recordId: string) {
     try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/extraction`, { method: "POST" }); setExtraction(current => ({ ...current, [recordId]: data.text })); await load(); } catch (value) { setError(errorMessage(value)); }
   }
@@ -160,7 +182,7 @@ export function AsrPanel() {
     </div>
     <Card>
       <CardHeader title={`转写历史 · ${records.length}`} description="历史内容保存在本机，列表会每 3 秒更新一次。" />
-      {records.length ? <div className="stack-list">{records.map(record => <article className="history-row" key={record.id}><div className="history-main"><div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div><span>{formatDate(record.created_at)} · {record.progress_detail || ""}</span>{record.progress !== undefined && record.status !== "completed" ? <ProgressBar value={record.progress || 0} /> : null}{record.error ? <small className="error-text">{record.error}</small> : null}</div><div className="row-actions"><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "text")}>全文</Button>{record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "extraction")}>结果</Button></> : null}<Button size="sm" variant="quiet" onClick={() => void rename(record)}>重命名</Button><Button size="sm" variant="danger" onClick={() => void remove(record)}>删除</Button></div>{extraction[record.id] ? <pre className="text-preview">{extraction[record.id]}</pre> : null}</article>)}</div> : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
+      {records.length ? <div className="stack-list">{records.map(record => <article className="history-row" key={record.id}><div className="history-main"><div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div><span>{formatDate(record.created_at)} · {record.progress_detail || ""}</span>{record.progress !== undefined && record.status !== "completed" ? <ProgressBar value={record.progress || 0} /> : null}{record.error ? <small className="error-text">{record.error}</small> : null}</div><div className="row-actions"><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "text")}>全文</Button>{extraction[record.id] ? <Button size="sm" variant="quiet" onClick={() => void copyRecordText(record)}>复制</Button> : null}{record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "extraction")}>结果</Button></> : null}<Button size="sm" variant="quiet" onClick={() => void rename(record)}>重命名</Button><Button size="sm" variant="danger" onClick={() => void remove(record)}>删除</Button></div>{extraction[record.id] ? <textarea className="text-preview" value={extraction[record.id]} readOnly aria-label={`${record.name || record.filename || record.id}展开文本`} /> : null}</article>)}</div> : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
     </Card>
   </>;
 }
