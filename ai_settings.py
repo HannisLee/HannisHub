@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -528,7 +529,11 @@ def _api_error_detail(response: httpx.Response) -> str:
     """从 OpenAI 兼容接口错误中提取可展示的简短说明。"""
     try:
         payload = response.json()
-        return str(payload.get("error", {}).get("message") or payload.get("detail") or "")[:300]
+        error = payload.get("error")
+        message = ""
+        if isinstance(error, dict):
+            message = error.get("message")
+        return str(message or payload.get("msg") or payload.get("message") or payload.get("detail") or "")[:300]
     except (AttributeError, TypeError, ValueError):
         return ""
 
@@ -638,6 +643,137 @@ async def test_model(model: object, config_id: object = None) -> dict[str, Any]:
         "message": f"「{connection['name']}」模型可用",
         "response": content.strip()[:500],
     }
+
+
+def _provider_for_usage(connection: dict[str, Any]) -> str:
+    """根据 API 地址识别支持剩余用量查询的服务商。"""
+    hostname = (urlparse(str(connection.get("base_url") or "")).hostname or "").lower()
+    return "glm" if "bigmodel.cn" in hostname else ""
+
+
+def _usage_number(value: object) -> float | None:
+    """把用量接口返回值转换为有限数字。"""
+    try:
+        number = float(value)
+        return number if number == number and number not in {float("inf"), float("-inf")} else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _usage_reset_time(value: object) -> float | None:
+    """转换 GLM 的毫秒重置时间戳为秒级时间戳。"""
+    number = _usage_number(value)
+    if number is None or number <= 0:
+        return None
+    return number / 1000 if number > 10_000_000_000 else number
+
+
+def _glm_usage_entries(payload: object) -> tuple[list[dict[str, Any]], str | None]:
+    """把 GLM 用量响应转换为前端可自适应渲染的条目列表。"""
+    if not isinstance(payload, dict):
+        return [], "GLM 用量接口返回格式不符合预期"
+    data = payload.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("limits"), list):
+        return [], "GLM 用量接口未返回限额数组"
+
+    entries: list[dict[str, Any]] = []
+    for limit in data["limits"]:
+        if not isinstance(limit, dict):
+            continue
+        limit_type = str(limit.get("type") or "")
+        percentage = _usage_number(limit.get("percentage"))
+        reset_at = _usage_reset_time(limit.get("nextResetTime"))
+        if limit_type == "TIME_LIMIT":
+            used = _usage_number(limit.get("currentValue"))
+            total = _usage_number(limit.get("usage"))
+            remaining = _usage_number(limit.get("remaining"))
+            if remaining is None and used is not None and total is not None:
+                remaining = total - used
+            entries.append({
+                "label": "5 小时限额",
+                "used": used,
+                "total": total,
+                "remaining": remaining,
+                "used_percent": percentage,
+                "resets_at": reset_at,
+            })
+        elif limit_type == "TOKENS_LIMIT":
+            entries.append({
+                "label": "Token 限额",
+                "used": None,
+                "total": None,
+                "remaining": None,
+                "used_percent": percentage,
+                "resets_at": reset_at,
+            })
+
+    if not entries:
+        return [], "GLM 用量接口未返回可展示的限额"
+    return entries, None
+
+
+async def get_ai_usage(config_id: object = None) -> dict[str, Any]:
+    """查询指定 AI 配置的剩余用量；不同服务商返回自适应条目。"""
+    connection = get_active_ai_connection(config_id)
+    provider = _provider_for_usage(connection)
+    result: dict[str, Any] = {
+        "config_id": str(connection["id"]),
+        "config_name": str(connection["name"]),
+        "provider": provider,
+        "supported": provider == "glm",
+        "kind": "window_quota" if provider == "glm" else "unsupported",
+        "level": "",
+        "entries": [],
+        "message": "",
+    }
+    if provider != "glm":
+        result["message"] = "该服务暂无用量接口"
+        return result
+    if not connection["base_url"]:
+        result["message"] = "请先保存 GLM API 地址"
+        return result
+    if not connection["api_key"]:
+        result["message"] = "请先保存 GLM API 密钥"
+        return result
+
+    parsed = urlparse(connection["base_url"])
+    usage_url = f"{parsed.scheme}://{parsed.netloc}/api/monitor/usage/quota/limit"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            response = await client.get(
+                usage_url,
+                headers={"Authorization": f"Bearer {connection['api_key']}"},
+            )
+    except httpx.RequestError as exc:
+        result["message"] = f"GLM 用量获取失败：{str(exc)[:180]}"
+        return result
+    if response.is_error:
+        detail = _api_error_detail(response)
+        suffix = f"：{detail}" if detail else ""
+        result["message"] = f"GLM 用量接口返回 HTTP {response.status_code}{suffix}"
+        return result
+
+    try:
+        payload = response.json()
+    except ValueError:
+        result["message"] = "GLM 用量接口未返回 JSON"
+        return result
+    entries, error = _glm_usage_entries(payload)
+    if error:
+        result["message"] = error
+        return result
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    result["entries"] = entries
+    result["level"] = str(data.get("level") or "") if isinstance(data, dict) else ""
+    return result
+
+
+async def get_ai_usage_summaries(config_id: object = None) -> dict[str, Any]:
+    """查询一条或全部 AI 配置的用量摘要。"""
+    requested_id = str(config_id or "").strip()
+    connections = [get_active_ai_connection(requested_id)] if requested_id else get_ai_connections()
+    usages = await asyncio.gather(*(get_ai_usage(connection["id"]) for connection in connections))
+    return {"usages": list(usages)}
 
 
 async def chat_completion(

@@ -136,6 +136,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/ai-settings/test` | 接收 `config_id`，请求指定配置的 `/models` 测试连接并返回合并后的可选模型列表 |
 | POST | `/api/ai-settings/models` | 接收 `config_id`，探查指定 OpenAI 兼容接口的模型，并与手工维护列表合并持久保存 |
 | POST | `/api/ai-settings/model-test` | 接收 `config_id` 与 `model`，使用指定配置发送一次最小对话请求验证模型可用性 |
+| GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
@@ -159,6 +160,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；页面支持添加任意多个命名配置，每条配置独立保存 OpenAI 兼容地址、当前模型、API 密钥和可选模型列表，并通过“设为当前使用”随时切换。
 - AI 任务只使用 `active_ai_config_id` 指向的配置，不做主备自动回退；配置删除或切换后，后续任务立即按新的当前配置执行。
 - 模型探查结果会与用户手工添加的未知模型名合并并持久保存；点击可选模型会填入当前模型，当前模型输入框也允许直接填写不在列表中的名称。
+- 每条配置提供“剩余用量”自适应区域：GLM 读取 5 小时限额的剩余值、已用占比、重置时间与 Token 限额占比；暂无用量接口的服务仅提示不支持，不影响其他配置编辑。
 - `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，只返回每条配置的 `api_key_configured`。
 - 首次读取时会把既有单 API、主/备用 API 或旧版 `llama_manager/settings.json` 的 AI 配置迁移为一条或多条新配置；迁移完成后旧扁平字段会从 JSON 中移除，保持单一存储结构。
 - `/settings` 对每条配置提供“测试链接”“探查模型列表”“添加模型”和“测试模型”操作；测试与探查会先自动保存当前配置列表，避免新增配置必须手动保存后才能测试。ASR 提炼与提示词润色均复用当前启用配置。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。

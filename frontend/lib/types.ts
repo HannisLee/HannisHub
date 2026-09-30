@@ -30,6 +30,31 @@ export interface AiModelTestResult {
   response?: string;
 }
 
+export interface AiUsageEntry {
+  label: string;
+  used?: number | null;
+  total?: number | null;
+  remaining?: number | null;
+  used_percent?: number | null;
+  resets_at?: number | null;
+  unit?: string;
+}
+
+export interface AiUsageSummary {
+  config_id: string;
+  config_name?: string;
+  provider?: string;
+  supported: boolean;
+  kind?: string;
+  level?: string;
+  entries: AiUsageEntry[];
+  message?: string;
+}
+
+export interface AiUsageResponse {
+  usages: AiUsageSummary[];
+}
+
 export interface ServiceSummary {
   id: string;
   name: string;

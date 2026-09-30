@@ -276,6 +276,12 @@ async def test_ai_model(payload: dict[str, Any] = Body(...)):
     return JSONResponse(await ai_settings.test_model(payload.get("model"), payload.get("config_id")))
 
 
+@app.get("/api/ai-settings/usage")
+async def read_ai_usage(config_id: str | None = None):
+    """查询 AI 配置的剩余用量；无用量接口的服务返回不支持说明。"""
+    return JSONResponse(await ai_settings.get_ai_usage_summaries(config_id))
+
+
 @app.get("/api/file-manager/settings")
 async def file_manager_settings():
     """返回文件管理组件已暴露的顶层目录。"""

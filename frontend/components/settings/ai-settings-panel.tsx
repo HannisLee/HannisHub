@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage } from "../../lib/format";
-import type { AiConnectionConfig, AiConnectionTestResult, AiModelTestResult, AiSettings } from "../../lib/types";
+import type {
+  AiConnectionConfig,
+  AiConnectionTestResult,
+  AiModelTestResult,
+  AiSettings,
+  AiUsageResponse,
+  AiUsageSummary,
+} from "../../lib/types";
 import { Badge, Button, Card, CardHeader, ErrorState, Field, LoadingState, PageHeader } from "../ui/primitives";
 
 const EMPTY_SETTINGS: AiSettings = {
@@ -17,6 +24,26 @@ function localConfigId() {
 
 function uniqueModels(models: string[]) {
   return Array.from(new Set(models.map(model => model.trim()).filter(Boolean)));
+}
+
+function formatUsageNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatUsagePercent(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "";
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatUsageTime(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value * 1000));
 }
 
 export function AiSettingsPanel() {
@@ -33,6 +60,9 @@ export function AiSettingsPanel() {
   const [testingConnection, setTestingConnection] = useState("");
   const [discoveringModels, setDiscoveringModels] = useState("");
   const [testingModel, setTestingModel] = useState("");
+  const [usageByConfig, setUsageByConfig] = useState<Record<string, AiUsageSummary>>({});
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState("");
 
   async function load() {
     try {
@@ -43,6 +73,7 @@ export function AiSettingsPanel() {
       setClearKeyIds({});
       setCustomModels("");
       setError("");
+      void loadUsage();
     } catch (value) {
       setError(errorMessage(value));
     } finally {
@@ -140,9 +171,33 @@ export function AiSettingsPanel() {
 
   async function save() {
     try {
-      await saveSettings(settings, "AI 配置已保存到本机 ai_settings.json");
+      const saved = await saveSettings(settings, "AI 配置已保存到本机 ai_settings.json");
+      const configId = saved.ai_configs.find(config => config.id === selectedConfigId)?.id
+        || saved.active_ai_config_id
+        || saved.ai_configs[0]?.id
+        || "";
+      if (configId) await loadUsage(configId);
     } catch {
       // 错误已在 saveSettings 中写入页面状态。
+    }
+  }
+
+  async function loadUsage(configId = "") {
+    const targetId = configId.trim();
+    setUsageLoading(true);
+    try {
+      const query = targetId ? `?config_id=${encodeURIComponent(targetId)}` : "";
+      const data = await apiFetch<AiUsageResponse>(`${API_PATHS.aiSettings}/usage${query}`);
+      setUsageByConfig(current => {
+        const next = { ...current };
+        for (const usage of data.usages) next[usage.config_id] = usage;
+        return next;
+      });
+      setUsageError("");
+    } catch (value) {
+      setUsageError(errorMessage(value));
+    } finally {
+      setUsageLoading(false);
     }
   }
 
@@ -257,6 +312,76 @@ export function AiSettingsPanel() {
     );
   }
 
+  function renderUsageEntry(entry: AiUsageSummary["entries"][number], index: number) {
+    const percent = entry.used_percent === null || entry.used_percent === undefined
+      || !Number.isFinite(entry.used_percent)
+      ? null
+      : entry.used_percent;
+    const barWidth = percent === null ? 0 : Math.min(100, Math.max(0, percent));
+    const percentText = formatUsagePercent(percent);
+    const resetTime = formatUsageTime(entry.resets_at);
+    const unit = entry.unit?.trim() || "";
+    const quotaText = entry.remaining !== null && entry.remaining !== undefined
+      ? entry.total !== null && entry.total !== undefined
+        ? `剩余 ${formatUsageNumber(entry.remaining)} / ${formatUsageNumber(entry.total)}${unit}`
+        : `剩余 ${formatUsageNumber(entry.remaining)}${unit}`
+      : entry.used !== null && entry.used !== undefined && entry.total !== null && entry.total !== undefined
+        ? `已用 ${formatUsageNumber(entry.used)} / ${formatUsageNumber(entry.total)}${unit}`
+        : "";
+    return (
+      <div className="ai-usage-entry" key={`${entry.label}-${index}`}>
+        <div className="ai-usage-entry-head">
+          <strong>{entry.label}</strong>
+          <small>{percentText || "暂无占比"}</small>
+        </div>
+        {quotaText ? <span className="ai-usage-value">{quotaText}</span> : null}
+        {percent !== null ? (
+          <div className="ai-usage-progress" role="img" aria-label={`${entry.label}已用 ${percentText}`}>
+            <span style={{ width: `${barWidth}%` }} />
+          </div>
+        ) : null}
+        {resetTime ? <small className="ai-usage-reset">{resetTime} 重置</small> : null}
+      </div>
+    );
+  }
+
+  function renderUsage(config: AiConnectionConfig) {
+    const usage = usageByConfig[config.id];
+    return (
+      <section className="ai-usage field-wide" aria-label={`${config.name}剩余用量`}>
+        <div className="ai-models-head">
+          <span>剩余用量</span>
+          <small>{usage?.supported && usage.level ? `GLM ${usage.level}` : "按服务商能力自适应展示"}</small>
+        </div>
+        <div className="ai-usage-body">
+          {usageError ? <p className="ai-usage-message is-error">{usageError}</p> : null}
+          {!usageError && usageLoading && !usage ? <p className="ai-usage-message">正在读取剩余用量…</p> : null}
+          {!usageError && (!usageLoading || usage) && !usage ? (
+            <p className="ai-usage-message">保存配置后可读取剩余用量。</p>
+          ) : null}
+          {usage && !usage.supported ? <p className="ai-usage-message">{usage.message || "该服务暂无用量接口"}</p> : null}
+          {usage?.supported && usage.message && !usage.entries.length ? (
+            <p className="ai-usage-message is-error">{usage.message}</p>
+          ) : null}
+          {usage?.supported && usage.entries.length ? (
+            <div className="ai-usage-list">
+              {usage.entries.map(renderUsageEntry)}
+            </div>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => void loadUsage(config.id)}
+          disabled={usageLoading}
+        >
+          {usageLoading ? "用量读取中…" : "刷新用量"}
+        </Button>
+      </section>
+    );
+  }
+
   function renderSelectedConfig(config: AiConnectionConfig) {
     const isActive = config.id === settings.active_ai_config_id;
     const apiKey = apiKeyDrafts[config.id] || "";
@@ -323,6 +448,8 @@ export function AiSettingsPanel() {
             />
             清除此配置的密钥
           </label>
+
+          {renderUsage(config)}
 
           <section className="ai-models field-wide" aria-label={`${config.name}可选模型`}>
             <div className="ai-models-head">
