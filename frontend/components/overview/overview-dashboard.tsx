@@ -56,14 +56,14 @@ export function OverviewDashboard() {
     <>
       <PageHeader kicker="HannisHub / Overview" title="把运行中的世界放在一张桌面上" description="查看本机 GPU、受管服务、远程任务与提示词资产的当前状态。" />
       <div className="metric-grid">
-        <MetricCard label="受管进程" value={runningProcesses.length} detail="当前运行中的服务" href="/llama/processes" />
+        <MetricCard label="推理服务" value={runningProcesses.length} detail="当前运行中的服务" href="/llama/models" />
         <MetricCard label="GPU" value={onlineGpus} detail={data.gpus.error || "已发现的设备"} href="/llama/gpu" />
         <MetricCard label="服务器连接" value={data.connections.length} detail="已保存的远程入口" href="/server/connections" />
         <MetricCard label="提示词" value={data.promptCount} detail="已归档的工作内容" href="/prompts" />
       </div>
       <div className="overview-grid">
         <Card>
-          <CardHeader title="正在运行" description="受管进程和远程任务的即时快照。" actions={<a className="text-link" href="/llama/processes">查看全部 →</a>} />
+          <CardHeader title="正在运行" description="受管进程和远程任务的即时快照。" actions={<a className="text-link" href="/llama/models">查看全部 →</a>} />
           {runningProcesses.length ? <div className="compact-list">{runningProcesses.slice(0, 5).map(process => <div className="compact-row" key={process.pid}><div><strong>{process.display_name || process.model_name || `PID ${process.pid}`}</strong><span>PID {process.pid}{process.port ? ` · 端口 ${process.port}` : ""}</span></div><Badge tone="success">运行中</Badge></div>)}</div> : <EmptyState title="当前没有受管进程" detail="从模型管理页启动一个已注册服务。" />}
           {activeTasks ? <div className="overview-note"><span className="status-dot status-dot-warning" />{activeTasks} 个远程任务正在派发</div> : null}
         </Card>

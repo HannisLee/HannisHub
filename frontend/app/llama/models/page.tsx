@@ -1,6 +1,6 @@
 import { AppShell } from "../../../components/layout/app-shell";
-import { ModelsPanel } from "../../../components/llama/models-panel";
+import { InferencePanel } from "../../../components/llama/inference-panel";
 
 export default function ModelsPage() {
-  return <AppShell><ModelsPanel /></AppShell>;
+  return <AppShell><InferencePanel /></AppShell>;
 }

@@ -168,16 +168,24 @@ export interface ManagedProcess {
 
 export interface GpuProcess {
   pid: number;
+  gpu_pid?: number | null;
+  gpu_index?: number | null;
+  process_type?: string | null;
   used_mem?: number | null;
   process_name?: string | null;
   username?: string | null;
   command?: string | null;
   model_name?: string | null;
+  display_name?: string | null;
+  service_id?: string | null;
+  managed?: boolean;
 }
 
 export interface GpuHistoryPoint {
   timestamp: number;
   gpu_util: number;
+  used_mem?: number | null;
+  total_mem?: number | null;
 }
 
 export interface GpuStatus {
@@ -202,6 +210,7 @@ export interface GpuResponse {
   history_hours?: number;
   gpus?: GpuStatus[];
   managed_processes?: ManagedProcess[];
+  gpu_processes?: GpuProcess[];
 }
 
 export interface DownloadTask {

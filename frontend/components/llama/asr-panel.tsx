@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody, uploadFile } from "../../lib/api";
 import { errorMessage, formatDate } from "../../lib/format";
-import type { AiSettings, AsrInfo, AsrRecord } from "../../lib/types";
+import type { AiSettings, AsrInfo, AsrRecord, CustomService } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
 
 interface UploadState { id: string; name: string; progress: number; status: string; detail: string; }
 
 export function AsrPanel() {
   const [info, setInfo] = useState<AsrInfo | null>(null);
+  const [defaultService, setDefaultService] = useState<CustomService | null>(null);
   const [records, setRecords] = useState<AsrRecord[]>([]);
   const [aiModel, setAiModel] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -17,23 +18,43 @@ export function AsrPanel() {
   const [extraction, setExtraction] = useState<Record<string, string>>({});
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [error, setError] = useState("");
+  const [startingAsr, setStartingAsr] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     try {
-      const [asr, history, extractionSettings, aiSettings] = await Promise.all([
+      const [asrResult, historyResult, extractionResult, aiResult, serviceResult] = await Promise.allSettled([
         apiFetch<AsrInfo>(`${API_PATHS.llama}/asr`),
         apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`),
         apiFetch<{ prompt: string }>(`${API_PATHS.llama}/asr/extraction-settings`),
         apiFetch<AiSettings>(API_PATHS.aiSettings),
+        apiFetch<{ services: CustomService[] }>(`${API_PATHS.llama}/custom-services`),
       ]);
-      setInfo(asr);
-      setRecords(history.records || []);
-      setPrompt(extractionSettings.prompt || "");
-      const activeConfig = aiSettings.ai_configs.find(config => config.id === aiSettings.active_ai_config_id) || aiSettings.ai_configs[0];
-      setAiModel(activeConfig?.model ? `${activeConfig.model}（${activeConfig.name}）` : "");
-      setStatus("");
-      setError("");
+      setInfo(asrResult.status === "fulfilled" ? asrResult.value : null);
+      setRecords(historyResult.status === "fulfilled" ? historyResult.value.records || [] : []);
+      setPrompt(extractionResult.status === "fulfilled" ? extractionResult.value.prompt || "" : "");
+      if (aiResult.status === "fulfilled") {
+        const activeConfig = aiResult.value.ai_configs.find(config => config.id === aiResult.value.active_ai_config_id) || aiResult.value.ai_configs[0];
+        setAiModel(activeConfig?.model ? `${activeConfig.model}（${activeConfig.name}）` : "");
+      }
+      if (serviceResult.status === "fulfilled") {
+        const services = serviceResult.value.services || [];
+        setDefaultService(
+          services.find(service => service.service_category === "asr" && /qwen3[-_ ]?asr/i.test(service.name || "")) ||
+          services.find(service => service.service_category === "asr") ||
+          null,
+        );
+      }
+      // ASR 服务未启动时 /api/asr 返回 404 是正常状态，不作为页面错误展示。
+      const failed = [historyResult, extractionResult, aiResult, serviceResult].find(
+        result => result.status === "rejected",
+      ) as PromiseRejectedResult | undefined;
+      if (failed) {
+        setError(errorMessage(failed.reason));
+      } else {
+        setStatus("");
+        setError("");
+      }
     } catch (value) { setError(errorMessage(value)); }
   }
   useEffect(() => { void load(); const timer = window.setInterval(() => void apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`).then(data => setRecords(data.records || [])).catch(() => {}), 3000); return () => window.clearInterval(timer); }, []);
@@ -60,6 +81,33 @@ export function AsrPanel() {
     } catch (value) { setError(errorMessage(value)); }
   }
 
+  async function startDefaultAsr() {
+    if (!defaultService) return;
+    setStartingAsr(true);
+    setStatus(`正在启动 ${defaultService.name}…`);
+    setError("");
+    try {
+      await apiFetch(`${API_PATHS.llama}/start`, { method: "POST", body: jsonBody({ service_id: defaultService.id }) });
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+        try {
+          const nextInfo = await apiFetch<AsrInfo>(`${API_PATHS.llama}/asr`);
+          setInfo(nextInfo);
+          setStatus(`${defaultService.name} 已启动（PID ${nextInfo.pid}）`);
+          return;
+        } catch {
+          // ASR 服务加载模型需要时间，继续等待。
+        }
+      }
+      setStatus(`${defaultService.name} 已启动，服务仍在初始化，可稍后刷新`);
+    } catch (value) {
+      setError(errorMessage(value));
+      setStatus("");
+    } finally {
+      setStartingAsr(false);
+    }
+  }
+
   async function showText(recordId: string, suffix: "text" | "extraction") {
     try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/${suffix}`); setExtraction(current => ({ ...current, [recordId]: data.text })); } catch (value) { setError(errorMessage(value)); }
   }
@@ -84,7 +132,14 @@ export function AsrPanel() {
     <div className="two-column-grid">
       <Card>
         <CardHeader title="ASR 服务" description={`当前由模型管理模块发现的唯一 ASR 实例；提炼模型：${aiModel || "未配置"}`} />
-        {info ? <div className="asr-service"><Badge tone="success">可用</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : <LoadingState />}
+        {info ? <div className="asr-service"><Badge tone="success">可用</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : defaultService ? (
+          <div className="asr-service">
+            <Badge tone="warning">未运行</Badge>
+            <strong>{defaultService.name}</strong>
+            <span>默认注册服务 · GPU {defaultService.gpu_indexes?.length ? defaultService.gpu_indexes.join(", ") : "全部"}</span>
+            <Button onClick={() => void startDefaultAsr()} disabled={startingAsr}>{startingAsr ? "默认启动中…" : "默认启动"}</Button>
+          </div>
+        ) : <LoadingState />}
         <div
           className="upload-drop"
           role="button"

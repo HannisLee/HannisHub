@@ -18,8 +18,7 @@ export const navigation: NavGroup[] = [
   {
     label: "模型管理",
     items: [
-      { href: "/llama/models", label: "模型与仓库", icon: "models" },
-      { href: "/llama/processes", label: "受管进程", icon: "processes" },
+      { href: "/llama/models", label: "推理服务", icon: "models" },
       { href: "/llama/gpu", label: "GPU 监控", icon: "gpu" },
       { href: "/llama/downloads", label: "模型下载", icon: "downloads" },
       { href: "/llama/asr", label: "ASR 转写", icon: "asr" },

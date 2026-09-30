@@ -353,7 +353,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .table-subline { display: block; margin-top: var(--space-1); color: var(--color-text-muted); font-size: 12px; }
 .path-cell { display: inline-block; max-width: 300px; }
 .subtle-path { margin: calc(var(--space-5) * -1) 0 var(--space-5); color: var(--color-text-muted); font-size: 13px; }
-.repository-grid, .gpu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.repository-grid, .gpu-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
 .repository-card, .gpu-card { padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-soft); }
 .repository-card { display: grid; gap: var(--space-3); }
 .repository-card > code { color: var(--color-text-muted); }
@@ -371,6 +371,17 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .gpu-history path { fill: none; stroke: var(--color-divider); stroke-width: 0.7; vector-effect: non-scaling-stroke; }
 .gpu-history polyline { fill: none; stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .gpu-history-empty { margin: 0; padding-top: var(--space-2); border-top: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 12px; }
+.gpu-overview-chart { display: grid; min-width: 0; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-surface-soft); }
+.gpu-overview-chart > svg { display: block; width: 100%; height: auto; aspect-ratio: 1000 / 320; overflow: visible; }
+.gpu-overview-chart line { stroke: var(--color-divider); stroke-width: 1; }
+.gpu-overview-chart text { fill: var(--color-text-muted); font-size: 11px; text-anchor: middle; }
+.gpu-overview-chart polyline { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.gpu-overview-chart polyline.is-memory { stroke-width: 1.8; stroke-dasharray: 8 7; opacity: 0.82; }
+.gpu-chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
+.gpu-chart-legend span { display: inline-flex; align-items: center; gap: var(--space-2); }
+.gpu-chart-legend i { width: 12px; height: 2px; border-radius: var(--radius-pill); }
+.gpu-chart-legend small { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.gpu-chart-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
 .progress { height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--color-divider); }
 .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--color-brand); transition: width 180ms ease; }
 .progress-success > span { background: var(--color-success); }

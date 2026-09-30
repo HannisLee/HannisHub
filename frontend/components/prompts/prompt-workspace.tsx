@@ -57,6 +57,7 @@ export function PromptWorkspace() {
   const [message, setMessage] = useState("");
   const archiveInFlightRef = useRef(false);
   const messageTokenRef = useRef(0);
+  const polishTokenRef = useRef(0);
 
   const currentValue = mode === "polished" ? polished : raw;
   const busy = archiving || polishing !== null;
@@ -164,28 +165,33 @@ export function PromptWorkspace() {
   }
 
   async function runPolish(level: PromptPolishLevel) {
-    if (!raw.trim()) {
+    const source = raw;
+    if (!source.trim()) {
       setMessage("请先输入需要润色的原文");
       return;
     }
+    const requestToken = ++polishTokenRef.current;
     setPolishing(level);
     setError("");
     setMessage(`${POLISH_LEVELS.find(item => item.id === level)?.label}处理中…`);
     try {
       const result = await apiFetch<PromptPolishResult>(`${API_PATHS.prompts}/polish`, {
         method: "POST",
-        body: jsonBody({ content: raw, level }),
+        body: jsonBody({ content: source, level }),
       });
+      if (requestToken !== polishTokenRef.current) return;
+      if (!result.content?.trim()) throw new Error("模型未返回有效润色内容");
       setPolished(result.content);
       setMode("polished");
       setStale(false);
       const effortLabel = REASONING_EFFORT_LEVELS.find(item => item.id === result.reasoning_effort)?.label;
       setMessage(`润色完成 · ${result.model}${effortLabel ? ` · 推理 ${effortLabel}` : ""}`);
     } catch (value) {
+      if (requestToken !== polishTokenRef.current) return;
       setError(errorMessage(value));
       setMessage("润色未完成，原文保持不变");
     } finally {
-      setPolishing(null);
+      if (requestToken === polishTokenRef.current) setPolishing(null);
     }
   }
 
@@ -322,7 +328,10 @@ export function PromptWorkspace() {
               return;
             }
             setRaw(event.target.value);
+            setPolished("");
+            setMode("raw");
             setStale(true);
+            polishTokenRef.current += 1;
           }}
           placeholder="在这里输入或粘贴你的提示词…"
           spellCheck={false}

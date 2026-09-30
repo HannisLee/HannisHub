@@ -83,6 +83,21 @@ ASR_MAX_CHUNK_SECONDS = 600
 ASR_TARGET_CHUNK_BYTES = 16 * 1024 * 1024
 ASR_MIN_CHUNK_SECONDS = 15
 SERVICE_CATEGORIES = {"asr", "llm"}
+GPU_PROTECTED_PROCESS_NAMES = {
+    "xorg",
+    "xorg.wrap",
+    "gnome-shell",
+    "gdm",
+    "gdm-session-worker",
+    "gnome-session-binary",
+    "gnome-remote-desktop-daemon",
+    "plasmashell",
+    "kwin_x11",
+    "kwin_wayland",
+    "cinnamon",
+    "mate-session",
+    "xfce4-session",
+}
 # 上传文件不再按扩展名限制。所有能够被 FFmpeg 解码的媒体都会在本地导出为
 # FLAC 切片后再送给 ASR 服务，扩展名仅用于保留原始文件名和帮助 FFmpeg 判断格式。
 ASR_MAX_FILENAME_SUFFIX_LENGTH = 16
@@ -836,6 +851,8 @@ def _append_gpu_history_sample(gpus: list, history_hours: float):
                     "index": gpu["index"],
                     "name": gpu.get("name", ""),
                     "gpu_util": gpu.get("gpu_util", 0),
+                    "used_mem": gpu.get("used_mem"),
+                    "total_mem": gpu.get("total_mem"),
                 }
                 for gpu in gpus
             ],
@@ -864,10 +881,16 @@ def _history_by_gpu(history_hours: float) -> dict:
             index = _to_int(gpu.get("index"), default=-1)
             if index < 0:
                 continue
-            by_gpu.setdefault(index, []).append({
+            point = {
                 "timestamp": ts,
                 "gpu_util": _to_int(gpu.get("gpu_util")),
-            })
+            }
+            used_mem = gpu.get("used_mem")
+            total_mem = gpu.get("total_mem")
+            if isinstance(used_mem, (int, float)) and isinstance(total_mem, (int, float)):
+                point["used_mem"] = used_mem
+                point["total_mem"] = total_mem
+            by_gpu.setdefault(index, []).append(point)
     return by_gpu
 
 
@@ -887,6 +910,8 @@ def _gpus_from_history(history_hours: float) -> list:
                     "timestamp": ts,
                     "name": gpu.get("name", f"GPU {index}"),
                     "gpu_util": _to_int(gpu.get("gpu_util")),
+                    "used_mem": gpu.get("used_mem"),
+                    "total_mem": gpu.get("total_mem"),
                 }
 
     gpus = []
@@ -899,8 +924,8 @@ def _gpus_from_history(history_hours: float) -> list:
             "uuid": "",
             "bus_id": "",
             "gpu_util": info.get("gpu_util", 0),
-            "used_mem": None,
-            "total_mem": None,
+            "used_mem": info.get("used_mem"),
+            "total_mem": info.get("total_mem"),
             "temperature": None,
             "process_count": 0,
             "users": [],
@@ -946,6 +971,29 @@ def _run_nvidia_smi(args: list) -> tuple[Optional[list], Optional[str]]:
         return None, detail or f"nvidia-smi 返回错误码 {proc.returncode}"
 
     return _parse_csv_lines(proc.stdout), None
+
+
+def _run_nvidia_smi_text(args: list) -> tuple[Optional[str], Optional[str]]:
+    """执行 nvidia-smi 并保留原始输出，用于解析非 CSV 的进程表。"""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return None, "未找到 nvidia-smi，请确认已安装 NVIDIA 驱动和工具"
+    try:
+        proc = subprocess.run(
+            [nvidia_smi, *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "nvidia-smi 查询超时"
+    except OSError as exc:
+        return None, f"nvidia-smi 执行失败: {exc}"
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return None, detail or f"nvidia-smi 返回错误码 {proc.returncode}"
+    return proc.stdout, None
 
 
 def _model_name_from_value(value: str, require_model_hint: bool = False) -> Optional[str]:
@@ -1029,6 +1077,63 @@ def _get_process_detail(pid: int) -> dict:
     except (psutil.AccessDenied, psutil.NoSuchProcess, ValueError):
         pass
     return detail
+
+
+def _current_service_pid_set() -> set[int]:
+    """返回当前管理服务自身及其祖先 PID，禁止通过 GPU 进程接口停止。"""
+    protected = {os.getpid()}
+    try:
+        proc = psutil.Process(os.getpid())
+        for parent in proc.parents():
+            if parent.pid == 1:
+                break
+            protected.add(parent.pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+        pass
+    return protected
+
+
+def _is_protected_gpu_process(pid: int, process_name: str = "", command: str = "") -> bool:
+    """识别桌面组件和当前管理服务，避免误停图形会话或 HannisHub。"""
+    if pid <= 1 or pid in _current_service_pid_set():
+        return True
+    candidates = {Path(str(process_name or "")).name.lower()}
+    try:
+        for token in shlex.split(command or ""):
+            candidates.add(Path(token).name.lower())
+    except ValueError:
+        candidates.add(Path(str(command or "")).name.lower())
+    return bool(candidates & GPU_PROTECTED_PROCESS_NAMES)
+
+
+def _stop_external_process(pid: int) -> str:
+    """停止一个非受管 GPU 进程；只做终止，不修改受管进程记录。"""
+    if pid <= 1:
+        raise HTTPException(status_code=400, detail="不能停止系统关键进程")
+    if pid in _current_service_pid_set():
+        raise HTTPException(status_code=400, detail="不能停止 HannisHub 管理服务")
+    try:
+        proc = psutil.Process(pid)
+        process_name = proc.name()
+        command = " ".join(proc.cmdline())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="进程不存在或无法读取") from exc
+    if _is_protected_gpu_process(pid, process_name, command):
+        raise HTTPException(status_code=400, detail="桌面图形进程受保护，不能在此停止")
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+        return f"{process_name}({pid})"
+    except psutil.NoSuchProcess:
+        return f"{process_name}({pid})"
+    except (psutil.AccessDenied, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="没有权限停止该进程") from exc
+    except psutil.Error as exc:
+        raise HTTPException(status_code=500, detail=f"停止进程失败: {exc}") from exc
 
 
 def _is_process_running(proc) -> bool:
@@ -1185,6 +1290,33 @@ def _managed_process_on_port(port: int) -> Optional[int]:
     return None
 
 
+def _parse_nvidia_smi_process_rows(output: str) -> list[dict]:
+    """解析 nvidia-smi 默认进程表，包含 compute 与 graphics 进程。"""
+    rows: list[dict] = []
+    for line in output.splitlines():
+        text = line.strip()
+        if not text.startswith("|") or not text.endswith("|"):
+            continue
+        match = re.fullmatch(
+            r"\s*(\d+)\s+(?:\S+\s+){2}(\d+)\s+([CG])\s+(.+?)\s+([0-9.]+)\s*([KMGT]iB)\s*",
+            text[1:-1],
+            re.I,
+        )
+        if not match:
+            continue
+        value = float(match.group(5))
+        unit = match.group(6).upper()
+        multiplier = {"KIB": 1 / 1024, "MIB": 1, "GIB": 1024, "TIB": 1024 * 1024}
+        rows.append({
+            "gpu_index": _to_int(match.group(1), default=-1),
+            "pid": _to_int(match.group(2), default=-1),
+            "process_type": match.group(3).upper(),
+            "process_name": match.group(4) or "unknown",
+            "used_mem": int(value * multiplier.get(unit, 1)),
+        })
+    return rows
+
+
 def _collect_gpu_status() -> dict:
     """采集 GPU 和进程信息"""
     settings = _load_settings()
@@ -1214,6 +1346,7 @@ def _collect_gpu_status() -> dict:
             "stale": bool(history_gpus),
             "history_hours": history_hours,
             "managed_processes": list(managed.values()),
+            "gpu_processes": [],
             "gpus": history_gpus,
         }
 
@@ -1248,11 +1381,20 @@ def _collect_gpu_status() -> dict:
     for gpu in gpus:
         gpu["history"] = history.get(gpu["index"], [])
 
-    process_fields = ["gpu_uuid", "gpu_bus_id", "pid", "used_memory", "process_name"]
-    process_rows, process_error = _run_nvidia_smi([
-        f"--query-compute-apps={','.join(process_fields)}",
+    compute_fields = ["gpu_uuid", "gpu_bus_id", "pid", "used_memory", "process_name"]
+    compute_rows, compute_error = _run_nvidia_smi([
+        f"--query-compute-apps={','.join(compute_fields)}",
         "--format=csv,noheader,nounits",
     ])
+    process_output, process_table_error = _run_nvidia_smi_text([])
+    process_rows = _parse_nvidia_smi_process_rows(process_output or "")
+    process_error = compute_error or process_table_error
+    compute_memory_by_pid = {
+        _to_int(row[2], default=-1): _to_int(row[3])
+        for row in (compute_rows or [])
+        if len(row) >= len(compute_fields)
+    }
+    gpu_index_to_gpu = {gpu["index"]: gpu for gpu in gpus}
 
     managed_rows = {}
 
@@ -1290,43 +1432,49 @@ def _collect_gpu_status() -> dict:
         gpu_pid = process.get("gpu_pid")
         if gpu_pid and gpu_pid not in row["gpu_process_pids"]:
             row["gpu_process_pids"].append(gpu_pid)
-    if not process_error:
-        for row in process_rows or []:
-            if len(row) < len(process_fields):
+    gpu_processes: list[dict] = []
+    if not process_table_error:
+        for row in process_rows:
+            gpu = gpu_index_to_gpu.get(row["gpu_index"])
+            gpu_pid = row["pid"]
+            if gpu is None or gpu_pid <= 0:
                 continue
-            gpu = uuid_to_gpu.get(row[0]) or bus_id_to_gpu.get(row[1])
-            if gpu is None:
+            proc_detail = _get_process_detail(gpu_pid)
+            if _is_protected_gpu_process(
+                gpu_pid,
+                row.get("process_name", ""),
+                proc_detail.get("command", ""),
+            ):
                 continue
 
-            gpu_pid = _to_int(row[2], default=-1)
-            root_pid = managed_pid_map.get(gpu_pid)
-            if root_pid not in managed:
-                continue
-
-            proc_detail = _get_process_detail(gpu_pid) if gpu_pid > 0 else {
-                "username": "Unknown",
-                "command": "",
-                "cmdline": [],
-            }
+            root_pid = managed_pid_map.get(gpu_pid, gpu_pid)
             managed_info = managed.get(root_pid, {})
+            is_managed = root_pid in managed
             process = {
                 "pid": root_pid,
-                "gpu_pid": gpu_pid if gpu_pid > 0 else None,
-                "used_mem": _to_int(row[3]),
-                "process_name": row[4],
+                "gpu_pid": gpu_pid,
+                "gpu_index": gpu["index"],
+                "process_type": row.get("process_type"),
+                "used_mem": compute_memory_by_pid.get(gpu_pid, row.get("used_mem")),
+                "process_name": row.get("process_name") or proc_detail.get("command") or "unknown",
                 "username": proc_detail["username"],
                 "command": managed_info.get("command") or proc_detail["command"],
                 "model_name": managed_info.get("model_name") or _infer_model_name(proc_detail["cmdline"]),
                 "model": managed_info.get("model"),
+                "display_name": managed_info.get("display_name") or managed_info.get("model_name") or row.get("process_name"),
+                "service_id": managed_info.get("service_id"),
                 "host": managed_info.get("host"),
                 "port": managed_info.get("port"),
                 "url": managed_info.get("url"),
                 "proxy_url": managed_info.get("proxy_url"),
                 "gpu_indexes": managed_info.get("gpu_indexes", []),
                 "started_at": managed_info.get("started_at"),
+                "managed": is_managed,
             }
             gpu["processes"].append(process)
-            _merge_managed_gpu_row(root_pid, gpu, process)
+            gpu_processes.append(process)
+            if is_managed:
+                _merge_managed_gpu_row(root_pid, gpu, process)
 
     for gpu in gpus:
         users = sorted({
@@ -1380,6 +1528,7 @@ def _collect_gpu_status() -> dict:
         "stale": False,
         "history_hours": history_hours,
         "managed_processes": managed_processes,
+        "gpu_processes": gpu_processes,
         "gpus": gpus,
     }
 
@@ -2546,6 +2695,44 @@ async def get_status():
 async def get_gpus():
     """获取 GPU 状态和 GPU 进程列表"""
     return JSONResponse(_collect_gpu_status())
+
+
+@app.post("/api/gpu-processes/stop")
+async def stop_gpu_process(body: dict = None):
+    """停止一个 GPU 进程；受管进程走原有停止链路，桌面进程受保护。"""
+    body = body or {}
+    try:
+        pid = int(body.get("pid"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="PID 必须是整数") from exc
+    if pid <= 0:
+        raise HTTPException(status_code=400, detail="PID 必须是正整数")
+
+    gpu_status = await asyncio.to_thread(_collect_gpu_status)
+    gpu_targets = {
+        target_pid
+        for process in gpu_status.get("gpu_processes", [])
+        for target_pid in (process.get("pid"), process.get("gpu_pid"))
+        if target_pid
+    }
+    if pid not in gpu_targets:
+        raise HTTPException(status_code=404, detail="指定的进程当前不在 GPU 进程列表中")
+
+    process = next(
+        (
+            item for item in gpu_status.get("gpu_processes", [])
+            if item.get("pid") == pid or item.get("gpu_pid") == pid
+        ),
+        None,
+    )
+    root_pid = _to_int((process or {}).get("pid"), default=pid)
+    with _process_lock:
+        if root_pid in _managed_processes:
+            info = _stop_process_internal(pid=root_pid, clear_log=False)
+            return JSONResponse({"ok": True, "status": "stopped", "detail": f"Stopped {info}"})
+
+    detail = await asyncio.to_thread(_stop_external_process, pid)
+    return JSONResponse({"ok": True, "status": "stopped", "detail": f"Stopped {detail}"})
 
 
 @app.get("/api/managed-processes")

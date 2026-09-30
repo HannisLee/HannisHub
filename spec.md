@@ -75,7 +75,8 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
-- `/llama/models`、`/llama/processes`、`/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：模型管理模块页面
+- `/llama/models`：推理服务页面，合并模型/仓库浏览、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
+- `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
@@ -99,7 +100,7 @@ HannisHub/
 | `frontend/app/` | App Router 页面、全局样式、登录与 404 页面 |
 | `frontend/components/layout/` | 会话检查、桌面/移动侧栏、Topbar、浏览器标签标题与统一 App Shell |
 | `frontend/components/ui/` | 按钮、卡片、表单、状态、进度条与细线 SVG 图标 |
-| `frontend/components/llama/` | 模型、进程、GPU、下载、ASR、设置页面业务组件 |
+| `frontend/components/llama/` | 推理服务、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件 |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
@@ -115,7 +116,9 @@ API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，�
 
 页面复现原有的实时行为：GPU 与进程状态每 5 秒刷新，下载状态每 3 秒刷新且日志每 5 秒刷新，ASR 历史每 3 秒刷新，Server 任务每 15 秒刷新。所有页面均对加载、错误和空数据提供明确状态。
 
-GPU 页面同时绘制 API 返回的真实利用率历史；受管 LLM 的“聊天”入口继续指向兼容保留的 `/llama-manager/chat/{pid}`，ASR 的入口则回到新的 `/llama/asr` 页面，从而在完整聊天迁移前不丢失原有交互能力。
+推理服务页面把 GGUF 模型、全量仓库、注册服务、运行进程与日志按全宽卡片自上而下合并展示；不再拆分“模型与仓库”和“受管进程”两个入口。GPU 页面提供全宽历史趋势图（实线为利用率、虚线为显存占比），设备卡片与进程表同样全宽排列；受管 LLM 的“聊天”入口继续指向兼容保留的 `/llama-manager/chat/{pid}`，ASR 的入口则回到新的 `/llama/asr` 页面，从而在完整聊天迁移前不丢失原有交互能力。
+
+ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服务中优先选择名称匹配 `Qwen3 ASR` 的 ASR 服务，调用 `/api/start` 启动并最多轮询 30 秒等待 `/api/asr` 可用。
 
 ### Hub API
 
@@ -268,8 +271,9 @@ _download_lock   # 下载任务状态读写锁
 | POST | `/api/custom-services` | 注册或更新服务（服务名、服务类型、完整启动命令、GPU 选择） |
 | DELETE | `/api/custom-services/{service_id}` | 删除已注册服务 |
 | GET | `/api/status` | 当前 llama-server 进程状态 |
-| GET | `/api/gpus` | 当前 GPU 状态、每卡 util 历史和受管进程列表 |
+| GET | `/api/gpus` | 当前 GPU 状态、每卡 util/显存历史、受管进程汇总和本机 GPU 进程列表 |
 | GET | `/api/managed-processes` | 当前运行期已知受管进程和日志记录 |
+| POST | `/api/gpu-processes/stop` | 停止当前出现在 GPU 进程列表中的指定进程；受管进程走原停止链路，桌面图形进程受保护 |
 | GET | `/asr` | 返回固定地址的 ASR 专用音频转写页 |
 | GET | `/chat/{pid}` | 返回指定标准 LLM 服务的通用 OpenAI 兼容聊天页 |
 | GET | `/api/asr/history` | 返回本地 ASR 历史记录摘要（不含全文） |
@@ -312,6 +316,20 @@ _download_lock   # 下载任务状态读写锁
       "used_mem": 6326
     }
   ],
+  "gpu_processes": [
+    {
+      "pid": 12345,
+      "gpu_pid": 12346,
+      "gpu_index": 0,
+      "process_type": "C",
+      "used_mem": 6326,
+      "process_name": "python",
+      "username": "user",
+      "command": "python ...",
+      "model_name": "Qwen3-ASR-1.7B",
+      "managed": true
+    }
+  ],
   "gpus": [
     {
       "index": 0,
@@ -326,7 +344,7 @@ _download_lock   # 下载任务状态读写锁
       "process_count": 1,
       "users": ["user"],
       "history": [
-        {"timestamp": 1717480000.0, "gpu_util": 20}
+        {"timestamp": 1717480000.0, "gpu_util": 20, "used_mem": 6339, "total_mem": 40960}
       ],
       "processes": [
         {
@@ -335,7 +353,8 @@ _download_lock   # 下载任务状态读写锁
           "process_name": "python",
           "username": "user",
           "command": "python ...",
-          "model_name": "Qwen3-ASR-1.7B"
+          "model_name": "Qwen3-ASR-1.7B",
+          "managed": true
         }
       ]
     }
@@ -378,12 +397,13 @@ _download_lock   # 下载任务状态读写锁
 1. 服务注册时明确选择 ASR 或标准 LLM。ASR 服务的 Open 固定跳转到 `/asr`；标准 LLM 服务的 Open 打开 `/chat/{pid}` 通用聊天页
 2. 专用页将服务与批量拖放/点击上传区置顶，转写历史放在下方；可一次选择或拖入多个音频，支持 M4S 及所有可被 FFmpeg 解码的常见音视频格式，单文件最多 4 GB。后端不再按扩展名拒绝文件，而是以文件内容交给 FFmpeg 探测
 3. 后端自动使用唯一运行中的 ASR 受管实例；未运行时返回 404，存在多个实例时返回 409。音频写入系统临时目录，并由 FFmpeg 解码、静音检测和导出为 FLAC 后再转写；初始单片最长 600 秒，若导出后的 FLAC 超过 16 MB 安全阈值则自动继续切分。未安装 FFmpeg 时会返回安装提示；没有初始化信息的独立 DASH M4S 片段无法单独解码，需提供完整 MP4/M4A 或合并后的媒体文件
-4. 后端按顺序向该实例本机地址的 `/v1/audio/transcriptions` 发送 multipart 请求，自动从 `qwen-asr-serve` 命令读取模型路径，兼容 `text` 和 OpenAI `choices` 返回格式并去除 `<asr_text>` 标记；服务端仍返回“文件过大”时会再切分后重试该片段
-5. 浏览器通过 XMLHttpRequest 上传，逐文件显示真实的已上传字节数和百分比。服务端为每个上传文件立即创建历史 item，并把上传、排队、FFmpeg 分析、转写、完成或失败状态及对应阶段百分比写入历史索引；页面每 3 秒刷新，因此刷新页面后仍可查看后台任务进度
-6. 后台队列默认同时只运行 1 个任务，以避免单卡 vLLM 争抢资源。FFmpeg 静音分析从 `-progress pipe:2` 读取已处理音频时长并显示处理进度；转写阶段按已完成片段数显示进度，同时明确显示当前是在 FFmpeg 转码片段还是等待 ASR 返回
-7. 所有临时音频和 FLAC 切片在任务结束后删除；成功转写的全文保存到 `data/asr_history/<记录 ID>.txt`，信息提取结果保存到 `data/asr_history/<记录 ID>.extracted.txt`，元数据保存到 `data/asr_history/records.json`，临时任务目录为 `data/asr_jobs/`，三者均不纳入 Git
-8. 专用页以最新上传在前的时间倒序展示可展开 item，列表保存自定义名称、原始文件名、上传时间、时长、片段数、状态、阶段进度和是否已提取；已完成条目可在原文与信息提取结果间切换，并可修改记录名称或删除已结束的记录
-9. 历史列表下方提供可保存的信息提取提示词。默认提示词用于去除抖音音频转写的口头禅和冗余内容，保留关键事实、观点、步骤、数字和结论，且禁止编造原文未提供的信息
+4. 统一前端在 ASR 服务未运行时显示“默认启动”按钮，优先匹配注册表中名称包含 Qwen3 ASR 的 ASR 服务，调用 `/api/start` 后每秒轮询 `/api/asr`，最多等待 30 秒
+5. 后端按顺序向该实例本机地址的 `/v1/audio/transcriptions` 发送 multipart 请求，自动从 `qwen-asr-serve` 命令读取模型路径，兼容 `text` 和 OpenAI `choices` 返回格式并去除 `<asr_text>` 标记；服务端仍返回“文件过大”时会再切分后重试该片段
+6. 浏览器通过 XMLHttpRequest 上传，逐文件显示真实的已上传字节数和百分比。服务端为每个上传文件立即创建历史 item，并把上传、排队、FFmpeg 分析、转写、完成或失败状态及对应阶段百分比写入历史索引；页面每 3 秒刷新，因此刷新页面后仍可查看后台任务进度
+7. 后台队列默认同时只运行 1 个任务，以避免单卡 vLLM 争抢资源。FFmpeg 静音分析从 `-progress pipe:2` 读取已处理音频时长并显示处理进度；转写阶段按已完成片段数显示进度，同时明确显示当前是在 FFmpeg 转码片段还是等待 ASR 返回
+8. 所有临时音频和 FLAC 切片在任务结束后删除；成功转写的全文保存到 `data/asr_history/<记录 ID>.txt`，信息提取结果保存到 `data/asr_history/<记录 ID>.extracted.txt`，元数据保存到 `data/asr_history/records.json`，临时任务目录为 `data/asr_jobs/`，三者均不纳入 Git
+9. 专用页以最新上传在前的时间倒序展示可展开 item，列表保存自定义名称、原始文件名、上传时间、时长、片段数、状态、阶段进度和是否已提取；已完成条目可在原文与信息提取结果间切换，并可修改记录名称或删除已结束的记录
+10. 历史列表下方提供可保存的信息提取提示词。默认提示词用于去除抖音音频转写的口头禅和冗余内容，保留关键事实、观点、步骤、数字和结论，且禁止编造原文未提供的信息
 
 **下载模型：**
 1. 校验仓库名（`owner/repo`）；指定文件名时校验 `.gguf` 结尾，留空则全量下载
@@ -403,16 +423,21 @@ _download_lock   # 下载任务状态读写锁
 
 **GPU 监控：**
 1. 调用 `nvidia-smi --query-gpu=index,name,driver_version,uuid,pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits`
-2. 调用 `nvidia-smi --query-compute-apps=gpu_uuid,gpu_bus_id,pid,used_memory,process_name --format=csv,noheader,nounits`
-3. 进程归属优先按 `gpu_uuid` 映射到 GPU，失败时按 `gpu_bus_id` 映射；仍无法映射的进程行会被忽略
+2. 调用 `nvidia-smi --query-compute-apps=gpu_uuid,gpu_bus_id,pid,used_memory,process_name --format=csv,noheader,nounits` 获取计算进程显存
+3. 调用默认 `nvidia-smi` 输出并解析 Processes 表，因此 compute 与 graphics 进程都能进入采集链路
 4. GPU 进程 PID 会先通过 `_managed_process_pid_map()` 归属到模型管理模块启动的父服务 PID，兼容 `conda run` / vLLM 启动器由子进程实际占用 GPU 的情况
-5. GPU 进程表只保留 `_managed_processes` 中仍存活的服务，系统或其他用户进程不进入前端进程表
-6. 同一服务占用多张 GPU 时，GPU index/name 汇总展示，进程显存累加，总显存累加，GPU util/温度取最大值
+5. `gpu_processes` 展示本机全部 GPU 进程，并标记 `managed`；Xorg、GNOME Shell、GDM、KDE/Plasma 等桌面图形进程，以及 HannisHub 服务自身和祖先进程会被过滤，不提供停止操作
+6. 同一受管服务占用多张 GPU 时，`managed_processes` 中 GPU index/name 汇总展示，进程显存累加，总显存累加，GPU util/温度取最大值
 7. 如果 `nvidia-smi` 暂时没有返回该服务的 compute-apps 行，但启动时选择了 GPU，则用所选 GPU 回填 GPU name/util/total mem/temp，进程显存保持空值
-8. 每次 `/api/gpus` 采集时最多每 5 秒写入一条 GPU util 样本到 `settings.json.gpu_history`
+8. 每次 `/api/gpus` 采集时最多每 5 秒写入一条 GPU util 与显存样本到 `settings.json.gpu_history`
 9. 按 `settings.json.gpu_history_hours` 返回每张 GPU 最近 X 小时的 `history`，默认 2 小时
 10. `nvidia-smi` 不存在、驱动不可用或查询超时时，优先从 `settings.json.gpu_history` 恢复 GPU 列表和波形，返回 `stale: true`
 11. 本地历史也为空时，接口返回 JSON：`{"ok": false, "error": "...", "gpus": []}`
+
+**GPU 进程停止：**
+1. `/api/gpu-processes/stop` 先重新采集当前 GPU 进程，只允许停止当前列表中的 PID 或受管父 PID，避免把接口当作任意进程 kill 入口
+2. 受管进程复用 `_stop_process_internal()`，递归处理子进程；非受管进程仅提供停止操作，使用 `psutil.terminate()`，等待 5 秒后必要时 kill
+3. PID 1、HannisHub 自身/祖先、桌面图形进程受保护；权限不足时返回 403
 
 **端口冲突处理：**
 - 使用 `psutil.net_connections(kind="inet")` 查找 LISTEN 状态连接
@@ -664,6 +689,8 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 ## 在线提示词输入子服务（prompt_service）
 
 `prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、三档 AI 润色、无分组归档、复制、恢复和删除。轻度、中度、重度按钮固定在编辑器顶部的原文/润色稿切换左侧，长文本无需滚动到底部即可操作；接口内部仍使用 `light`、`standard`、`deep` 三个稳定档位值。三档润色复用项目统一的 OpenAI 兼容 API 与模型配置，润色指令保存在根目录 `ai_settings.json`；归档内容保存到 `prompt_service/settings.json`，数据结构：
+
+前端点击任一润色按钮时会立即固化当前原文快照并直接把该快照放入 `/api/polish` 请求体；原文继续保留在原文状态，收到非空结果后才切换到润色稿。原文每次变化会清空旧润色稿并使未完成请求令牌失效，避免新请求完成后被旧状态覆盖或显示上一次润色内容。
 
 ```json
 {
