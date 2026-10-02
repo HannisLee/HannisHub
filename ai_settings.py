@@ -412,7 +412,7 @@ def save_prompt_polish_prompts(
     value: object,
     reasoning_effort: object = None,
 ) -> dict[str, Any]:
-    """保存提示词工作区的三档润色指令和推理强度。"""
+    """保存提示词页面的三档润色指令和推理强度。"""
     prompts = _normalize_prompt_polish_prompts(value)
     with _SETTINGS_LOCK:
         data = _load_ai_settings()

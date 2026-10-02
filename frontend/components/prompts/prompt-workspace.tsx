@@ -284,7 +284,7 @@ export function PromptWorkspace() {
 
   return (
     <div className="prompt-workspace">
-      <h1 className="prompt-workspace-title">提示词 / Workspace</h1>
+      <h1 className="prompt-workspace-title">提示词</h1>
       {error ? <ErrorState message={error} /> : null}
       {message ? <div className="inline-message">{message}</div> : null}
 

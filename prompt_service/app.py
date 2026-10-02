@@ -240,13 +240,13 @@ async def polish_prompt(request: Request):
 
 @router.get("/polish-settings")
 async def read_polish_settings():
-    """读取提示词工作区的三档润色指令。"""
+    """读取提示词页面的三档润色指令。"""
     return JSONResponse(ai_settings.get_public_prompt_polish_settings())
 
 
 @router.put("/polish-settings")
 async def update_polish_settings(request: Request):
-    """保存提示词工作区的三档润色指令。"""
+    """保存提示词页面的三档润色指令。"""
     try:
         payload = await request.json()
     except Exception as exc:

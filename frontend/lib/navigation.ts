@@ -40,7 +40,7 @@ export const navigation: NavGroup[] = [
       { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
     ],
   },
-  { label: "提示词", items: [{ href: "/prompts", label: "提示词工作区", title: "提示词", icon: "prompts" }] },
+  { label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
   { label: "设置", items: [{ href: "/settings", label: "AI 能力", icon: "settings" }] },
 ];
 

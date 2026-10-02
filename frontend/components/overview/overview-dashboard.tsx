@@ -46,7 +46,7 @@ export function OverviewDashboard() {
   }, []);
 
   if (error) return <><PageHeader kicker="HannisHub / Overview" title="总览" description="读取工作台状态时遇到问题。" /><ErrorState message={error} /></>;
-  if (!data) return <><PageHeader kicker="HannisHub / Overview" title="总览" description="本机模型、远程服务器和提示词工作区的共同入口。" /><LoadingState /></>;
+  if (!data) return <><PageHeader kicker="HannisHub / Overview" title="总览" description="本机模型、远程服务器和提示词的共同入口。" /><LoadingState /></>;
 
   const runningProcesses = data.processes.filter(item => item.running !== false);
   const onlineGpus = data.gpus.gpus?.length || 0;

@@ -7,7 +7,7 @@ HannisHub 是本机模型、远程服务器和提示词资产的统一管理工�
 - 单管理员登录、首次初始化、会话和退出管理
 - 模型管理：GGUF 与仓库浏览、受管进程、GPU 监控、下载、ASR 转写和设置
 - Server：SSH 服务器连接、远端时间、Codex CLI 或终端任务调度
-- 提示词工作区：本地暂存、原文/润色编辑、分组归档、复制、恢复和删除
+- 提示词：本地暂存、原文/润色编辑、分组归档、复制、恢复和删除
 - AI 设置：集中管理 OpenAI 兼容接口、模型与密钥，支持探查模型列表、测试链接和测试模型；敏感配置保存在不入 Git 的本地 JSON
 - 文件管理：默认暴露 `~/reproduce`，支持目录浏览、服务端缓存、手动同步、文件下载与点云预览
 
@@ -82,7 +82,7 @@ bash run.sh
 | 模型设置 | `/llama/settings` | `/llama-manager/api` |
 | 服务器连接 | `/server/connections` | `/server/api` |
 | 远程任务 | `/server/tasks` | `/server/api` |
-| 提示词工作区 | `/prompts` | `/prompt/api` |
+| 提示词 | `/prompts` | `/prompt/api` |
 | 文件浏览 | `/files` | `/api/file-manager` |
 | 点云查看器 | `/files/point-clouds` | `/api/file-manager`、`/api/point-clouds` |
 | AI 能力设置 | `/settings` | `/api/ai-settings` |

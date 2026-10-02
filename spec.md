@@ -78,7 +78,7 @@ HannisHub/
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
-- `/prompts`：提示词工作区
+- `/prompts`：提示词
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
 - `/files`：文件游览页，浏览已开放目录；点击可预览的点云文件会打开点云预览页
 - `/files/point-clouds`：点云预览页，依次展示固定尺寸预览、目录收藏和当前目录；`/point-clouds` 为兼容入口
@@ -552,7 +552,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `active_ai_config_id` | string | `""` | 当前 AI 任务使用的配置 ID；为空表示尚未启用任何配置 |
 | `ai_configs` | array | `[]` | 命名 AI 配置数组，最多 32 条，每条结构见下表 |
 | `asr_extraction_prompt` | string | 默认提炼提示词 | ASR 转写提炼使用的 system 提示词 |
-| `prompt_polish_prompts` | object | 内置三档指令 | 提示词工作区轻度、标准、深度三档润色使用的 system 提示词 |
+| `prompt_polish_prompts` | object | 内置三档指令 | 提示词页面轻度、标准、深度三档润色使用的 system 提示词 |
 | `prompt_reasoning_effort` | string | `"auto"` | 提示词润色推理强度，可选 `auto`、`low`、`medium`、`high`；`auto` 不传推理参数 |
 
 `ai_configs[]` 单条配置字段：
