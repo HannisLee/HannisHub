@@ -70,6 +70,8 @@ export interface FileManagerEntry {
   size: number;
   modified: number;
   extension: string;
+  /** 条目本身是符号链接；目录链接可正常进入与上传 */
+  symlink?: boolean;
   download_url?: string;
   relative_path?: string;
 }

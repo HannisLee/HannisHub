@@ -691,16 +691,17 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               {filteredEntries.map((entry: FileManagerEntry) => (
                 <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} key={entry.path}>
                   <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
-                    <span className="file-manager-entry-mark">{entry.type === "directory" ? "◇" : entry.type === "file" ? "·" : "×"}</span>
+                    <span className="file-manager-entry-mark">{entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}</span>
                     <span className="file-manager-entry-details">
                       <strong title={entry.name}>{entry.name}</strong>
                       {pointCloudMode && entry.type === "file" ? <span className="file-manager-entry-relative" title={entry.relative_path}>{entry.relative_path}</span> : null}
                       <small>
-                        {entry.type === "directory" ? "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
+                        {entry.type === "directory" ? entry.symlink ? "软链接文件夹" : "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
                       </small>
                     </span>
                   </button>
                   <span className="file-manager-entry-actions">
+                    {entry.symlink ? <Badge tone="info">软链接</Badge> : null}
                     {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
                     {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>{pointCloudMode ? `预览至 ${activePreview === 0 ? "A" : "B"}` : "预览"}</button> : null}
                     {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}

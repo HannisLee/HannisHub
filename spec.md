@@ -142,14 +142,14 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
-| GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，不跟随符号链接 |
+| GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，并跟随顶层目录内出现的符号链接 |
 | GET | `/api/file-manager/markdown-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的 Markdown 文件，最多返回 2,000 篇，供文档查看模块建立阅读目录 |
 | GET | `/api/file-manager/markdown?root=<index>&path=<relative_path>` | 读取单个不超过 3 MB 的 UTF-8 Markdown 文件并返回内容、路径与元信息 |
 | GET | `/api/file-manager/date-search-folders` | 读取按日期查找 PLY 的项目目录；首次使用时列出已存在且处于开放范围内的 RadioGS、LumiMotion 项目目录 |
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
 | POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
-| POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&overwrite=<bool>` | 以原始请求体上传单个不超过 4 GB 的文件；URL 编码后的文件相对路径放在 `x-file-path` 请求头，可包含文件夹相对结构，服务端逐段校验路径、拒绝符号链接并原子写入，成功后清除该顶层目录相关缓存 |
+| POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&overwrite=<bool>` | 以原始请求体上传单个不超过 4 GB 的文件；URL 编码后的文件相对路径放在 `x-file-path` 请求头，可包含文件夹相对结构，服务端逐段校验路径、跟随顶层目录内出现的符号链接并原子写入，成功后清除该顶层目录相关缓存 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
@@ -181,10 +181,10 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 文件管理组件
 
-- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。
+- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。顶层目录里的软链接（例如 `RadioGS-perlight/data -> /home/lihan/data`）会作为可进入的文件夹正常显示，并支持在其内部上传与下载。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 服务端对目录列表维护 1 小时线程安全缓存。目录缓存同时记录目录 mtime；手动同步会清除所选项目旧缓存并递归预读目录树。浏览器端复用有效缓存，手动同步后清除浏览器缓存并刷新当前目录。
-- 下载、上传与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。上传支持点击、多文件和拖入文件夹，前端按文件显示上传进度，可选覆盖同名文件。
+- 下载、上传与浏览都只接收顶层目录索引与相对路径；后端按字面逐段解析路径，拒绝 `..`、空段等越界写法。顶层目录内出现的符号链接由管理员在服务器上手动创建，等同于显式开放链接指向的位置：浏览、下载、上传与递归扫描都会跟随，条目上以“软链接”标记区分；链接目标内部再次出现的符号链接同样跟随，但每次递归扫描都按真实路径去重，避免环形链接导致死循环。失效链接仍以“不支持的链接或特殊文件”展示且不可进入。上传支持点击、多文件和拖入文件夹，前端按文件显示上传进度，可选覆盖同名文件。
 - “文档查看”页复用相同的受限目录边界。首次打开时优先定位 `/home/lihan/reproduce/RadioGS-stage1`（该路径须位于已开放范围），顶部文件夹选择器与左侧目录均可逐层切换；左侧只显示文件夹与 Markdown 文档，文件名最多显示两行。目录和文档会优先按文件名开头的 `YYYY-MM-DD` 或 `YYYYMMDD` 日期倒序排列，再按修改时间倒序排列；阅读区渲染标题、段落、列表、代码块、表格、引用和链接。相对图片与附件通过受限资源接口解析，不会暴露开放目录外的文件。单次递归扫描最多返回 2,000 篇文档，单篇读取上限为 3 MB。
 - 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重复路径拒绝收藏；读取时将旧顶层路径映射到当前开放范围，无法访问的目录暂不展示。
 

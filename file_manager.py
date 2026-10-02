@@ -44,6 +44,7 @@ class DirectoryRecord:
     size: int
     modified: float
     extension: str
+    symlink: bool = False
 
 
 _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int]] = {}
@@ -140,13 +141,28 @@ def _normalize_relative_path(value: str) -> str:
     return "/".join(parts)
 
 
+def _resolve_relative(root: Path, relative_path: str) -> Path:
+    """按字面逐段解析顶层目录内的相对路径，并跟随其中出现的符号链接。
+
+    顶层目录里的符号链接由管理员在服务器上手动创建，等同于显式开放链接指向的位置，
+    因此跳转后的真实路径允许位于顶层目录之外；`..`、空段等越界写法仍然拒绝。
+    """
+    current = root
+    for part in relative_path.split("/") if relative_path else []:
+        if part in ("", ".", ".."):
+            raise HTTPException(status_code=404, detail="目录路径格式不受支持")
+        current = current / part
+        if current.is_symlink():
+            try:
+                current = current.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise HTTPException(status_code=404, detail="路径中的符号链接已失效") from exc
+    return current
+
+
 def _resolve_directory(root: Path, relative_path: str) -> Path:
-    """解析受限目录，并阻止中间路径通过符号链接越界。"""
-    directory = (root / relative_path).resolve()
-    try:
-        directory.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="目录不在允许的顶层目录内") from exc
+    """解析受限目录，跟随顶层目录内的符号链接，并拒绝越界写法。"""
+    directory = _resolve_relative(root, relative_path)
     if not directory.is_dir():
         raise HTTPException(status_code=404, detail="目录不存在或无法读取")
     return directory
@@ -160,23 +176,27 @@ def _scan_directory(directory: Path, relative_path: str) -> tuple[list[Directory
         with os.scandir(directory) as iterator:
             for item in iterator:
                 try:
-                    if item.is_dir(follow_symlinks=False) and item.name in IGNORED_DIRECTORY_NAMES:
+                    is_link = item.is_symlink()
+                    is_directory = item.is_dir()
+                    if is_directory and item.name in IGNORED_DIRECTORY_NAMES:
                         continue
-                    stat = item.stat(follow_symlinks=False)
                     child_path = f"{relative_path}/{item.name}" if relative_path else item.name
-                    if item.is_dir(follow_symlinks=False):
+                    if is_directory:
                         record_type: "directory" | "file" | "other" = "directory"
                         size = 0
                         extension = ""
-                    elif item.is_file(follow_symlinks=False):
+                        stat = item.stat()
+                    elif item.is_file():
                         record_type = "file"
+                        stat = item.stat()
                         size = stat.st_size
                         extension = Path(item.name).suffix.lower().removeprefix(".")
                     else:
                         record_type = "other"
                         size = 0
                         extension = ""
-                    records.append(DirectoryRecord(item.name, child_path, record_type, size, stat.st_mtime, extension))
+                        stat = item.stat(follow_symlinks=False)
+                    records.append(DirectoryRecord(item.name, child_path, record_type, size, stat.st_mtime, extension, is_link))
                 except OSError:
                     continue
                 if len(records) >= MAX_DIRECTORY_ENTRIES:
@@ -236,6 +256,7 @@ def _entry_payload(record: DirectoryRecord, root_index: int) -> dict[str, Any]:
         "size": record.size,
         "modified": record.modified,
         "extension": record.extension,
+        "symlink": record.symlink,
     }
     if record.type == "file":
         payload["download_url"] = f"/api/file-manager/download?{urlencode({'root': root_index, 'path': record.path})}"
@@ -264,11 +285,19 @@ def list_directory(root_index: int, relative_path: str, *, refresh: bool = False
 
 
 def _scan_ply_tree(directory: Path, relative_path: str) -> list[DirectoryRecord]:
-    """递归读取 PLY 文件，忽略符号链接与不相关的普通文件。"""
+    """递归读取 PLY 文件，跟随顶层目录内的符号链接，并跳过环形递归。"""
     records: list[DirectoryRecord] = []
     pending = [(directory, relative_path)]
+    visited: set[Path] = set()
     while pending:
         current, current_path = pending.pop()
+        try:
+            real = current.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if real in visited:
+            continue
+        visited.add(real)
         try:
             with os.scandir(current) as iterator:
                 for item in iterator:
@@ -276,12 +305,12 @@ def _scan_ply_tree(directory: Path, relative_path: str) -> list[DirectoryRecord]
                         child_path = f"{current_path}/{item.name}" if current_path else item.name
                         if len(child_path) > 4_096:
                             continue
-                        if item.is_dir(follow_symlinks=False):
+                        if item.is_dir():
                             if item.name not in IGNORED_DIRECTORY_NAMES:
-                                pending.append((Path(item.path), child_path))
-                        elif item.name.lower().endswith(".ply") and item.is_file(follow_symlinks=False):
-                            stat = item.stat(follow_symlinks=False)
-                            records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, "ply"))
+                                pending.append((current / item.name, child_path))
+                        elif item.name.lower().endswith(".ply") and item.is_file():
+                            stat = item.stat()
+                            records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, "ply", item.is_symlink()))
                     except OSError:
                         continue
         except OSError as exc:
@@ -326,11 +355,19 @@ def list_ply_files(root_index: int, relative_path: str, *, refresh: bool = False
 
 
 def _scan_markdown_tree(directory: Path, relative_path: str) -> tuple[list[DirectoryRecord], bool]:
-    """递归读取 Markdown 文件，不跟随符号链接且限制返回数量。"""
+    """递归读取 Markdown 文件，跟随顶层目录内的符号链接，限制返回数量并跳过环形递归。"""
     records: list[DirectoryRecord] = []
     pending = [(directory, relative_path)]
+    visited: set[Path] = set()
     while pending:
         current, current_path = pending.pop()
+        try:
+            real = current.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if real in visited:
+            continue
+        visited.add(real)
         try:
             with os.scandir(current) as iterator:
                 for item in iterator:
@@ -338,14 +375,14 @@ def _scan_markdown_tree(directory: Path, relative_path: str) -> tuple[list[Direc
                         child_path = f"{current_path}/{item.name}" if current_path else item.name
                         if len(child_path) > 4_096:
                             continue
-                        if item.is_dir(follow_symlinks=False):
+                        if item.is_dir():
                             if item.name not in IGNORED_DIRECTORY_NAMES:
-                                pending.append((Path(item.path), child_path))
-                        elif item.is_file(follow_symlinks=False):
+                                pending.append((current / item.name, child_path))
+                        elif item.is_file():
                             extension = Path(item.name).suffix.lower().removeprefix(".")
                             if extension in {"md", "markdown", "mdown", "mkdn"}:
-                                stat = item.stat(follow_symlinks=False)
-                                records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, extension))
+                                stat = item.stat()
+                                records.append(DirectoryRecord(item.name, child_path, "file", stat.st_size, stat.st_mtime, extension, item.is_symlink()))
                                 if len(records) >= MAX_MARKDOWN_FILES:
                                     records.sort(key=lambda record: (record.path.lower(), record.path))
                                     return records, True
@@ -602,38 +639,45 @@ def search_ply_by_range(start_date: object, end_date: object, iteration_mode: ob
 
 
 def resolve_file(root_index: int, relative_path: str) -> Path:
-    """只允许下载已暴露顶层目录内部的普通文件。"""
+    """只允许下载已暴露顶层目录内部的普通文件，允许路径经过目录内的符号链接。"""
     roots = configured_roots()
     if root_index < 0 or root_index >= len(roots):
         raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
     root = _resolve_root(roots[root_index])
-    candidate = (root / _normalize_relative_path(relative_path)).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="文件路径不在允许的顶层目录内") from exc
+    candidate = _resolve_relative(root, _normalize_relative_path(relative_path))
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="文件不存在或不是普通文件")
     return candidate
 
 
 def _upload_parent(root: Path, file_path: str) -> Path:
-    """逐段创建上传父目录，拒绝符号链接和被忽略的缓存目录。"""
+    """逐段创建上传父目录，跟随顶层目录内的符号链接，并拒绝被忽略的缓存目录。"""
     parts = file_path.split("/")
     if any(part in IGNORED_DIRECTORY_NAMES for part in parts[:-1]):
         raise HTTPException(status_code=422, detail="上传路径包含服务端忽略的目录")
 
     current = root
     for part in parts[:-1]:
-        current = current / part
-        if current.is_symlink():
-            raise HTTPException(status_code=422, detail="上传路径包含符号链接，已拒绝")
-        if current.exists():
-            if not current.is_dir():
+        candidate = current / part
+        if candidate.is_symlink():
+            try:
+                target = candidate.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise HTTPException(status_code=422, detail=f"上传路径中的符号链接已失效：{part}") from exc
+            if not target.is_dir():
+                raise HTTPException(status_code=409, detail="上传目标路径中存在同名文件")
+            current = target
+            continue
+        if candidate.exists():
+            if not candidate.is_dir():
                 raise HTTPException(status_code=409, detail="上传目标路径中存在同名文件")
         else:
-            current.mkdir()
-    return root / file_path
+            try:
+                candidate.mkdir()
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"创建上传目录失败：{exc}") from exc
+        current = candidate
+    return current / parts[-1]
 
 
 def _invalidate_root_caches(root: Path) -> None:
@@ -665,13 +709,11 @@ async def upload_file(
     safe_file_path = _normalize_relative_path(file_path)
     full_path = _normalize_relative_path(f"{safe_directory}/{safe_file_path}" if safe_directory else safe_file_path)
     target = _upload_parent(root, full_path)
+    # 重新解析父目录，缩小上传期间父目录被替换的窗口；目录内的符号链接按开放范围正常跟随。
     try:
-        resolved_parent = target.parent.resolve()
-        resolved_parent.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="上传路径不在允许的顶层目录内") from exc
-    # 使用已解析父目录拼出最终目标，避免上传期间父目录被换成符号链接后越界。
-    target = resolved_parent / target.name
+        target = target.parent.resolve(strict=True) / target.name
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail="上传路径不可用") from exc
 
     if target.is_symlink():
         raise HTTPException(status_code=422, detail="上传目标是指向其他位置的链接，已拒绝")
@@ -734,6 +776,14 @@ def _favorite_name(value: object) -> str:
     return name
 
 
+def _plain_inside(root: Path, relative_path: str) -> bool:
+    """判断相对路径按字面拼接后是否仍位于顶层目录内，用于收藏的旧写法回退。"""
+    try:
+        return (root / relative_path).resolve().is_relative_to(root)
+    except (OSError, RuntimeError):
+        return False
+
+
 def _stored_favorites() -> list[dict[str, str]]:
     """读取独立配置区段中的有效收藏记录。"""
     value = get_settings_section("file_favorites")
@@ -743,17 +793,26 @@ def _stored_favorites() -> list[dict[str, str]]:
 
 
 def list_favorites() -> list[dict[str, str]]:
-    """展示仍属于开放范围的收藏，并兼容顶层目录路径写法变化。"""
+    """展示仍属于开放范围的收藏，并兼容顶层目录路径写法变化与目录内的符号链接。"""
     roots = configured_roots()
+    resolved_roots = [Path(text).expanduser().resolve() for text in roots]
     with _FAVORITES_LOCK:
         visible = []
         for item in _stored_favorites():
-            directory = (Path(item["root_path"]).expanduser() / item["path"]).resolve()
-            for root_text in roots:
-                root = Path(root_text).expanduser().resolve()
-                if directory.is_dir() and directory.is_relative_to(root):
-                    visible.append({**item, "root_path": root_text, "path": directory.relative_to(root).as_posix() if directory != root else ""})
-                    break
+            stored_root = Path(item["root_path"]).expanduser().resolve()
+            index = next((position for position, root in enumerate(resolved_roots) if root == stored_root), None)
+            if index is None:
+                # 顶层目录写法变化时，按“相对路径仍落在某个开放目录内”重新映射。
+                index = next((position for position, root in enumerate(resolved_roots)
+                              if _plain_inside(root, item["path"])), None)
+            if index is None:
+                continue
+            try:
+                directory = _resolve_relative(resolved_roots[index], item["path"])
+            except HTTPException:
+                continue
+            if directory.is_dir():
+                visible.append({**item, "root_path": roots[index], "path": item["path"]})
         return visible
 
 
@@ -841,9 +900,20 @@ def sync_roots(targets: object = None) -> dict[str, Any]:
                     if key[0] == root and (key[1] == prefix or key[1].startswith(f"{prefix}/") or not key[1] or prefix.startswith(f"{key[1]}/")):
                         del _PLY_CACHE[key]
         for root_text, prefix in jobs:
+            root = _resolve_root(root_text)
             pending = [prefix]
+            visited: set[Path] = set()
             while pending:
                 relative_path = pending.pop()
+                try:
+                    directory = _resolve_directory(root, relative_path)
+                except HTTPException as exc:
+                    if exc.status_code == 404 and relative_path != prefix:
+                        continue
+                    raise
+                if directory in visited:
+                    continue
+                visited.add(directory)
                 try:
                     records, _, _ = _directory_records(root_text, relative_path, refresh=True)
                 except HTTPException as exc:
@@ -852,7 +922,6 @@ def sync_roots(targets: object = None) -> dict[str, Any]:
                     raise
                 directory_count += 1
                 pending.extend(record.path for record in records if record.type == "directory")
-            root = _resolve_root(root_text)
             ply_records = _scan_ply_tree(_resolve_directory(root, prefix), prefix)
             with _CACHE_LOCK:
                 _PLY_CACHE[(root, prefix)] = (time.time(), ply_records)
