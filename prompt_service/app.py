@@ -22,7 +22,6 @@ import ai_settings
 
 SETTINGS_PATH = APP_DIR / "settings.json"
 PROMPT_MAX_CHARS = 2_000_000
-PROMPT_MAX_COUNT = 500
 GROUP_MAX_COUNT = 100
 GROUP_NAME_MAX_CHARS = 40
 # 空字符串代表「无分组」，它是固定分组，始终排在自定义分组之前
@@ -96,6 +95,8 @@ def _public_prompt(item: dict) -> dict:
     return {
         "id": str(item.get("id") or ""),
         "content": str(item.get("content") or ""),
+        "raw_content": str(item.get("raw_content") or item.get("content") or ""),
+        "polished_content": str(item.get("polished_content") or ""),
         "group_id": str(item.get("group_id") or "") if item.get("group_id") else UNGROUPED_ID,
         "created_at": item.get("created_at") or _now_iso(),
         "updated_at": item.get("updated_at") or item.get("created_at") or _now_iso(),
@@ -123,19 +124,30 @@ def _group_list() -> list[dict]:
     return [_public_group(item) for item in _read_settings()["groups"]]
 
 
-def _normalize_content(payload: dict) -> str:
-    """校验请求内容并返回纯文本字符串。"""
+def _normalize_text(payload: dict, field: str, *, required: bool) -> str:
+    """校验归档里的纯文本字段，可选字段允许空字符串。"""
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
-    content = str(payload.get("content") or "")
-    if not content.strip():
+    value = payload.get(field)
+    if value is None:
+        if required:
+            raise HTTPException(status_code=400, detail="提示词内容不能为空")
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{field} 必须是字符串")
+    if required and not value.strip():
         raise HTTPException(status_code=400, detail="提示词内容不能为空")
-    if len(content) > PROMPT_MAX_CHARS:
+    if len(value) > PROMPT_MAX_CHARS:
         raise HTTPException(
             status_code=400,
             detail=f"提示词过长，最多 {PROMPT_MAX_CHARS} 个字符",
         )
-    return content
+    return value
+
+
+def _normalize_content(payload: dict) -> str:
+    """校验归档展示内容并返回纯文本字符串。"""
+    return _normalize_text(payload, "content", required=True)
 
 
 def _normalize_group_name(payload: dict, existing: Optional[dict] = None) -> str:
@@ -209,7 +221,6 @@ async def list_prompts():
         {
             "prompts": _sorted_prompts(),
             "groups": _group_list(),
-            "max_count": PROMPT_MAX_COUNT,
             "max_group_count": GROUP_MAX_COUNT,
         }
     )
@@ -260,20 +271,21 @@ async def create_prompt(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
     content = _normalize_content(payload)
+    raw_content = _normalize_text(payload, "raw_content", required=True) if "raw_content" in payload else content
+    polished_content = _normalize_text(payload, "polished_content", required=False)
     now = _now_iso()
     with _SETTINGS_LOCK:
         data = _read_settings()
         item = {
             "id": f"prompt_{uuid.uuid4().hex[:12]}",
             "content": content,
+            "raw_content": raw_content,
+            "polished_content": polished_content,
             "group_id": UNGROUPED_ID,
             "created_at": now,
             "updated_at": now,
         }
         data["prompts"].append(item)
-        if len(data["prompts"]) > PROMPT_MAX_COUNT:
-            # 保留最新条目，删除最早的记录
-            data["prompts"] = data["prompts"][-PROMPT_MAX_COUNT:]
         _write_settings(data)
     return JSONResponse(_public_prompt(item), status_code=201)
 
@@ -289,19 +301,25 @@ async def update_prompt(prompt_id: str, request: Request):
         raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
     # content 与 group_id 至少传一个，只传分组时保留原内容
     content = _normalize_content(payload) if "content" in payload else None
+    raw_content = _normalize_text(payload, "raw_content", required=True) if "raw_content" in payload else None
+    polished_content = _normalize_text(payload, "polished_content", required=False) if "polished_content" in payload else None
     with _SETTINGS_LOCK:
         data = _read_settings()
         item = _find_prompt(data["prompts"], prompt_id)
         if item is None:
             raise HTTPException(status_code=404, detail="提示词不存在")
-        if content is None and "group_id" not in payload:
+        if content is None and raw_content is None and polished_content is None and "group_id" not in payload:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
         if "group_id" in payload:
             item["group_id"] = _resolve_group_id(data["groups"], payload.get("group_id"))
         if content is not None:
             item["content"] = content
-        # 更新时间用于每个分组内“越新越上面”的排序
-        item["updated_at"] = _now_iso()
+        if raw_content is not None:
+            item["raw_content"] = raw_content
+        if polished_content is not None:
+            item["polished_content"] = polished_content
+        # 恢复后再次归档等同于更新同一条记录，保留原记录时间与列表位置
+        item["updated_at"] = item.get("updated_at") or item.get("created_at") or _now_iso()
         _write_settings(data)
         updated = dict(item)
     return JSONResponse(_public_prompt(updated))

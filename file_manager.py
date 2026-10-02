@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from auth import get_settings_section, update_settings_section
 
@@ -25,6 +25,8 @@ MAX_FAVORITES = 100
 MAX_DATE_SEARCH_FOLDERS = 24
 MAX_MARKDOWN_FILES = 2_000
 MAX_MARKDOWN_FILE_BYTES = 3 * 1024 * 1024
+MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
     "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
@@ -131,7 +133,7 @@ def _normalize_relative_path(value: str) -> str:
     """校验目录相对路径，拒绝空段、.、.. 与反斜杠。"""
     if not value or value == ".":
         return ""
-    if "\\" in value or len(value) > 4_096:
+    if "\\" in value or len(value) > 4_096 or any(ord(char) < 32 or char == "\x7f" for char in value):
         raise HTTPException(status_code=422, detail="目录路径格式不受支持")
     parts = value.split("/")
     if any(part in ("", ".", "..") for part in parts):
@@ -614,6 +616,107 @@ def resolve_file(root_index: int, relative_path: str) -> Path:
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="文件不存在或不是普通文件")
     return candidate
+
+
+def _upload_parent(root: Path, file_path: str) -> Path:
+    """逐段创建上传父目录，拒绝符号链接和被忽略的缓存目录。"""
+    parts = file_path.split("/")
+    if any(part in IGNORED_DIRECTORY_NAMES for part in parts[:-1]):
+        raise HTTPException(status_code=422, detail="上传路径包含服务端忽略的目录")
+
+    current = root
+    for part in parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            raise HTTPException(status_code=422, detail="上传路径包含符号链接，已拒绝")
+        if current.exists():
+            if not current.is_dir():
+                raise HTTPException(status_code=409, detail="上传目标路径中存在同名文件")
+        else:
+            current.mkdir()
+    return root / file_path
+
+
+def _invalidate_root_caches(root: Path) -> None:
+    """上传成功后清空该顶层目录的目录与 PLY 缓存，避免列表显示旧状态。"""
+    with _CACHE_LOCK:
+        for cache in (_DIRECTORY_CACHE, _PLY_CACHE, _MARKDOWN_CACHE):
+            for key in list(cache):
+                if key[0] == root:
+                    del cache[key]
+
+
+async def upload_file(
+    root_index: int,
+    relative_path: str,
+    file_path: str,
+    file: UploadFile,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """把上传内容原子写入当前受限目录，支持保留拖入文件夹的相对结构。"""
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    root = _resolve_root(roots[root_index])
+    safe_directory = _normalize_relative_path(relative_path)
+    _resolve_directory(root, safe_directory)
+    safe_file_path = _normalize_relative_path(file_path)
+    target = _upload_parent(root, safe_file_path)
+    try:
+        resolved_parent = target.parent.resolve()
+        resolved_parent.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="上传路径不在允许的顶层目录内") from exc
+    # 使用已解析父目录拼出最终目标，避免上传期间父目录被换成符号链接后越界。
+    target = resolved_parent / target.name
+
+    if target.is_symlink():
+        raise HTTPException(status_code=422, detail="上传目标是指向其他位置的链接，已拒绝")
+    if target.exists():
+        if not target.is_file():
+            raise HTTPException(status_code=409, detail="上传目标已存在同名文件夹")
+        if not overwrite:
+            raise HTTPException(status_code=409, detail="目标已有同名文件，可勾选覆盖后重试")
+
+    temp_path = target.with_name(f".{target.name}.{uuid4().hex}.upload")
+    total_size = 0
+    try:
+        with temp_path.open("wb") as output:
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_FILE_BYTES:
+                    raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
+                output.write(chunk)
+        if target.exists() and (target.is_symlink() or not target.is_file()):
+            raise HTTPException(status_code=409, detail="上传目标在传输期间发生变化，已取消")
+        os.replace(temp_path, target)
+    except HTTPException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"写入上传文件失败：{exc}") from exc
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    _invalidate_root_caches(root)
+    full_path = safe_file_path if not safe_directory else f"{safe_directory}/{safe_file_path}"
+    return {
+        "root_index": root_index,
+        "directory": safe_directory,
+        "path": full_path,
+        "name": target.name,
+        "size": total_size,
+        "overwrite": overwrite,
+        "modified": time.time(),
+    }
 
 
 def _favorite_name(value: object) -> str:

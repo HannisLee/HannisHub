@@ -147,6 +147,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
 | POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
+| POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&file_path=<relative_file_path>&overwrite=<bool>` | 以 multipart 上传单个不超过 4 GB 的文件；`file_path` 可包含文件夹相对结构，服务端逐段校验路径、拒绝符号链接并原子写入，成功后清除该顶层目录相关缓存 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
@@ -181,7 +182,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 服务端对目录列表维护 1 小时线程安全缓存。目录缓存同时记录目录 mtime；手动同步会清除所选项目旧缓存并递归预读目录树。浏览器端复用有效缓存，手动同步后清除浏览器缓存并刷新当前目录。
-- 下载与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。当前暂不提供上传能力。
+- 下载、上传与浏览都只接收顶层目录索引与相对路径；后端解析真实路径并验证仍位于顶层目录内，阻止 `..` 与符号链接越界读取。上传支持点击、多文件和拖入文件夹，前端按文件显示上传进度，可选覆盖同名文件。
 - “文档查看”页复用相同的受限目录边界。首次打开时优先定位 `/home/lihan/reproduce/RadioGS-stage1`（该路径须位于已开放范围），顶部文件夹选择器与左侧目录均可逐层切换；左侧只显示文件夹与 Markdown 文档，文件名最多显示两行。目录和文档会优先按文件名开头的 `YYYY-MM-DD` 或 `YYYYMMDD` 日期倒序排列，再按修改时间倒序排列；阅读区渲染标题、段落、列表、代码块、表格、引用和链接。相对图片与附件通过受限资源接口解析，不会暴露开放目录外的文件。单次递归扫描最多返回 2,000 篇文档，单篇读取上限为 3 MB。
 - 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重复路径拒绝收藏；读取时将旧顶层路径映射到当前开放范围，无法访问的目录暂不展示。
 
@@ -690,7 +691,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 ## 在线提示词输入子服务（prompt_service）
 
-`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、三档 AI 润色、无分组归档、复制、恢复和删除。轻度、中度、重度按钮固定在编辑器顶部的原文/润色稿切换左侧，长文本无需滚动到底部即可操作；接口内部仍使用 `light`、`standard`、`deep` 三个稳定档位值。三档润色复用项目统一的 OpenAI 兼容 API 与模型配置，润色指令保存在根目录 `ai_settings.json`；归档内容保存到 `prompt_service/settings.json`，数据结构：
+`prompt_service/` 是与模型管理、Server 同级别的轻量 FastAPI 子服务。日常入口由统一 Dashboard 的 `/prompts` 提供，使用 `/prompt/api/...`；它保留浏览器本地草稿、三档 AI 润色、无分组归档、复制、恢复和删除。轻度、中度、重度按钮固定在编辑器顶部的原文/润色稿切换左侧，长文本无需滚动到底部即可操作；接口内部仍使用 `light`、`standard`、`deep` 三个稳定档位值。三档润色复用项目统一的 OpenAI 兼容 API 与模型配置，润色指令保存在根目录 `ai_settings.json`；归档内容保存到 `prompt_service/settings.json`。归档按钮只执行归档，不触发剪贴板复制；当前显示原文时归档原文，当前显示润色稿时归档润色稿。归档记录始终保存原文；从润色稿归档时同时保存润色稿，恢复后可在原文与润色稿之间切换，但列表展开内容只显示归档那一刻对应的版本。恢复后再归档会按原记录 ID 执行更新，不删除重插，并保留原记录时间。数据结构：
 
 前端点击任一润色按钮时会立即固化当前原文快照并直接把该快照放入 `/api/polish` 请求体；原文继续保留在原文状态，收到非空结果后才切换到润色稿。原文每次变化会清空旧润色稿并使未完成请求令牌失效，避免新请求完成后被旧状态覆盖或显示上一次润色内容。
 
@@ -700,6 +701,8 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
     {
       "id": "prompt_xxxxxxxxxxxx",
       "content": "提示词全文",
+      "raw_content": "归档时的原文",
+      "polished_content": "归档时的润色稿，仅从润色稿归档时非空",
       "created_at": "2026-09-22T00:00:00+00:00",
       "updated_at": "2026-09-22T00:00:00+00:00"
     }
@@ -715,11 +718,11 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | GET | `/prompt`、`/prompt/` | 返回在线提示词输入页面 |
 | GET | `/api/health` | 子服务健康检查 |
 | GET | `/api/prompts` | 读取归档提示词列表（按更新时间倒序） |
-| POST | `/api/prompts` | 归档新提示词，请求体 `{ "content": string }` |
-| PUT | `/api/prompts/{prompt_id}` | 更新指定归档提示词内容 |
+| POST | `/api/prompts` | 归档新提示词，请求体 `{ "content": string, "raw_content": string, "polished_content": string }`；`content` 为归档那一刻展示的版本，`raw_content` 必填保存原文，`polished_content` 仅从润色稿归档时非空 |
+| PUT | `/api/prompts/{prompt_id}` | 更新指定归档提示词内容，请求体同 POST；恢复后再次归档时前端用该端点覆盖原记录并保留时间 |
 | DELETE | `/api/prompts/{prompt_id}` | 删除指定归档提示词 |
 | POST | `/api/polish` | 使用统一 AI 配置润色提示词，请求体 `{ "content": string, "level": "light" \| "standard" \| "deep" }`；实际推理强度读取润色设置 |
 | GET | `/api/polish-settings` | 读取三档润色指令、推理强度与内置默认值 |
 | PUT | `/api/polish-settings` | 保存三档润色指令与推理强度，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string }, "reasoning_effort": "auto" \| "low" \| "medium" \| "high" }` |
 
-服务端限制：归档提示词最长 200 万字符，单次 AI 润色最多 20 万字符，最多保留 500 条归档，超出时自动删除最早记录。归档页面使用固定高度的内部滚动列表，折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。
+服务端限制：归档提示词与原文最长 200 万字符，单次 AI 润色最多 20 万字符。归档数量无上限，前端归档列表按时间倒序只展示最新 10 条并显示当前归档总数。归档页面使用固定高度的内部滚动列表，折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。

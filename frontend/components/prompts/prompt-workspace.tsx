@@ -15,7 +15,7 @@ import { Button, Card, CardHeader, EmptyState, ErrorState, LoadingState } from "
 
 const DRAFT_KEY = "hannishub_prompt_draft";
 const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
-const ARCHIVE_MAX_COUNT = 500;
+const ARCHIVE_DISPLAY_COUNT = 10;
 
 const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string }> = [
   { id: "light", label: "轻度" },
@@ -37,6 +37,7 @@ interface Draft {
   polished: string;
   mode: "raw" | "polished";
   stale: boolean;
+  restoredId?: string | null;
 }
 
 export function PromptWorkspace() {
@@ -44,6 +45,7 @@ export function PromptWorkspace() {
   const [polished, setPolished] = useState("");
   const [mode, setMode] = useState<"raw" | "polished">("raw");
   const [stale, setStale] = useState(true);
+  const [restoredId, setRestoredId] = useState<string | null>(null);
   const [items, setItems] = useState<PromptItem[]>([]);
   const [polishPrompts, setPolishPrompts] = useState<PromptPolishPrompts>(EMPTY_POLISH_PROMPTS);
   const [defaultPolishPrompts, setDefaultPolishPrompts] = useState<PromptPolishPrompts>(EMPTY_POLISH_PROMPTS);
@@ -101,6 +103,7 @@ export function PromptWorkspace() {
           setPolished(draft.polished || "");
           setMode(draft.mode === "polished" ? "polished" : "raw");
           setStale(draft.stale !== false);
+          setRestoredId(typeof draft.restoredId === "string" ? draft.restoredId : null);
         }
       } catch {
         setRaw(stored);
@@ -111,10 +114,10 @@ export function PromptWorkspace() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw, polished, mode, stale } satisfies Draft));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw, polished, mode, stale, restoredId } satisfies Draft));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [raw, polished, mode, stale]);
+  }, [raw, polished, mode, stale, restoredId]);
 
   function claimMessage() {
     const token = ++messageTokenRef.current;
@@ -203,44 +206,37 @@ export function PromptWorkspace() {
     }
 
     const content = currentValue;
+    const polishedContent = mode === "polished" ? polished : "";
+    const endpoint = restoredId
+      ? `${API_PATHS.prompts}/prompts/${encodePath(restoredId)}`
+      : `${API_PATHS.prompts}/prompts`;
     archiveInFlightRef.current = true;
     setArchiving(true);
     setError("");
     const showMessage = claimMessage();
-    showMessage("已复制，正在归档…");
-    let copied: boolean | null = null;
-    let archiveFinished = false;
-    let archiveSucceeded = false;
-    void copyToClipboard(content).then(result => {
-      copied = result;
-      if (result) return;
-      if (!archiveFinished) {
-        showMessage("复制失败，归档仍在进行…");
-        return;
-      }
-      showMessage(archiveSucceeded ? "已归档，但复制失败，请手动复制" : "复制与归档均失败，内容仍保留在编辑器");
-    });
+    showMessage("正在归档…");
 
     try {
-      await apiFetch(`${API_PATHS.prompts}/prompts`, {
-        method: "POST",
-        body: jsonBody({ content }),
+      await apiFetch(endpoint, {
+        method: restoredId ? "PUT" : "POST",
+        body: jsonBody({
+          content,
+          raw_content: raw,
+          polished_content: polishedContent,
+        }),
       });
-      archiveFinished = true;
-      archiveSucceeded = true;
       setRaw("");
       setPolished("");
       setStale(true);
       setMode("raw");
+      setRestoredId(null);
       localStorage.removeItem(DRAFT_KEY);
       localStorage.removeItem(LEGACY_DRAFT_KEY);
-      showMessage(copied === false ? "已归档，但复制失败，请手动复制" : "已复制并归档");
+      showMessage(restoredId ? "已更新原归档记录" : "已归档");
       void loadArchive();
     } catch (value) {
-      archiveFinished = true;
-      archiveSucceeded = false;
       setError(errorMessage(value));
-      showMessage(copied === false ? "复制与归档均失败，内容仍保留在编辑器" : "已复制，但归档失败，内容仍保留在编辑器");
+      showMessage(restoredId ? "归档记录更新失败，内容仍保留在编辑器" : "归档失败，内容仍保留在编辑器");
     } finally {
       archiveInFlightRef.current = false;
       setArchiving(false);
@@ -258,10 +254,12 @@ export function PromptWorkspace() {
   }
 
   function restorePrompt(item: PromptItem) {
-    setRaw(item.content);
-    setPolished("");
-    setStale(true);
+    const rawContent = item.raw_content || item.content;
+    setRaw(rawContent);
+    setPolished(item.polished_content || "");
+    setStale(!item.polished_content);
     setMode("raw");
+    setRestoredId(item.id);
     setMessage("已恢复到编辑器");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -315,7 +313,7 @@ export function PromptWorkspace() {
                 <button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => setMode("polished")} disabled={busy || !polished}>润色稿</button>
               </div>
               <Button variant="secondary" size="sm" onClick={() => copyText(currentValue, mode === "polished" ? "润色稿已复制" : "原文已复制")} disabled={busy}>复制</Button>
-              <Button size="sm" onClick={() => void archive()} disabled={busy}>{archiving ? "归档中…" : "归档并复制"}</Button>
+              <Button size="sm" onClick={() => void archive()} disabled={busy}>{archiving ? "归档中…" : "归档"}</Button>
             </div>
           }
         />
@@ -347,12 +345,12 @@ export function PromptWorkspace() {
       <div className="prompt-layout">
         <Card className="prompt-archive-card">
           <CardHeader
-            title={`归档列表 · ${items.length}/${ARCHIVE_MAX_COUNT}`}
-            description="按时间倒序排列；列表固定高度并独立滚动，超过 500 条时自动淘汰最早记录。"
+            title={`归档列表 · ${items.length}`}
+            description="按时间倒序展示最新 10 条；归档数量无上限。"
           />
           {loading ? <LoadingState /> : items.length ? (
             <div className="prompt-archive-list">
-              {items.map(item => (
+              {items.slice(0, ARCHIVE_DISPLAY_COUNT).map(item => (
                 <details className="prompt-item" key={item.id}>
                   <summary>
                     <span className="prompt-item-copy">

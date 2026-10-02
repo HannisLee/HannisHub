@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -40,6 +40,7 @@ from file_manager import (
     save_date_search_folders,
     search_ply_by_date,
     search_ply_by_range,
+    upload_file as upload_file_to_directory,
     sync_roots,
 )
 from point_cloud import resolve_cloud_file
@@ -384,6 +385,18 @@ async def update_file_manager_favorite(favorite_id: str, payload: dict[str, Any]
 async def remove_file_manager_favorite(favorite_id: str):
     """删除指定收藏。"""
     return JSONResponse({"favorites": await run_in_threadpool(delete_favorite, favorite_id)})
+
+
+@app.post("/api/file-manager/upload")
+async def file_manager_upload(
+    root: int = Query(..., ge=0),
+    path: str = Query("", max_length=4_096),
+    file_path: str = Query(..., min_length=1, max_length=4_096),
+    overwrite: bool = Query(False),
+    file: UploadFile = File(...),
+):
+    """上传单个文件到当前受限目录；file_path 可包含文件夹相对结构。"""
+    return JSONResponse(await upload_file_to_directory(root, path, file_path, file, overwrite=overwrite))
 
 
 @app.get("/api/file-manager/download")

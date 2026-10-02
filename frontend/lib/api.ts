@@ -49,6 +49,38 @@ export function encodePath(value: string): string {
   return encodeURIComponent(value);
 }
 
+export function uploadFormData<T>(
+  path: string,
+  form: FormData,
+  onProgress: (percent: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", path);
+    request.withCredentials = true;
+    request.upload.addEventListener("progress", event => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    request.addEventListener("load", () => {
+      let payload: ApiErrorShape = {};
+      try {
+        payload = JSON.parse(request.responseText || "{}") as ApiErrorShape;
+      } catch {
+        payload = { detail: "服务未返回 JSON 响应" };
+      }
+      if (request.status === 401) redirectToLogin();
+      if (request.status < 200 || request.status >= 300) {
+        reject(new ApiError(request.status, payload));
+        return;
+      }
+      resolve(payload as T);
+    });
+    request.addEventListener("error", () => reject(new Error("网络请求失败")));
+    request.addEventListener("abort", () => reject(new Error("上传已取消")));
+    request.send(form);
+  });
+}
+
 export function uploadFile(
   path: string,
   file: File,

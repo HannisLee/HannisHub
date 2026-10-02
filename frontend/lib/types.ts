@@ -130,6 +130,16 @@ export interface FileManagerDatePlyResponse {
   cached: boolean;
 }
 
+export interface FileManagerUploadResponse {
+  root_index: number;
+  directory: string;
+  path: string;
+  name: string;
+  size: number;
+  overwrite: boolean;
+  modified: number;
+}
+
 export interface FileManagerSyncResponse {
   targets: string[];
   directory_count: number;
@@ -357,6 +367,8 @@ export interface PromptGroup {
 export interface PromptItem {
   id: string;
   content: string;
+  raw_content?: string;
+  polished_content?: string;
   group_id?: string;
   created_at?: string;
   updated_at?: string;
