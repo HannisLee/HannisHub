@@ -26,7 +26,6 @@ MAX_DATE_SEARCH_FOLDERS = 24
 MAX_MARKDOWN_FILES = 2_000
 MAX_MARKDOWN_FILE_BYTES = 3 * 1024 * 1024
 MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024 * 1024
-UPLOAD_CHUNK_BYTES = 1024 * 1024
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
     "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
@@ -664,7 +663,8 @@ async def upload_file(
     if not file_path:
         raise HTTPException(status_code=422, detail="缺少上传文件相对路径")
     safe_file_path = _normalize_relative_path(file_path)
-    target = _upload_parent(root, safe_file_path)
+    full_path = _normalize_relative_path(f"{safe_directory}/{safe_file_path}" if safe_directory else safe_file_path)
+    target = _upload_parent(root, full_path)
     try:
         resolved_parent = target.parent.resolve()
         resolved_parent.relative_to(root)
@@ -713,7 +713,6 @@ async def upload_file(
         raise
 
     _invalidate_root_caches(root)
-    full_path = safe_file_path if not safe_directory else f"{safe_directory}/{safe_file_path}"
     return {
         "root_index": root_index,
         "directory": safe_directory,
