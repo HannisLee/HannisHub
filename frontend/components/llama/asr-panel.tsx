@@ -7,6 +7,8 @@ import type { AiSettings, AsrInfo, AsrRecord, CustomService } from "../../lib/ty
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
 
 interface UploadState { id: string; name: string; progress: number; status: string; detail: string; }
+/** 单条转写历史的展开文本状态：mode 区分全文与提炼结果。 */
+interface RecordTextState { mode: "text" | "extraction"; text: string; expanded: boolean; loading: boolean; }
 
 export function AsrPanel() {
   const [info, setInfo] = useState<AsrInfo | null>(null);
@@ -15,7 +17,7 @@ export function AsrPanel() {
   const [aiModel, setAiModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState("");
-  const [extraction, setExtraction] = useState<Record<string, string>>({});
+  const [recordTexts, setRecordTexts] = useState<Record<string, RecordTextState>>({});
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [error, setError] = useState("");
   const [startingAsr, setStartingAsr] = useState(false);
@@ -108,12 +110,44 @@ export function AsrPanel() {
     }
   }
 
-  async function showText(recordId: string, suffix: "text" | "extraction") {
-    try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/${suffix}`); setExtraction(current => ({ ...current, [recordId]: data.text })); } catch (value) { setError(errorMessage(value)); }
+  async function loadRecordText(recordId: string, mode: "text" | "extraction") {
+    const current = recordTexts[recordId];
+    // 已有同类型内容时直接复用缓存，仅切换为展开。
+    if (current && current.mode === mode && current.text && !current.loading) {
+      setRecordTexts(prev => ({ ...prev, [recordId]: { ...current, expanded: true } }));
+      return;
+    }
+    setRecordTexts(prev => {
+      const existing = prev[recordId];
+      const keep = existing && existing.mode === mode;
+      return { ...prev, [recordId]: { mode, text: keep ? existing.text : "", expanded: keep ? existing.expanded : false, loading: true } };
+    });
+    try {
+      const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/${mode}`);
+      setRecordTexts(prev => ({ ...prev, [recordId]: { mode, text: data.text, expanded: true, loading: false } }));
+    } catch (value) {
+      // 加载失败时回到折叠状态，保留可重试的空内容。
+      setRecordTexts(prev => {
+        const existing = prev[recordId];
+        if (existing?.mode !== mode) return prev;
+        return { ...prev, [recordId]: { ...existing, text: existing.text, expanded: false, loading: false } };
+      });
+      setError(errorMessage(value));
+    }
+  }
+
+  function toggleRecordText(recordId: string) {
+    const current = recordTexts[recordId];
+    if (current?.loading) return; // 加载中忽略重复点击，避免并发请求。
+    if (!current || !current.text) {
+      void loadRecordText(recordId, "text");
+      return;
+    }
+    setRecordTexts(prev => ({ ...prev, [recordId]: { ...current, expanded: !current.expanded } }));
   }
 
   async function copyRecordText(record: AsrRecord) {
-    const text = extraction[record.id] || "";
+    const text = recordTexts[record.id]?.text || "";
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -134,7 +168,7 @@ export function AsrPanel() {
   }
 
   async function extract(recordId: string) {
-    try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/extraction`, { method: "POST" }); setExtraction(current => ({ ...current, [recordId]: data.text })); await load(); } catch (value) { setError(errorMessage(value)); }
+    try { const data = await apiFetch<{ text: string }>(`${API_PATHS.llama}/asr/history/${encodePath(recordId)}/extraction`, { method: "POST" }); setRecordTexts(current => ({ ...current, [recordId]: { mode: "extraction", text: data.text, expanded: true, loading: false } })); await load(); } catch (value) { setError(errorMessage(value)); }
   }
   async function rename(record: AsrRecord) {
     const name = window.prompt("请输入新的记录名称", record.name || record.filename || "");
@@ -143,7 +177,11 @@ export function AsrPanel() {
   }
   async function remove(record: AsrRecord) {
     if (!window.confirm("确定删除这条转写历史吗？")) return;
-    try { await apiFetch(`${API_PATHS.llama}/asr/history/${encodePath(record.id)}`, { method: "DELETE" }); await load(); } catch (value) { setError(errorMessage(value)); }
+    try {
+      await apiFetch(`${API_PATHS.llama}/asr/history/${encodePath(record.id)}`, { method: "DELETE" });
+      setRecordTexts(current => { const next = { ...current }; delete next[record.id]; return next; });
+      await load();
+    } catch (value) { setError(errorMessage(value)); }
   }
 
   return <>
@@ -177,7 +215,9 @@ export function AsrPanel() {
       <Card>
         <CardHeader title={`转写历史 · ${records.length}`} description="历史内容保存在本机，列表会每 3 秒更新一次。" />
         {records.length ? (
-          <div className="stack-list">{records.map(record => (
+          <div className="stack-list">{records.map(record => {
+            const textState = recordTexts[record.id];
+            return (
             <article className="history-row" key={record.id}>
               <div className="history-main">
                 <div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div>
@@ -186,15 +226,16 @@ export function AsrPanel() {
                 {record.error ? <small className="error-text">{record.error}</small> : null}
               </div>
               <div className="row-actions">
-                <Button size="sm" variant="quiet" onClick={() => void showText(record.id, "text")}>全文</Button>
-                {extraction[record.id] ? <Button size="sm" variant="quiet" onClick={() => void copyRecordText(record)}>复制</Button> : null}
-                {record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "extraction")}>结果</Button></> : null}
+                <Button size="sm" variant="quiet" onClick={() => toggleRecordText(record.id)} aria-expanded={Boolean(textState?.expanded)} disabled={textState?.loading}>{textState?.loading ? "加载中…" : textState?.expanded ? "折叠" : "展开"}</Button>
+                {textState?.expanded ? <Button size="sm" variant="quiet" onClick={() => void copyRecordText(record)}>复制</Button> : null}
+                {record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void loadRecordText(record.id, "extraction")}>结果</Button></> : null}
                 <Button size="sm" variant="quiet" onClick={() => void rename(record)}>重命名</Button>
                 <Button size="sm" variant="danger" onClick={() => void remove(record)}>删除</Button>
               </div>
-              {extraction[record.id] ? <textarea className="text-preview" value={extraction[record.id]} readOnly aria-label={`${record.name || record.filename || record.id}展开文本`} /> : null}
+              {textState?.expanded ? <textarea className="text-preview" value={textState.text} readOnly aria-label={`${record.name || record.filename || record.id}${textState.mode === "text" ? "转写全文" : "提炼结果"}`} /> : null}
             </article>
-          ))}</div>
+            );
+          })}</div>
         ) : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
       </Card>
 
