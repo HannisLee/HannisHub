@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { API_PATHS, apiFetch, jsonBody, uploadFormData } from "../../lib/api";
+import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import type {
   FileManagerDirectoryResponse,
@@ -355,15 +355,15 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     for (const [index, item] of selected.entries()) {
       const id = `${Date.now()}-${index}-${item.relativePath}`;
       try {
-        const form = new FormData();
-        form.append("file", item.file, item.file.name);
         const params = new URLSearchParams({
           root: String(targetRoot),
           path: targetPath,
-          file_path: item.relativePath,
           overwrite: String(overwriteUploads),
         });
-        const result = await uploadFormData<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, form, progress => {
+        const result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
+          "Content-Type": item.file.type || "application/octet-stream",
+          "x-file-path": encodeURIComponent(item.relativePath),
+        }, progress => {
           updateUpload(id, { progress, status: "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
         });
         successCount += 1;

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
-import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { CustomService, GpuResponse, ManagedProcess, ModelFile, ModelRepository } from "../../lib/types";
+import { errorMessage, formatDate } from "../../lib/format";
+import type { CustomService, GpuResponse, ManagedProcess } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Field, LoadingState, PageHeader } from "../ui/primitives";
+import { GpuSummaryGrid } from "./gpu-panel";
 
 interface ProcessFormState {
   id: string;
@@ -17,10 +18,6 @@ interface ProcessFormState {
 const emptyForm: ProcessFormState = { id: "", name: "", category: "llm", command: "", gpus: [] };
 
 export function InferencePanel() {
-  const [models, setModels] = useState<ModelFile[]>([]);
-  const [repositories, setRepositories] = useState<ModelRepository[]>([]);
-  const [modelDir, setModelDir] = useState("");
-  const [query, setQuery] = useState("");
   const [processes, setProcesses] = useState<ManagedProcess[]>([]);
   const [services, setServices] = useState<CustomService[]>([]);
   const [gpus, setGpus] = useState<GpuResponse>({});
@@ -34,24 +31,25 @@ export function InferencePanel() {
 
   const load = useCallback(async () => {
     try {
-      const [modelData, repositoryData, processData, serviceData, gpuData] = await Promise.all([
-        apiFetch<{ models: ModelFile[]; model_dir: string }>(`${API_PATHS.llama}/models`),
-        apiFetch<{ repositories: ModelRepository[] }>(`${API_PATHS.llama}/model-repositories`),
+      const [processData, serviceData] = await Promise.all([
         apiFetch<{ processes: ManagedProcess[] }>(`${API_PATHS.llama}/managed-processes`),
         apiFetch<{ services: CustomService[] }>(`${API_PATHS.llama}/custom-services`),
-        apiFetch<GpuResponse>(`${API_PATHS.llama}/gpus`),
       ]);
-      setModels(modelData.models || []);
-      setModelDir(modelData.model_dir || "");
-      setRepositories(repositoryData.repositories || []);
       setProcesses(processData.processes || []);
       setServices(serviceData.services || []);
-      setGpus(gpuData);
       setError("");
     } catch (value) {
       setError(errorMessage(value));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadGpus = useCallback(async () => {
+    try {
+      setGpus(await apiFetch<GpuResponse>(`${API_PATHS.llama}/gpus?history_hours=1`));
+    } catch (value) {
+      setError(errorMessage(value));
     }
   }, []);
 
@@ -65,9 +63,16 @@ export function InferencePanel() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
+    const initialTimer = window.setTimeout(() => {
+      void load();
+      void loadGpus();
+    }, 0);
+    const gpuTimer = window.setInterval(() => void loadGpus(), 5000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(gpuTimer);
+    };
+  }, [load, loadGpus]);
 
   useEffect(() => {
     if (!selectedPid) return;
@@ -75,11 +80,6 @@ export function InferencePanel() {
     const timer = window.setTimeout(() => void loadLogs(pid), 0);
     return () => window.clearTimeout(timer);
   }, [loadLogs, selectedPid]);
-
-  const filteredModels = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return normalized ? models.filter(item => `${item.name} ${item.path}`.toLowerCase().includes(normalized)) : models;
-  }, [models, query]);
 
   const runningByService = useMemo(
     () => new Map(processes.filter(item => item.running !== false && item.service_id).map(item => [item.service_id as string, item])),
@@ -163,43 +163,19 @@ export function InferencePanel() {
       <PageHeader
         kicker="模型管理 / Inference"
         title="推理服务"
-        description="模型文件、全量仓库、已注册服务和运行进程统一在一个页面管理。"
+        description="GPU 状态、已注册服务和运行进程统一在一个页面管理。"
         actions={<><a className="button button-secondary button-sm" href="/llama/downloads">下载模型</a><Button variant="secondary" size="sm" onClick={() => void load()}>刷新状态</Button></>}
       />
       {error ? <ErrorState message={error} /> : null}
       {message ? <div className="inline-message">{message}</div> : null}
-      <div className="subtle-path"><span>当前模型目录</span><code>{modelDir || "尚未设置"}</code></div>
       {loading ? <LoadingState /> : (
         <div className="stack-grid">
           <Card>
             <CardHeader
-              title={`GGUF 模型 · ${models.length}`}
-              description="递归扫描模型目录中的 .gguf 文件。"
-              actions={<><input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称或路径" /><button className="button button-secondary button-sm" type="button" onClick={() => void load()}>刷新</button></>}
+              title={`GPU 状态 · ${gpus.gpus?.length || 0}`}
+              description="与 GPU 监控页一致，展示每张 GPU 的当前利用率与显存占用。"
             />
-            {filteredModels.length ? (
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>路径</th></tr></thead>
-                  <tbody>{filteredModels.map(model => (
-                    <tr key={model.path}><td><strong>{model.name}</strong></td><td>{formatBytes(model.size)}</td><td>{formatDate(model.modified)}</td><td><code className="path-cell">{model.path}</code></td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <EmptyState title="没有找到 GGUF 模型" detail={query ? "尝试换一个搜索词。" : "设置模型目录后，模型会出现在这里。"} />}
-          </Card>
-
-          <Card>
-            <CardHeader title={`全量仓库 · ${repositories.length}`} description="保留仓库结构的下载目录，可用于 vLLM 等服务。" />
-            {repositories.length ? (
-              <div className="repository-grid">{repositories.map(repo => (
-                <article className="repository-card" key={repo.path}>
-                  <div className="repository-title"><strong>{repo.display_name}</strong><Badge tone={repo.has_model_files ? "success" : "neutral"}>{repo.has_model_files ? "含模型文件" : "目录"}</Badge></div>
-                  <code>{repo.path}</code>
-                  <div className="repository-meta"><span>{repo.has_config ? "有 config.json" : "无 config.json"}</span><span>{formatDate(repo.modified)}</span></div>
-                </article>
-              ))}</div>
-            ) : <EmptyState title="没有全量仓库" detail="在下载页留空文件名即可下载整个仓库。" />}
+            <GpuSummaryGrid gpus={gpus.gpus} emptyDetail={gpus.error || "nvidia-smi 不可用或当前没有可见设备。"} />
           </Card>
 
           <Card>
@@ -241,7 +217,7 @@ export function InferencePanel() {
               actions={<select className="select-compact" value={selectedPid || ""} onChange={event => setSelectedPid(event.target.value ? Number(event.target.value) : null)}><option value="">选择进程</option>{processes.filter(item => item.running !== false).map(item => <option value={item.pid} key={item.pid}>{item.display_name || item.model_name || `PID ${item.pid}`} · {item.pid}</option>)}</select>}
             />
             {processes.length ? (
-              <div className="data-table-wrap">
+              <div className="data-table-wrap process-table-wrap">
                 <table className="data-table">
                   <thead><tr><th>服务</th><th>PID</th><th>端口</th><th>GPU</th><th>启动时间</th><th>状态</th><th>操作</th></tr></thead>
                   <tbody>{processes.map(process => (
@@ -255,6 +231,9 @@ export function InferencePanel() {
                 </table>
               </div>
             ) : <EmptyState title="没有运行记录" detail="启动一个服务后，进程状态会显示在这里。" />}
+            {processes.length > 3 ? (
+              <p className="table-footer-note">列表内部滚动，默认可视前 3 条，共 {processes.length} 条；可通过右侧下拉选择运行中的进程查看日志。</p>
+            ) : null}
             {selectedPid ? <pre className="log-viewer">{logs || "暂无日志"}</pre> : null}
           </Card>
         </div>

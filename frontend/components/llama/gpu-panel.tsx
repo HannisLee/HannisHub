@@ -15,17 +15,29 @@ const GPU_COLORS = [
   "#5CA8A0",
 ];
 
+const HISTORY_RANGES = [
+  { hours: 24, label: "过去 24 小时" },
+  { hours: 12, label: "过去 12 小时" },
+  { hours: 6, label: "过去 6 小时" },
+  { hours: 1, label: "过去 1 小时" },
+];
+
 function formatChartTime(timestamp: number) {
   return new Date(timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false, minute: "2-digit" });
 }
 
-function GpuOverviewChart({ gpus }: { gpus: GpuStatus[] }) {
+function GpuMemoryChart({ gpus }: { gpus: GpuStatus[] }) {
   const histories = gpus.map((gpu, index) => ({
     index,
     gpu,
-    points: (gpu.history || []).filter(point => Number.isFinite(point.timestamp) && Number.isFinite(point.gpu_util)),
+    points: (gpu.history || []).filter(point => (
+      Number.isFinite(point.timestamp) &&
+      Number.isFinite(Number(point.used_mem)) &&
+      Number.isFinite(Number(point.total_mem)) &&
+      Number(point.total_mem) > 0
+    )),
   })).filter(item => item.points.length);
-  if (!histories.length) return <EmptyState title="还没有历史采样" detail="GPU 监控每 5 秒自动采样，积累数据后显示趋势图。" />;
+  if (!histories.length) return <EmptyState title="还没有显存采样" detail="GPU 监控每 5 秒自动采样，积累数据后显示显存趋势。" />;
 
   const timestamps = histories.flatMap(item => item.points.map(point => point.timestamp));
   const minTime = Math.min(...timestamps);
@@ -43,23 +55,20 @@ function GpuOverviewChart({ gpus }: { gpus: GpuStatus[] }) {
     <div className="gpu-overview-chart">
       <div className="gpu-chart-legend">
         {histories.map(item => {
-          const latestMemory = item.points.at(-1);
-          const memoryPercent = latestMemory?.total_mem
-            ? clampPercent((Number(latestMemory.used_mem || 0) / Number(latestMemory.total_mem)) * 100)
-            : null;
+          const latest = item.points.at(-1);
+          const memoryPercent = latest
+            ? clampPercent((Number(latest.used_mem || 0) / Number(latest.total_mem || 1)) * 100)
+            : 0;
           return (
             <span key={item.gpu.index}>
               <i style={{ background: GPU_COLORS[item.index % GPU_COLORS.length] }} />
               GPU {item.gpu.index}
-              <small>
-                利用率 {clampPercent(item.points.at(-1)?.gpu_util).toFixed(0)}%
-                {memoryPercent === null ? "" : ` · 显存 ${memoryPercent.toFixed(0)}%`}
-              </small>
+              <small>显存 {formatMemMb(latest?.used_mem)} / {formatMemMb(latest?.total_mem)} · {memoryPercent.toFixed(0)}%</small>
             </span>
           );
         })}
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="GPU 利用率与显存占比历史趋势">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="GPU 显存占用历史趋势">
         {[0, 25, 50, 75, 100].map(value => (
           <g key={value}>
             <line x1={padding.left} x2={width - padding.right} y1={y(value)} y2={y(value)} />
@@ -75,29 +84,20 @@ function GpuOverviewChart({ gpus }: { gpus: GpuStatus[] }) {
           const points = item.points.length === 1
             ? [item.points[0], { ...item.points[0], timestamp: item.points[0].timestamp + 1 }]
             : item.points;
-          const coordinates = points.map(point => `${x(point.timestamp).toFixed(1)},${y(point.gpu_util).toFixed(1)}`).join(" ");
-          const memorySource = item.points.filter(point => (
-            Number.isFinite(Number(point.used_mem)) &&
-            Number.isFinite(Number(point.total_mem)) &&
-            Number(point.total_mem) > 0
-          ));
-          const memoryPoints = memorySource.length === 1
-            ? [memorySource[0], { ...memorySource[0], timestamp: memorySource[0].timestamp + 1 }]
-            : memorySource;
-          const memoryCoordinates = memoryPoints.map(point => (
+          const coordinates = points.map(point => (
             `${x(point.timestamp).toFixed(1)},${y((Number(point.used_mem) / Number(point.total_mem)) * 100).toFixed(1)}`
           )).join(" ");
+          const latest = points.at(-1)!;
           return (
             <g key={item.gpu.index}>
               <polyline points={coordinates} style={{ stroke: color }} />
-              {memoryCoordinates ? <polyline className="is-memory" points={memoryCoordinates} style={{ stroke: color }} /> : null}
-              <circle cx={x(points.at(-1)!.timestamp)} cy={y(points.at(-1)!.gpu_util)} r="4" style={{ fill: color }} />
+              <circle cx={x(latest.timestamp)} cy={y((Number(latest.used_mem) / Number(latest.total_mem)) * 100)} r="4" style={{ fill: color }} />
             </g>
           );
         })}
       </svg>
       <div className="gpu-chart-meta">
-        <span>纵轴：0–100%；实线为 GPU 利用率，虚线为显存占比</span>
+        <span>纵轴：0–100%，曲线为显存占用占比</span>
         <span>采样窗口：{formatChartTime(minTime)} – {formatChartTime(maxTime)}</span>
       </div>
     </div>
@@ -111,10 +111,8 @@ function GpuCard({ gpu }: { gpu: GpuStatus }) {
     <article className="gpu-card">
       <div className="gpu-card-head">
         <div><span className="eyebrow eyebrow-small">GPU {gpu.index}</span><h3>{gpu.name || "未知设备"}</h3></div>
-        <span className="gpu-util">{util.toFixed(0)}%</span>
+        <div className="gpu-current-util"><span>当前利用率</span><strong>{util.toFixed(0)}%</strong></div>
       </div>
-      <div className="gpu-meter-label"><span>利用率</span><b>{util.toFixed(0)}%</b></div>
-      <ProgressBar value={util} />
       <div className="gpu-meter-label"><span>显存</span><b>{formatMemMb(gpu.used_mem)} / {formatMemMb(gpu.total_mem)}</b></div>
       <ProgressBar value={memory} tone="warning" />
       <div className="gpu-meta"><span>温度 {gpu.temperature ?? "—"}°C</span><span>{gpu.process_count || 0} 个进程</span><span>{gpu.users?.length ? gpu.users.join(", ") : "无用户"}</span></div>
@@ -122,22 +120,29 @@ function GpuCard({ gpu }: { gpu: GpuStatus }) {
   );
 }
 
+/** 推理服务与 GPU 监控共用同一套 GPU 状态卡片，保持顶部信息格式一致 */
+export function GpuSummaryGrid({ gpus, emptyDetail = "nvidia-smi 不可用或当前没有可见设备。" }: { gpus?: GpuStatus[]; emptyDetail?: string }) {
+  if (!gpus?.length) return <EmptyState title="暂无 GPU 状态" detail={emptyDetail} />;
+  return <div className="gpu-grid">{gpus.map(gpu => <GpuCard gpu={gpu} key={gpu.index} />)}</div>;
+}
+
 export function GpuPanel() {
   const [data, setData] = useState<GpuResponse | null>(null);
+  const [historyHours, setHistoryHours] = useState(24);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [stoppingPid, setStoppingPid] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setData(await apiFetch<GpuResponse>(`${API_PATHS.llama}/gpus`));
+      setData(await apiFetch<GpuResponse>(`${API_PATHS.llama}/gpus?history_hours=${historyHours}`));
       setError("");
     } catch (value) {
       setError(errorMessage(value));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [historyHours]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void load(), 0);
@@ -171,17 +176,33 @@ export function GpuPanel() {
       <PageHeader
         kicker="模型管理 / GPU"
         title="GPU 监控"
-        description="全宽趋势图、设备状态和本机 GPU 进程；页面每 5 秒自动刷新。"
+        description="全宽显存趋势图、设备当前利用率、显存占用和本机 GPU 进程；页面每 5 秒自动刷新。"
         actions={<Button variant="secondary" size="sm" onClick={() => void load()}>立即刷新</Button>}
       />
       {error ? <ErrorState message={error} /> : null}
       {!data ? loading ? <LoadingState /> : null : data.gpus?.length ? (
         <div className="stack-grid">
           <Card>
-            <CardHeader title="GPU 利用率趋势" description="汇总每张 GPU 的历史采样，图表随浏览器宽度铺满页面。" />
-            <GpuOverviewChart gpus={data.gpus} />
+            <CardHeader
+              title="GPU 显存趋势"
+              description="汇总每张 GPU 的历史采样；当前利用率显示在下方设备卡片中。"
+              actions={(
+                <div className="segmented" role="tablist" aria-label="显存历史时间范围">
+                  {HISTORY_RANGES.map(range => (
+                    <button
+                      type="button"
+                      role="tab"
+                      key={range.hours}
+                      aria-selected={historyHours === range.hours}
+                      onClick={() => setHistoryHours(range.hours)}
+                    >{range.label}</button>
+                  ))}
+                </div>
+              )}
+            />
+            <GpuMemoryChart gpus={data.gpus} />
           </Card>
-          <div className="gpu-grid">{data.gpus.map(gpu => <GpuCard gpu={gpu} key={gpu.index} />)}</div>
+          <GpuSummaryGrid gpus={data.gpus} />
           <Card>
             <CardHeader
               title={`GPU 进程 · ${gpuProcesses.length}`}

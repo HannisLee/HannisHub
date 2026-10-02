@@ -26,7 +26,7 @@ from urllib.parse import unquote
 import httpx
 import psutil
 import tqdm as _tqdm_module
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 # ── 路径常量 ──────────────────────────────────────────────
@@ -72,6 +72,7 @@ _process_lock = threading.Lock()
 _gpu_history_lock = threading.Lock()
 _last_gpu_sample_ts: float = 0
 GPU_SAMPLE_INTERVAL_SECONDS = 5
+GPU_HISTORY_UI_MAX_HOURS = 24
 
 # ── 下载任务状态 ───────────────────────────────────────
 _download_tasks: dict[str, dict] = {}
@@ -834,8 +835,8 @@ def _save_gpu_history(data: dict):
     _save_settings_state(GPU_HISTORY_KEY, data)
 
 
-def _append_gpu_history_sample(gpus: list, history_hours: float):
-    """按最小采样间隔写入 GPU util 历史"""
+def _append_gpu_history_sample(gpus: list, retention_hours: float):
+    """按最小采样间隔写入 GPU 历史；保留时长与前端查看窗口解耦"""
     global _last_gpu_sample_ts
 
     now = time.time()
@@ -857,7 +858,8 @@ def _append_gpu_history_sample(gpus: list, history_hours: float):
                 for gpu in gpus
             ],
         }
-        keep_seconds = (max(history_hours, 2) + 1) * 3600
+        # 前端提供 24 小时查看窗口，因此即使用户保留设置较小，也至少保留 25 小时。
+        keep_seconds = (max(retention_hours, GPU_HISTORY_UI_MAX_HOURS) + 1) * 3600
         cutoff = now - keep_seconds
         samples = [
             s for s in history.get("samples", [])
@@ -1317,10 +1319,11 @@ def _parse_nvidia_smi_process_rows(output: str) -> list[dict]:
     return rows
 
 
-def _collect_gpu_status() -> dict:
-    """采集 GPU 和进程信息"""
+def _collect_gpu_status(history_hours: Optional[float] = None) -> dict:
+    """采集 GPU 和进程信息；history_hours 为空时使用全局设置"""
     settings = _load_settings()
-    history_hours = _get_gpu_history_hours(settings)
+    if history_hours is None:
+        history_hours = _get_gpu_history_hours(settings)
     managed = _managed_process_snapshot()
     managed_pid_map = _managed_process_pid_map(managed)
     gpu_fields = [
@@ -1376,7 +1379,8 @@ def _collect_gpu_status() -> dict:
         if gpu["bus_id"]:
             bus_id_to_gpu[gpu["bus_id"]] = gpu
 
-    _append_gpu_history_sample(gpus, history_hours)
+    retention_hours = max(_get_gpu_history_hours(settings), GPU_HISTORY_UI_MAX_HOURS)
+    _append_gpu_history_sample(gpus, retention_hours)
     history = _history_by_gpu(history_hours)
     for gpu in gpus:
         gpu["history"] = history.get(gpu["index"], [])
@@ -2692,9 +2696,9 @@ async def get_status():
 
 
 @app.get("/api/gpus")
-async def get_gpus():
-    """获取 GPU 状态和 GPU 进程列表"""
-    return JSONResponse(_collect_gpu_status())
+async def get_gpus(history_hours: Optional[float] = Query(None, ge=0.25, le=168)):
+    """获取 GPU 状态和 GPU 进程列表；history_hours 可临时覆盖前端查看窗口"""
+    return JSONResponse(_collect_gpu_status(history_hours))
 
 
 @app.post("/api/gpu-processes/stop")

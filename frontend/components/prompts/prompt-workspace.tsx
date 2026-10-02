@@ -15,7 +15,6 @@ import { Button, Card, CardHeader, EmptyState, ErrorState, LoadingState } from "
 
 const DRAFT_KEY = "hannishub_prompt_draft";
 const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
-const ARCHIVE_DISPLAY_COUNT = 10;
 
 const POLISH_LEVELS: Array<{ id: PromptPolishLevel; label: string }> = [
   { id: "light", label: "轻度" },
@@ -343,14 +342,14 @@ export function PromptWorkspace() {
       </Card>
 
       <div className="prompt-layout">
-        <Card className="prompt-archive-card">
-          <CardHeader
-            title={`归档列表 · ${items.length}`}
-            description="按时间倒序展示最新 10 条；归档数量无上限。"
+          <Card className="prompt-archive-card">
+            <CardHeader
+              title={`归档列表 · ${items.length}`}
+              description="按时间倒序展示全部归档；固定高度内滚动。"
           />
           {loading ? <LoadingState /> : items.length ? (
             <div className="prompt-archive-list">
-              {items.slice(0, ARCHIVE_DISPLAY_COUNT).map(item => (
+              {items.map(item => (
                 <details className="prompt-item" key={item.id}>
                   <summary>
                     <span className="prompt-item-copy">

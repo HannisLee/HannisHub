@@ -75,7 +75,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
-- `/llama/models`：推理服务页面，合并模型/仓库浏览、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
+- `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
 - `/prompts`：提示词工作区
@@ -116,7 +116,9 @@ API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，�
 
 页面复现原有的实时行为：GPU 与进程状态每 5 秒刷新，下载状态每 3 秒刷新且日志每 5 秒刷新，ASR 历史每 3 秒刷新，Server 任务每 15 秒刷新。所有页面均对加载、错误和空数据提供明确状态。
 
-推理服务页面把 GGUF 模型、全量仓库、注册服务、运行进程与日志按全宽卡片自上而下合并展示；不再拆分“模型与仓库”和“受管进程”两个入口。GPU 页面提供全宽历史趋势图（实线为利用率、虚线为显存占比），设备卡片与进程表同样全宽排列；受管 LLM 的“聊天”入口继续指向兼容保留的 `/llama-manager/chat/{pid}`，ASR 的入口则回到新的 `/llama/asr` 页面，从而在完整聊天迁移前不丢失原有交互能力。
+推理服务页面顶部展示与 GPU 监控一致的 GPU 状态卡片（当前利用率与显存占用），下方依次为服务注册、已注册服务和当前进程与日志；GGUF 模型与全量仓库浏览迁移到模型下载页。当前进程表仅展示前 3 条并在卡片内滚动，避免页面被进程列表拉长。受管 LLM 的“聊天”入口继续指向兼容保留的 `/llama-manager/chat/{pid}`，ASR 的入口回到新的 `/llama/asr` 页面。
+
+GPU 页面提供全宽显存历史趋势图，右上角支持过去 24 / 12 / 6 / 1 小时切换；当前利用率以数字显示在 GPU 设备卡片中。模型下载页按“新建下载、任务状态、GGUF 模型、全量仓库、下载历史”全宽排列，下载历史始终位于最底部。ASR 页面中 ASR 服务为全宽卡片，顺序为 ASR 服务、转写历史、提炼提示词；转写展开文本为全宽且更高的只读文本框。
 
 ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服务中优先选择名称匹配 `Qwen3 ASR` 的 ASR 服务，调用 `/api/start` 启动并最多轮询 30 秒等待 `/api/asr` 可用。
 
@@ -147,7 +149,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
 | POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
-| POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&file_path=<relative_file_path>&overwrite=<bool>` | 以 multipart 上传单个不超过 4 GB 的文件；`file_path` 可包含文件夹相对结构，服务端逐段校验路径、拒绝符号链接并原子写入，成功后清除该顶层目录相关缓存 |
+| POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&overwrite=<bool>` | 以原始请求体上传单个不超过 4 GB 的文件；URL 编码后的文件相对路径放在 `x-file-path` 请求头，可包含文件夹相对结构，服务端逐段校验路径、拒绝符号链接并原子写入，成功后清除该顶层目录相关缓存 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
@@ -274,7 +276,7 @@ _download_lock   # 下载任务状态读写锁
 | POST | `/api/custom-services` | 注册或更新服务（服务名、服务类型、完整启动命令、GPU 选择） |
 | DELETE | `/api/custom-services/{service_id}` | 删除已注册服务 |
 | GET | `/api/status` | 当前 llama-server 进程状态 |
-| GET | `/api/gpus` | 当前 GPU 状态、每卡 util/显存历史、受管进程汇总和本机 GPU 进程列表 |
+| GET | `/api/gpus?history_hours=1\|6\|12\|24` | 当前 GPU 状态、每卡显存历史、受管进程汇总和本机 GPU 进程列表；`history_hours` 可临时覆盖查看窗口，不传时使用设置值 |
 | GET | `/api/managed-processes` | 当前运行期已知受管进程和日志记录 |
 | POST | `/api/gpu-processes/stop` | 停止当前出现在 GPU 进程列表中的指定进程；受管进程走原停止链路，桌面图形进程受保护 |
 | GET | `/asr` | 返回固定地址的 ASR 专用音频转写页 |
@@ -405,8 +407,8 @@ _download_lock   # 下载任务状态读写锁
 6. 浏览器通过 XMLHttpRequest 上传，逐文件显示真实的已上传字节数和百分比。服务端为每个上传文件立即创建历史 item，并把上传、排队、FFmpeg 分析、转写、完成或失败状态及对应阶段百分比写入历史索引；页面每 3 秒刷新，因此刷新页面后仍可查看后台任务进度
 7. 后台队列默认同时只运行 1 个任务，以避免单卡 vLLM 争抢资源。FFmpeg 静音分析从 `-progress pipe:2` 读取已处理音频时长并显示处理进度；转写阶段按已完成片段数显示进度，同时明确显示当前是在 FFmpeg 转码片段还是等待 ASR 返回
 8. 所有临时音频和 FLAC 切片在任务结束后删除；成功转写的全文保存到 `data/asr_history/<记录 ID>.txt`，信息提取结果保存到 `data/asr_history/<记录 ID>.extracted.txt`，元数据保存到 `data/asr_history/records.json`，临时任务目录为 `data/asr_jobs/`，三者均不纳入 Git
-9. 专用页以最新上传在前的时间倒序展示可展开 item，列表保存自定义名称、原始文件名、上传时间、时长、片段数、状态、阶段进度和是否已提取；已完成条目可在原文与信息提取结果间切换，并可修改记录名称或删除已结束的记录。展开文本使用只读文本框，聚焦后 Ctrl/Cmd+A 只选中当前框内文本；“复制”按钮只复制当前展开框内容
-10. 历史列表下方提供可保存的信息提取提示词。默认提示词用于去除抖音音频转写的口头禅和冗余内容，保留关键事实、观点、步骤、数字和结论，且禁止编造原文未提供的信息
+9. 专用页以最新上传在前的时间倒序展示可展开 item，列表保存自定义名称、原始文件名、上传时间、时长、片段数、状态、阶段进度和是否已提取；已完成条目可在原文与信息提取结果间切换，并可修改记录名称或删除已结束的记录。展开文本使用全宽、更高的只读文本框，聚焦后 Ctrl/Cmd+A 只选中当前框内文本；“复制”按钮只复制当前展开框内容
+10. 统一前端把可保存的信息提取提示词放在转写历史之后，位于 ASR 页面最底部。默认提示词用于去除抖音音频转写的口头禅和冗余内容，保留关键事实、观点、步骤、数字和结论，且禁止编造原文未提供的信息
 
 **下载模型：**
 1. 校验仓库名（`owner/repo`）；指定文件名时校验 `.gguf` 结尾，留空则全量下载
@@ -416,7 +418,7 @@ _download_lock   # 下载任务状态读写锁
 5. 后台线程按分支下载：单文件用 `hf_hub_download()`，全量用 `snapshot_download()`，均传按 `task_id` 绑定的 tqdm 类追踪进度
 6. `force_download=False`（默认）时，HF 通过 ETag 校验已有文件，命中缓存则跳过
 7. 每个任务日志写入 `logs/downloads/<task_id>.log`
-8. 前端轮询 `/api/download/status` 获取任务列表、进度、百分比和 `target_dir`
+8. 前端轮询 `/api/download/status` 获取任务列表、进度、百分比和 `target_dir`；统一前端同时展示本地 GGUF 模型和全量仓库，并把下载历史放在页面最底部
 
 **停止服务：**
 1. 表格行 Stop 传入 PID，只停止对应受管实例，不清空日志
@@ -433,7 +435,7 @@ _download_lock   # 下载任务状态读写锁
 6. 同一受管服务占用多张 GPU 时，`managed_processes` 中 GPU index/name 汇总展示，进程显存累加，总显存累加，GPU util/温度取最大值
 7. 如果 `nvidia-smi` 暂时没有返回该服务的 compute-apps 行，但启动时选择了 GPU，则用所选 GPU 回填 GPU name/util/total mem/temp，进程显存保持空值
 8. 每次 `/api/gpus` 采集时最多每 5 秒写入一条 GPU util 与显存样本到 `settings.json.gpu_history`
-9. 按 `settings.json.gpu_history_hours` 返回每张 GPU 最近 X 小时的 `history`，默认 2 小时
+9. 按 `settings.json.gpu_history_hours` 返回每张 GPU 最近 X 小时的 `history`，默认 2 小时；前端时间选择通过 `?history_hours=` 临时覆盖返回窗口，不修改全局保留设置。历史采样至少保留 25 小时，确保 24 小时查看窗口可用
 10. `nvidia-smi` 不存在、驱动不可用或查询超时时，优先从 `settings.json.gpu_history` 恢复 GPU 列表和波形，返回 `stale: true`
 11. 本地历史也为空时，接口返回 JSON：`{"ok": false, "error": "...", "gpus": []}`
 
@@ -725,4 +727,4 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | GET | `/api/polish-settings` | 读取三档润色指令、推理强度与内置默认值 |
 | PUT | `/api/polish-settings` | 保存三档润色指令与推理强度，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string }, "reasoning_effort": "auto" \| "low" \| "medium" \| "high" }` |
 
-服务端限制：归档提示词与原文最长 200 万字符，单次 AI 润色最多 20 万字符。归档数量无上限，前端归档列表按时间倒序只展示最新 10 条并显示当前归档总数。归档页面使用固定高度的内部滚动列表，折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。
+服务端限制：归档提示词与原文最长 200 万字符，单次 AI 润色最多 20 万字符。归档数量无上限，前端归档列表按时间倒序渲染全部历史记录，使用固定高度的内部滚动列表，可视区域约 10 条并显示当前归档总数。折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。

@@ -151,7 +151,7 @@ export function AsrPanel() {
     <input ref={inputRef} className="visually-hidden" type="file" accept="audio/*,video/*,.m4s,.mkv,.ts" multiple onChange={event => { void upload(event.target.files); event.target.value = ""; }} />
     {error ? <ErrorState message={error} /> : null}
     {status ? <div className="inline-message"><Badge tone="success">完成</Badge>{status}</div> : null}
-    <div className="two-column-grid">
+    <div className="stack-grid">
       <Card>
         <CardHeader title="ASR 服务" description={`当前由模型管理模块发现的唯一 ASR 实例；提炼模型：${aiModel || "未配置"}`} />
         {info ? <div className="asr-service"><Badge tone="success">可用</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : defaultService ? (
@@ -173,6 +173,31 @@ export function AsrPanel() {
         ><span className="upload-mark">↑</span><strong>拖入音频，或点击选择文件</strong><small>支持 FFmpeg 可以解码的常见音视频格式，单文件最大 4 GB。</small></div>
         {uploads.length ? <div className="upload-list">{uploads.map(item => <div className="upload-row" key={item.id}><div><strong>{item.name}</strong><span>{item.status} · {item.detail}</span></div><ProgressBar value={item.progress} /></div>)}</div> : null}
       </Card>
+
+      <Card>
+        <CardHeader title={`转写历史 · ${records.length}`} description="历史内容保存在本机，列表会每 3 秒更新一次。" />
+        {records.length ? (
+          <div className="stack-list">{records.map(record => (
+            <article className="history-row" key={record.id}>
+              <div className="history-main">
+                <div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div>
+                <span>{formatDate(record.created_at)} · {record.progress_detail || ""}</span>
+                {record.progress !== undefined && record.status !== "completed" ? <ProgressBar value={record.progress || 0} /> : null}
+                {record.error ? <small className="error-text">{record.error}</small> : null}
+              </div>
+              <div className="row-actions">
+                <Button size="sm" variant="quiet" onClick={() => void showText(record.id, "text")}>全文</Button>
+                {extraction[record.id] ? <Button size="sm" variant="quiet" onClick={() => void copyRecordText(record)}>复制</Button> : null}
+                {record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "extraction")}>结果</Button></> : null}
+                <Button size="sm" variant="quiet" onClick={() => void rename(record)}>重命名</Button>
+                <Button size="sm" variant="danger" onClick={() => void remove(record)}>删除</Button>
+              </div>
+              {extraction[record.id] ? <textarea className="text-preview" value={extraction[record.id]} readOnly aria-label={`${record.name || record.filename || record.id}展开文本`} /> : null}
+            </article>
+          ))}</div>
+        ) : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
+      </Card>
+
       <Card>
         <CardHeader title="提炼提示词" description="仅用于 ASR 转写结果的信息提炼；接口和模型使用 AI 能力设置中当前启用的配置。" actions={<Button size="sm" onClick={() => void savePrompt()}>保存提示词</Button>} />
         <Field label="System 提示词">
@@ -180,9 +205,5 @@ export function AsrPanel() {
         </Field>
       </Card>
     </div>
-    <Card>
-      <CardHeader title={`转写历史 · ${records.length}`} description="历史内容保存在本机，列表会每 3 秒更新一次。" />
-      {records.length ? <div className="stack-list">{records.map(record => <article className="history-row" key={record.id}><div className="history-main"><div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div><span>{formatDate(record.created_at)} · {record.progress_detail || ""}</span>{record.progress !== undefined && record.status !== "completed" ? <ProgressBar value={record.progress || 0} /> : null}{record.error ? <small className="error-text">{record.error}</small> : null}</div><div className="row-actions"><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "text")}>全文</Button>{extraction[record.id] ? <Button size="sm" variant="quiet" onClick={() => void copyRecordText(record)}>复制</Button> : null}{record.status === "completed" ? <><Button size="sm" variant="quiet" onClick={() => void extract(record.id)}>提炼</Button><Button size="sm" variant="quiet" onClick={() => void showText(record.id, "extraction")}>结果</Button></> : null}<Button size="sm" variant="quiet" onClick={() => void rename(record)}>重命名</Button><Button size="sm" variant="danger" onClick={() => void remove(record)}>删除</Button></div>{extraction[record.id] ? <textarea className="text-preview" value={extraction[record.id]} readOnly aria-label={`${record.name || record.filename || record.id}展开文本`} /> : null}</article>)}</div> : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
-    </Card>
   </>;
 }

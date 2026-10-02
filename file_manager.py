@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request
 
 from auth import get_settings_section, update_settings_section
 
@@ -650,7 +650,7 @@ async def upload_file(
     root_index: int,
     relative_path: str,
     file_path: str,
-    file: UploadFile,
+    request: Request,
     *,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -661,6 +661,8 @@ async def upload_file(
     root = _resolve_root(roots[root_index])
     safe_directory = _normalize_relative_path(relative_path)
     _resolve_directory(root, safe_directory)
+    if not file_path:
+        raise HTTPException(status_code=422, detail="缺少上传文件相对路径")
     safe_file_path = _normalize_relative_path(file_path)
     target = _upload_parent(root, safe_file_path)
     try:
@@ -679,14 +681,20 @@ async def upload_file(
         if not overwrite:
             raise HTTPException(status_code=409, detail="目标已有同名文件，可勾选覆盖后重试")
 
+    try:
+        content_length = int(request.headers.get("content-length", "0"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="上传长度格式无效") from exc
+    if content_length > MAX_UPLOAD_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
+
     temp_path = target.with_name(f".{target.name}.{uuid4().hex}.upload")
     total_size = 0
     try:
         with temp_path.open("wb") as output:
-            while True:
-                chunk = await file.read(UPLOAD_CHUNK_BYTES)
+            async for chunk in request.stream():
                 if not chunk:
-                    break
+                    continue
                 total_size += len(chunk)
                 if total_size > MAX_UPLOAD_FILE_BYTES:
                     raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
@@ -703,8 +711,6 @@ async def upload_file(
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
-    finally:
-        await file.close()
 
     _invalidate_root_caches(root)
     full_path = safe_file_path if not safe_directory else f"{safe_directory}/{safe_file_path}"

@@ -3,8 +3,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -389,14 +390,14 @@ async def remove_file_manager_favorite(favorite_id: str):
 
 @app.post("/api/file-manager/upload")
 async def file_manager_upload(
+    request: Request,
     root: int = Query(..., ge=0),
     path: str = Query("", max_length=4_096),
-    file_path: str = Query(..., min_length=1, max_length=4_096),
     overwrite: bool = Query(False),
-    file: UploadFile = File(...),
 ):
-    """上传单个文件到当前受限目录；file_path 可包含文件夹相对结构。"""
-    return JSONResponse(await upload_file_to_directory(root, path, file_path, file, overwrite=overwrite))
+    """以原始请求体上传单个文件到当前受限目录，文件相对路径放在 x-file-path 头。"""
+    file_path = unquote(request.headers.get("x-file-path", ""))
+    return JSONResponse(await upload_file_to_directory(root, path, file_path, request, overwrite=overwrite))
 
 
 @app.get("/api/file-manager/download")

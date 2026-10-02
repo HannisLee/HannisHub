@@ -336,7 +336,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .stack-list { gap: 0; }
 .stack-list > article { border-top: 1px solid var(--color-divider); }
 .stack-list > article:first-child { border-top: 0; }
-.service-row, .connection-row, .task-row, .history-row, .download-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-5); padding: var(--space-5) 0; }
+.service-row, .connection-row, .task-row, .download-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-5); padding: var(--space-5) 0; }
+.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-5); padding: var(--space-5) 0; }
 .service-row-main, .connection-main, .task-main, .history-main { display: grid; min-width: 0; gap: var(--space-2); }
 .service-row-title, .connection-title, .task-title, .history-title, .repository-title, .split-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .service-row code, .task-row code, .download-row code { display: block; color: var(--color-text-muted); }
@@ -344,6 +345,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .error-text { color: var(--color-error); font-size: 12px; }
 
 .data-table-wrap { overflow-x: auto; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); }
+.process-table-wrap { max-height: 340px; overflow: auto; }
+.table-footer-note { margin: var(--space-3) 0 0; color: var(--color-text-muted); font-size: 12px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .data-table th { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 12px; font-weight: 400; text-align: left; white-space: nowrap; }
 .data-table td { padding: var(--space-4); border-bottom: 1px solid var(--color-divider); color: var(--color-text-secondary); vertical-align: top; }
@@ -361,6 +364,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 
 .gpu-card { display: grid; gap: var(--space-4); }
 .gpu-card-head { display: flex; justify-content: space-between; gap: var(--space-4); }
+.gpu-current-util { display: grid; justify-items: end; gap: var(--space-1); text-align: right; }
+.gpu-current-util span { color: var(--color-text-muted); font-size: 12px; }
+.gpu-current-util strong { color: var(--color-text-primary); font: 400 32px/1 var(--font-display); }
 .gpu-card h3 { margin: 0; color: var(--color-text-primary); font: 400 22px/1.3 var(--font-display); }
 .gpu-util { color: var(--color-text-primary); font: 400 32px/1 var(--font-display); }
 .gpu-meter-label, .gpu-meta { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
@@ -376,7 +382,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .gpu-overview-chart line { stroke: var(--color-divider); stroke-width: 1; }
 .gpu-overview-chart text { fill: var(--color-text-muted); font-size: 11px; text-anchor: middle; }
 .gpu-overview-chart polyline { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-.gpu-overview-chart polyline.is-memory { stroke-width: 1.8; stroke-dasharray: 8 7; opacity: 0.82; }
 .gpu-chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
 .gpu-chart-legend span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .gpu-chart-legend i { width: 12px; height: 2px; border-radius: var(--radius-pill); }
@@ -397,6 +402,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .log-viewer, .text-preview { max-height: 400px; margin: var(--space-5) 0 0; padding: var(--space-4); overflow: auto; border: 1px solid var(--color-divider); border-radius: var(--radius-md); background: var(--color-bg); color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-preview { display: block; width: 100%; min-height: 160px; resize: vertical; }
 .text-preview:focus { border-color: var(--color-text-muted); background: var(--color-surface); outline: none; }
+.history-row .text-preview { grid-column: 1 / -1; height: min(60vh, 520px); min-height: 320px; max-height: 640px; }
 
 .asr-service { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); color: var(--color-text-secondary); }
 .upload-drop { display: grid; min-height: 184px; place-items: center; align-content: center; gap: var(--space-3); padding: var(--space-6); border: 1px dashed var(--color-control-border); border-radius: var(--radius-lg); color: var(--color-text-secondary); text-align: center; transition: background-color 160ms ease, border-color 160ms ease; }
@@ -831,7 +837,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .card-header { align-items: flex-start; flex-direction: column; gap: var(--space-3); }
   .card-actions { width: 100%; flex-wrap: wrap; }
   .search-input { width: 100%; }
-  .service-row, .connection-row, .task-row, .history-row, .download-row { flex-direction: column; }
+  .service-row, .connection-row, .task-row, .download-row { flex-direction: column; }
+  .history-row { grid-template-columns: 1fr; }
   .row-actions, .download-row-end { width: 100%; justify-content: flex-start; }
   .data-table { min-width: 700px; }
   .editor-actions { width: 100%; }
