@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
+import { BROWSER_LOCATION_KEY, readBrowserLocation, fileUploadItems, collectDataTransferFiles, uploadableRelativePath, type FileUploadItem } from "../../lib/file-manager-browser";
 import type {
   FileManagerDirectoryResponse,
   FileManagerDatePlyResponse,
@@ -43,59 +44,6 @@ interface UploadState {
   progress: number;
   status: string;
   detail: string;
-}
-
-interface FileUploadItem {
-  file: File;
-  relativePath: string;
-}
-
-const UPLOAD_IGNORED_DIRECTORY_NAMES = new Set([".git", ".hg", ".svn", "node_modules", "__pycache__", ".cache", ".venv", "venv"]);
-
-function uploadableRelativePath(value: string): boolean {
-  const parts = value.split("/");
-  return Boolean(value) && parts.every(part => part && part !== "." && part !== ".." && !UPLOAD_IGNORED_DIRECTORY_NAMES.has(part));
-}
-
-function fileUploadItems(files: FileList | null): FileUploadItem[] {
-  return Array.from(files || []).map(file => ({ file, relativePath: file.webkitRelativePath || file.name }));
-}
-
-function readDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
-  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
-}
-
-function readEntryFile(entry: FileSystemFileEntry): Promise<File | null> {
-  return new Promise(resolve => entry.file(resolve, () => resolve(null)));
-}
-
-async function collectUploadEntry(entry: FileSystemEntry, prefix = ""): Promise<FileUploadItem[]> {
-  const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-  if (entry.isFile) {
-    const file = await readEntryFile(entry as FileSystemFileEntry);
-    return file && uploadableRelativePath(relativePath) ? [{ file, relativePath }] : [];
-  }
-  if (!entry.isDirectory || UPLOAD_IGNORED_DIRECTORY_NAMES.has(entry.name)) return [];
-  const directoryEntry = entry as FileSystemDirectoryEntry;
-  const children: FileSystemEntry[] = [];
-  while (true) {
-    const batch = await readDirectoryEntries(directoryEntry.createReader());
-    if (!batch.length) break;
-    children.push(...batch);
-  }
-  const groups = await Promise.all(children.map(child => collectUploadEntry(child, relativePath)));
-  return groups.flat();
-}
-
-async function collectDataTransferFiles(dataTransfer: DataTransfer): Promise<FileUploadItem[]> {
-  const entries = Array.from(dataTransfer.items)
-    .map(item => item.webkitGetAsEntry?.() || null)
-    .filter((entry): entry is FileSystemEntry => Boolean(entry));
-  if (entries.length) {
-    const groups = await Promise.all(entries.map(entry => collectUploadEntry(entry)));
-    return groups.flat();
-  }
-  return fileUploadItems(dataTransfer.files);
 }
 
 /** 受限目录内的文件下载地址，预览与列表下载按钮共用 */
@@ -143,6 +91,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [expandedPreview, setExpandedPreview] = useState<0 | 1 | null>(null);
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [overwriteUploads, setOverwriteUploads] = useState(false);
   const [draggingUploads, setDraggingUploads] = useState(false);
   const [error, setError] = useState("");
@@ -153,6 +103,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const plyCache = useRef(new Map<string, FileManagerPlyResponse>());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
+  const uploadLock = useRef(false);
   const currentDirectoryRef = useRef({ root: selectedRootIndex, path });
 
   const loadDirectory = useCallback(async (rootIndex: number, nextPath: string, refresh = false) => {
@@ -191,10 +142,27 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   useEffect(() => {
     let active = true;
     apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
-      .then(value => {
+      .then(async value => {
         if (!active) return;
         const nextRoots = value.roots || [];
-        setResolvedRoots(value.resolved_roots || nextRoots);
+        const nextResolvedRoots = value.resolved_roots || nextRoots;
+        setResolvedRoots(nextResolvedRoots);
+        if (!pointCloudMode) {
+          let saved: ReturnType<typeof readBrowserLocation> = null;
+          try { saved = readBrowserLocation(window.localStorage, nextResolvedRoots); } catch { /* 浏览器禁用存储时使用默认目录。 */ }
+          if (saved) {
+            try {
+              const data = await apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(saved.rootIndex), path: saved.path })}`);
+              if (!active) return;
+              directoryCache.current.set(`${saved.rootIndex}:${saved.path}`, data);
+              setSelectedRootIndex(saved.rootIndex);
+              setPath(saved.path);
+            } catch {
+              // 已删除的目录或失效链接回退到顶层目录。
+              if (!active) return;
+            }
+          }
+        }
         if (pointCloudMode) {
           const params = new URLSearchParams(window.location.search);
           const requestedRoot = Number(params.get("root"));
@@ -257,6 +225,15 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     currentDirectoryRef.current = { root: selectedRootIndex, path };
   }, [selectedRootIndex, path]);
 
+  useEffect(() => {
+    if (pointCloudMode || loading || !directory || directory.root_index !== selectedRootIndex || directory.path !== path) return;
+    const root = resolvedRoots[selectedRootIndex];
+    if (!root) return;
+    try {
+      window.localStorage.setItem(BROWSER_LOCATION_KEY, JSON.stringify({ root, path }));
+    } catch { /* 存储不可用时不影响文件浏览。 */ }
+  }, [pointCloudMode, loading, directory, selectedRootIndex, path, resolvedRoots]);
+
   const filteredEntries = useMemo(() => {
     if (pointCloudMode) return [
       ...(directory?.entries.filter(entry => entry.type === "directory") || []),
@@ -281,7 +258,11 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     if (nextPath === path && rootIndex === selectedRootIndex) return;
     setSelectedRootIndex(rootIndex);
     setQuery("");
-    setUploads([]);
+    if (!uploadLock.current) {
+      setUploads([]);
+      setUploadMessage("");
+      setUploadError("");
+    }
     setPath(nextPath);
   }
 
@@ -329,67 +310,84 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     setUploads(current => current.map(item => item.id === id ? { ...item, ...patch } : item));
   }
 
-  async function startUpload(items: FileUploadItem[]) {
-    if (!roots.length || uploading) return;
+  async function startUpload(collectItems: () => Promise<FileUploadItem[]>) {
+    if (!roots.length || uploadLock.current) return;
+    uploadLock.current = true;
     const targetRoot = selectedRootIndex;
     const targetPath = path;
-    const selected = items.filter(item => uploadableRelativePath(item.relativePath));
-    if (!selected.length) {
-      setError("没有可上传的普通文件；隐藏缓存目录和无效路径会被跳过。");
-      return;
-    }
-
-    setError("");
+    const overwrite = overwriteUploads;
+    const targetLabel = `${resolvedRoots[targetRoot] || roots[targetRoot]}${targetPath ? `/${targetPath}` : ""}`;
+    setUploadError("");
+    setUploads([]);
     setUploading(true);
-    setUploads(selected.map((item, index) => ({
-      id: `${Date.now()}-${index}-${item.relativePath}`,
-      name: item.file.name,
-      relativePath: item.relativePath,
-      size: item.file.size,
-      progress: 0,
-      status: "等待上传",
-      detail: formatBytes(item.file.size),
-    })));
-
-    let successCount = 0;
-    for (const [index, item] of selected.entries()) {
-      const id = `${Date.now()}-${index}-${item.relativePath}`;
-      try {
-        const params = new URLSearchParams({
-          root: String(targetRoot),
-          path: targetPath,
-          overwrite: String(overwriteUploads),
-        });
-        const result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
-          "Content-Type": item.file.type || "application/octet-stream",
-          "x-file-path": encodeURIComponent(item.relativePath),
-        }, progress => {
-          updateUpload(id, { progress, status: "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
-        });
-        successCount += 1;
-        updateUpload(id, { progress: 100, status: "已上传", detail: `${formatBytes(result.size || item.file.size)} · 已写入` });
-      } catch (value) {
-        updateUpload(id, { status: "上传失败", detail: errorMessage(value) });
+    setUploadMessage(`正在读取文件和文件夹… 目标：${targetLabel}`);
+    try {
+      const items = await collectItems();
+      const selected = items.filter(item => uploadableRelativePath(item.relativePath));
+      if (!selected.length) {
+        setUploadMessage("");
+        setUploadError("未发现可上传文件。空文件夹、缓存目录和无效路径会被跳过。");
+        return;
       }
-    }
+      // 队列与进度回调复用同一组 ID，避免时间变化后无法找到原条目。
+      const batchId = Date.now();
+      const queue = selected.map((item, index) => ({
+        id: `${batchId}-${index}`,
+        name: item.file.name,
+        relativePath: item.relativePath,
+        size: item.file.size,
+        progress: 0,
+        status: "等待上传",
+        detail: formatBytes(item.file.size),
+      }));
+      setUploads(queue);
 
-    directoryCache.current.delete(`${targetRoot}:${targetPath}`);
-    plyCache.current.delete(`${targetRoot}:${targetPath}`);
-    if (currentDirectoryRef.current.root === targetRoot && currentDirectoryRef.current.path === targetPath) {
-      await loadDirectory(targetRoot, targetPath, true);
+      let successCount = 0;
+      for (const [index, item] of selected.entries()) {
+        const id = queue[index].id;
+        setUploadMessage(`正在上传 ${index + 1} / ${selected.length} 个文件 · 目标：${targetLabel}`);
+        updateUpload(id, { status: "正在上传", detail: `0% · ${formatBytes(item.file.size)}` });
+        try {
+          const params = new URLSearchParams({ root: String(targetRoot), path: targetPath, overwrite: String(overwrite) });
+          const result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
+            "Content-Type": item.file.type || "application/octet-stream",
+            "x-file-path": encodeURIComponent(item.relativePath),
+          }, progress => {
+            updateUpload(id, { progress, status: progress === 100 ? "等待服务器写入" : "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
+          });
+          successCount += 1;
+          updateUpload(id, { progress: 100, status: "已上传", detail: `${formatBytes(result.size ?? item.file.size)} · 已写入` });
+        } catch (value) {
+          updateUpload(id, { status: "上传失败", detail: errorMessage(value) });
+        }
+      }
+
+      directoryCache.current.clear();
+      plyCache.current.clear();
+      if (currentDirectoryRef.current.root === targetRoot && currentDirectoryRef.current.path === targetPath) {
+        await loadDirectory(targetRoot, targetPath, true);
+      }
+      const failureCount = selected.length - successCount;
+      setUploadMessage(`上传结束：成功 ${successCount} 个，失败 ${failureCount} 个 · 目标：${targetLabel}`);
+    } catch (value) {
+      setUploadMessage("");
+      setUploadError(`无法读取上传内容：${errorMessage(value)}`);
+    } finally {
+      uploadLock.current = false;
+      setUploading(false);
     }
-    if (successCount && successCount === selected.length) {
-      setError("");
-    }
-    setUploading(false);
   }
 
   async function handleUploadDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDraggingUploads(false);
-    const items = await collectDataTransferFiles(event.dataTransfer);
-    await startUpload(items);
+    await startUpload(() => collectDataTransferFiles(event.dataTransfer));
   }
+
+  const totalUploadBytes = uploads.reduce((sum, item) => sum + item.size, 0);
+  const uploadedBytes = uploads.reduce((sum, item) => sum + item.size * item.progress / 100, 0);
+  const overallUploadProgress = totalUploadBytes ? Math.round(uploadedBytes / totalUploadBytes * 100)
+    : uploads.length ? Math.round(uploads.filter(item => item.status === "已上传").length / uploads.length * 100) : 0;
 
   async function syncCache() {
     setSyncing(true);
@@ -605,7 +603,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               className="visually-hidden"
               type="file"
               multiple
-              onChange={event => { void startUpload(fileUploadItems(event.target.files)); event.target.value = ""; }}
+              onChange={event => { const items = fileUploadItems(event.target.files); void startUpload(() => Promise.resolve(items)); event.target.value = ""; }}
             />
             <input
               ref={directoryInputRef}
@@ -613,15 +611,16 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               type="file"
               multiple
               {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
-              onChange={event => { void startUpload(fileUploadItems(event.target.files)); event.target.value = ""; }}
+              onChange={event => { const items = fileUploadItems(event.target.files); void startUpload(() => Promise.resolve(items)); event.target.value = ""; }}
             />
             <div
               className={`upload-drop file-manager-upload-drop${draggingUploads ? " is-dragover" : ""}`}
               role="button"
               tabIndex={0}
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInputRef.current?.click(); } }}
-              onDragOver={event => { event.preventDefault(); setDraggingUploads(true); }}
+              aria-disabled={uploading || !roots.length}
+              onClick={() => { if (!uploading && roots.length) fileInputRef.current?.click(); }}
+              onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!uploading && roots.length) fileInputRef.current?.click(); } }}
+              onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = uploading || !roots.length ? "none" : "copy"; setDraggingUploads(!uploading && Boolean(roots.length)); }}
               onDragLeave={() => setDraggingUploads(false)}
               onDrop={event => { void handleUploadDrop(event); }}
             >
@@ -633,13 +632,18 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               <input type="checkbox" checked={overwriteUploads} onChange={event => setOverwriteUploads(event.target.checked)} disabled={uploading} />
               覆盖当前目录内的同名文件
             </label>
+            {uploadMessage ? <div className="file-manager-upload-summary" role="status" aria-live="polite">
+              <span>{uploadMessage}</span>
+              {uploads.length ? <><ProgressBar value={overallUploadProgress} /><small>总体传输 {overallUploadProgress}% · {formatBytes(uploadedBytes)} / {formatBytes(totalUploadBytes)}</small></> : uploading ? <LoadingState label="正在读取文件夹，请稍候…" /> : null}
+            </div> : null}
+            {uploadError ? <ErrorState message={uploadError} /> : null}
             {uploads.length ? (
               <div className="upload-list">
                 {uploads.map(item => (
                   <div className="upload-row" key={item.id}>
                     <div>
-                      <strong title={item.relativePath}>{item.name}</strong>
-                      <span>{item.status} · {item.detail}</span>
+                      <strong title={item.relativePath}>{item.relativePath}</strong>
+                      <span className={item.status === "上传失败" ? "error-text" : undefined}>{item.status} · {item.detail}</span>
                     </div>
                     <ProgressBar value={item.progress} />
                   </div>

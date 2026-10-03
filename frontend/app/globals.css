@@ -387,6 +387,10 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .gpu-chart-legend i { width: 12px; height: 2px; border-radius: var(--radius-pill); }
 .gpu-chart-legend small { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .gpu-chart-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); color: var(--color-text-muted); font-size: 12px; }
+.file-manager-upload-summary { display: grid; gap: var(--space-2); margin-top: var(--space-4); color: var(--color-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.file-manager-upload-summary small { color: var(--color-text-muted); }
+.file-manager-upload-summary .loading-state { padding: var(--space-3) 0; }
+.file-manager-upload-drop[aria-disabled="true"] { opacity: 0.54; cursor: default; }
 .progress { height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--color-divider); }
 .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--color-brand); transition: width 180ms ease; }
 .progress-success > span { background: var(--color-success); }
@@ -593,6 +597,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-upload .upload-row > div { align-items: baseline; }
 .file-manager-upload .upload-row strong { max-width: 70%; overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .file-manager-upload .upload-row span { flex: 1 1 auto; text-align: right; }
+.file-manager-upload .upload-row span.error-text { color: var(--color-error); }
 .file-manager-browser .card-header { display: block; }
 .file-manager-browser .card-actions { width: 100%; margin-top: var(--space-3); }
 .file-manager-toolbar { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto minmax(150px, 180px) auto; width: 100%; align-items: center; gap: var(--space-2); }
