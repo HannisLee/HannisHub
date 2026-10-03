@@ -385,6 +385,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }
 
   const totalUploadBytes = uploads.reduce((sum, item) => sum + item.size, 0);
+  // 完成项只参与总进度与汇总，明细仅保留待上传、上传中及失败的文件。
+  const visibleUploads = uploads.filter(item => item.status !== "已上传");
   const uploadedBytes = uploads.reduce((sum, item) => sum + item.size * item.progress / 100, 0);
   const overallUploadProgress = totalUploadBytes ? Math.round(uploadedBytes / totalUploadBytes * 100)
     : uploads.length ? Math.round(uploads.filter(item => item.status === "已上传").length / uploads.length * 100) : 0;
@@ -637,13 +639,13 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               {uploads.length ? <><ProgressBar value={overallUploadProgress} /><small>总体传输 {overallUploadProgress}% · {formatBytes(uploadedBytes)} / {formatBytes(totalUploadBytes)}</small></> : uploading ? <LoadingState label="正在读取文件夹，请稍候…" /> : null}
             </div> : null}
             {uploadError ? <ErrorState message={uploadError} /> : null}
-            {uploads.length ? (
-              <div className="upload-list">
-                {uploads.map(item => (
+            {visibleUploads.length ? (
+              <div className="upload-list" aria-label="未完成及失败的上传文件">
+                {visibleUploads.map(item => (
                   <div className="upload-row" key={item.id}>
                     <div>
                       <strong title={item.relativePath}>{item.relativePath}</strong>
-                      <span className={item.status === "上传失败" ? "error-text" : undefined}>{item.status} · {item.detail}</span>
+                      <span className={item.status === "上传失败" ? "error-text" : undefined} title={`${item.status} · ${item.detail}`}>{item.status} · {item.detail}</span>
                     </div>
                     <ProgressBar value={item.progress} />
                   </div>
