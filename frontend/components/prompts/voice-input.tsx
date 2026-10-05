@@ -190,11 +190,6 @@ export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget,
       recorder.start(1000);
       setSeconds(0);
       setRecording(true);
-      if ("speechSynthesis" in window) {
-        const speech = new SpeechSynthesisUtterance("开始录音");
-        speech.lang = "zh-CN";
-        window.speechSynthesis.speak(speech);
-      }
     } catch (value) {
       stream?.getTracks().forEach(track => track.stop());
       setError(errorMessage(value));
