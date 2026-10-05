@@ -729,8 +729,8 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | POST | `/api/polish` | 使用统一 AI 配置润色提示词，请求体 `{ "content": string, "level": "light" \| "standard" \| "deep" }`；实际推理强度读取润色设置 |
 | GET | `/api/polish-settings` | 读取三档润色指令、推理强度与内置默认值 |
 | PUT | `/api/polish-settings` | 保存三档润色指令与推理强度，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string }, "reasoning_effort": "auto" \| "low" \| "medium" \| "high" }` |
-| GET | `/api/asr-settings` | 读取外部 ASR 配置，按单用户要求明文回显 Key，同时返回 `ffmpeg_available` 和固定协议 `openai` |
-| PUT | `/api/asr-settings` | 保存 `{ "api_url": string, "api_key": string, "model": string, "language": string, "archive_dir": string, "timeout_seconds": number }`，自动继续等待配置的录音；地址填写完整转写端点 |
+| GET | `/api/asr-settings` | 读取外部 ASR 配置，按单用户要求明文回显 Key，同时返回 `ffmpeg_available`、自动识别的协议 `openai` / `chat_audio`、实际请求端点 `resolved_api_url` 与归档位置 `resolved_archive_dir` |
+| PUT | `/api/asr-settings` | 保存 `{ "api_url": string, "api_key": string, "model": string, "language": string }`，自动继续等待配置的录音；地址支持基础地址或完整端点。仍兼容 `archive_dir` 与 `timeout_seconds` 字段，省略的字段保留原值，界面不展示超时设置 |
 | GET | `/api/recordings` | 返回录音存档列表、处理状态、归档目录、转写文本与错误信息 |
 | POST | `/api/recordings/{recording_id}` | 接收整段原始音频请求体，`Content-Type` 指定音频格式，最大 512 MB；完整写入原音频后返回 JSON，并后台执行转码和外部转写；相同 ID 和 SHA-256 的重试复用原记录，不同音频返回 409 |
 | POST | `/api/recordings/{recording_id}/retry` | 重试转码或外部 ASR，保留原录音 ID 和全部音频；已成功或正在处理的任务不重复转写 |
@@ -738,7 +738,9 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 语音输入按钮位于当前提示词编辑器，点击后语音播报“开始录音”。采用浏览器 MediaRecorder 录制整段音频，每秒分片写入 IndexedDB；停止时等待全部分片事务提交，再自动上传。前端成功上传后仍保留本地副本，不自动清理；网络失败、超时或断网时保留副本并按退避间隔重试，网络恢复或刷新后继续上传。未正常停止的录音可以手动恢复已保存部分，避免误上传另一个标签页正在录制的音频。录音历史提供本地试听、下载、本地备份导入、服务器音频下载、重试和转写文本；转写完成后追加到原文并立即保存草稿。录音和归档、润色操作互斥，已有文本不会被转写覆盖。
 
-外部 ASR 设置紧接润色提示词设置，地址、Key、模型、语言、归档目录和超时均明确展示，保存到 `prompt_service/settings.json` 的 `external_asr` 字段；录音索引保存在同文件的 `recordings` 字段，提示词写入保留这些字段。默认归档目录为 `prompt_service/data/recordings/`，自定义路径以 `Path.expanduser()` 展开；历史记录保存原归档路径，修改设置不会移动或丢失历史文件。上传先写临时文件，检查完整性后原子落盘，只有完成原音频归档才返回成功；异常上传移除临时文件。服务端使用系统 ffmpeg 转为 16 kHz 单声道 64 kbps MP3 并保留原音频，调用配置的完整转写 URL，使用 Bearer Key 和 multipart `file`、可选 `model`/`language`、`response_format=json`，读取 JSON `text` 并归档为 UTF-8 文本。不调用本地 ASR。第三方服务自己的文件大小和时长限制仍适用。
+语音归档作为独立卡片放在提示词归档列表下方、润色提示词设置上方；录音按钮与导入入口仍位于编辑器，不影响正在录制的状态和自动上传。无录音时展示空状态，有录音时在固定高度内滚动显示全部历史。
+
+外部 ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和语言四项输入。服务器自动管理归档目录，实际归档位置和请求接口通过只读详情查看；超时不出现在界面，后端沿用已有值或默认值。配置保存到 `prompt_service/settings.json` 的 `external_asr` 字段；录音索引保存在同文件的 `recordings` 字段，提示词写入保留这些字段。默认归档目录为 `prompt_service/data/recordings/`，自定义路径以 `Path.expanduser()` 展开；历史记录保存原归档路径，修改设置不会移动或丢失历史文件。上传先写临时文件，检查完整性后原子落盘，只有完成原音频归档才返回成功；异常上传移除临时文件。服务端使用系统 ffmpeg 转为 16 kHz 单声道 64 kbps MP3 并保留原音频；标准转写服务使用 Bearer Key 和 multipart `file`、可选 `model`/`language`、`response_format=json`，读取 JSON `text`；MiMo ASR 自动适配 `/v1/chat/completions`，使用 JSON `messages[].content[].input_audio.data` 传入 MP3 的 Base64 data URL，语言通过 `asr_options.language` 传入，读取 `choices[0].message.content`。基础地址会补全对应端点，其他完整端点保留原路径与查询参数。转写内容归档为 UTF-8 文本，不调用本地 ASR。第三方服务自己的文件大小和时长限制仍适用。MiMo 请求格式依据[小米官方文档](https://mimo.mi.com/docs/en-US/api/audio/Speech-Recognition)。
 
 录音状态依次为 `queued`、`processing`、`done`，未配置接口为 `waiting_config`，转码或外部请求失败为 `failed`；失败不清理音频，用户可重试。后台队列随 Hub 或独立子服务启动，服务重启后继续未完成任务，取消任务会回收 ffmpeg。浏览器录音需要 HTTPS 或 localhost；本地数据与浏览器和源站绑定，清理站点数据会删除本地副本，浏览器关闭前尚未提交的最后片段也无法保证保存。前端请求持久存储并提供下载备份；存储失败时停止录音，并提供内存中整段音频的紧急下载。
 

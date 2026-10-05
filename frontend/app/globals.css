@@ -519,8 +519,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-voice-input { margin-bottom: var(--space-4); }
 .prompt-audio-import { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; }
 .prompt-audio-import input { width: 200px; }
-.prompt-audio-history { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-.prompt-audio-history summary { cursor: pointer; }
+.prompt-audio-history summary, .prompt-audio-storage summary { cursor: pointer; }
+.prompt-audio-storage { overflow-wrap: anywhere; }
 .prompt-audio-list { max-height: 420px; overflow-y: auto; }
 .prompt-audio-item { padding-block: var(--space-4); border-top: 1px solid var(--color-divider); overflow-wrap: anywhere; }
 .prompt-audio-item p { margin-block: var(--space-2); }

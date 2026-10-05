@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { API_PATHS, apiFetch, encodePath, uploadBinary } from "../../lib/api";
 import { errorMessage, formatDate } from "../../lib/format";
 import { appendAudioChunk, audioExtension, createLocalRecording, downloadAudio, listLocalRecordings, patchLocalRecording, readLocalAudio } from "../../lib/prompt-audio";
 import type { LocalRecording, ServerRecording } from "../../lib/prompt-audio";
-import { Button, ErrorState } from "../ui/primitives";
+import { Button, Card, CardHeader, EmptyState, ErrorState } from "../ui/primitives";
 
 const STATUS = { queued: "服务器已归档，等待处理", processing: "服务器转码 / 外部 ASR 转写中", waiting_config: "已归档，等待 ASR 配置", failed: "处理失败，可重试", done: "已归档并完成转写" };
 
@@ -23,7 +24,7 @@ function AudioPlayback({ item }: { item: LocalRecording }) {
   return url ? <audio controls preload="metadata" src={url} /> : null;
 }
 
-export function VoiceInput({ disabled, onText, onRecordingChange }: { disabled: boolean; onText: (text: string) => void; onRecordingChange: (recording: boolean) => void }) {
+export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget }: { disabled: boolean; onText: (text: string) => void; onRecordingChange: (recording: boolean) => void; archiveTarget: HTMLElement | null }) {
   const [local, setLocal] = useState<LocalRecording[]>([]);
   const [remote, setRemote] = useState<ServerRecording[]>([]);
   const [recording, setRecording] = useState(false);
@@ -229,7 +230,9 @@ export function VoiceInput({ disabled, onText, onRecordingChange }: { disabled: 
     </div>
     {error ? <ErrorState message={error} /> : null}
     {emergency ? <div className="row-actions"><Button size="sm" onClick={() => downloadAudio(emergency.blob, `${emergency.id}.${audioExtension(emergency.blob.type)}`)}>下载完整录音备份</Button><Button size="sm" variant="quiet" onClick={() => { setEmergency(null); setError(""); }}>备份完成，继续录音</Button><span className="muted">完整录音暂在内存中，请先下载，避免刷新页面。</span></div> : null}
-    {allIds.length ? <details className="prompt-audio-history"><summary>录音存档 · {allIds.length}（本地与服务器）</summary>
+    {archiveTarget ? createPortal(<Card className="prompt-settings-card prompt-audio-history">
+      <CardHeader title={`语音归档 · ${allIds.length}`} description="本地与服务器录音，支持试听、下载和转写重试。" />
+      {allIds.length ? <>
       <p className="muted">本地录音保存在当前浏览器与站点中，上传成功也不会删除。清理站点数据会删除本地副本，请按需下载备份。</p>
       <div className="prompt-audio-list">{allIds.map(id => {
         const item = local.find(item => item.id === id);
@@ -240,7 +243,6 @@ export function VoiceInput({ disabled, onText, onRecordingChange }: { disabled: 
           <div className="prompt-audio-meta"><strong>{formatDate(date)}</strong><span>{((item?.size || server?.size || 0) / 1024 / 1024).toFixed(2)} MB · {item ? "有本地副本" : "仅服务器副本"}</span></div>
           <p role="status">{active ? "正在录音并保存本地分片" : item && !item.ready ? "录音未正常结束或正在其他标签页录制，可恢复已保存部分" : server ? STATUS[server.status] : uploads[id] || "本地已保存，等待上传"}</p>
           {server?.error ? <p className="muted">{server.error}</p> : null}
-          {server ? <p className="muted">服务器归档目录：{server.archive_dir}</p> : null}
           <div className="row-actions">
             {item && !active ? <Button size="sm" variant="quiet" onClick={() => void readLocalAudio(item).then(blob => downloadAudio(blob, `${id}.${audioExtension(item.mime_type)}`)).catch(value => setError(errorMessage(value)))}>下载本地原音频</Button> : null}
             {server ? <a href={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio`}>下载服务器原音频</a> : null}
@@ -253,6 +255,7 @@ export function VoiceInput({ disabled, onText, onRecordingChange }: { disabled: 
           {server?.text ? <details><summary>查看转写文本</summary><pre>{server.text}</pre></details> : null}
         </div>;
       })}</div>
-    </details> : null}
+      </> : <EmptyState title="暂无语音归档" detail="点击语音输入录音，或导入已有录音。" />}
+    </Card>, archiveTarget) : null}
   </div>;
 }

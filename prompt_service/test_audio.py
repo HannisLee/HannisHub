@@ -1,6 +1,7 @@
 """录音归档与外部 ASR 的集成回归检查，不依赖真实密钥。"""
 
 import asyncio
+import base64
 import io
 import json
 import tempfile
@@ -13,7 +14,7 @@ from unittest.mock import patch
 import httpx
 from fastapi import FastAPI
 
-from prompt_service.audio import AudioService, MAX_AUDIO_BYTES
+from prompt_service.audio import AudioService, MAX_AUDIO_BYTES, resolve_asr_endpoint
 
 
 class AudioTests(unittest.IsolatedAsyncioTestCase):
@@ -102,6 +103,51 @@ class AudioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(item["text"], "这是完整转写")
         self.assertEqual(Path(item["raw_path"]).with_name("rec_test_001.txt").read_text(), item["text"])
+
+    async def test_mimo_base_address_audio_protocol_and_archive(self):
+        await self.upload()
+        before = await self.wait_status("waiting_config")
+
+        def handle(request):
+            self.assertEqual(str(request.url), "https://api.xiaomimimo.com/v1/chat/completions")
+            self.assertEqual(request.headers["authorization"], "Bearer test-key")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["model"], "mimo-v2.5-asr")
+            self.assertEqual(payload["asr_options"], {"language": "auto"})
+            self.assertFalse(payload["stream"])
+            audio = payload["messages"][0]["content"][0]
+            self.assertEqual(audio["type"], "input_audio")
+            self.assertEqual(base64.b64decode(audio["input_audio"]["data"].split(",", 1)[1]), Path(before["converted_path"]).read_bytes())
+            return httpx.Response(200, json={"choices": [{"message": {"content": "小米转写成功"}}]})
+
+        original_client = httpx.AsyncClient
+        with patch("prompt_service.audio.httpx.AsyncClient", side_effect=lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs)):
+            response = await self.client.put("/api/asr-settings", json={"api_url": "https://api.xiaomimimo.com/v1", "api_key": "test-key", "model": "mimo-v2.5-asr"})
+            self.assertEqual(response.json()["protocol"], "chat_audio")
+            self.assertEqual(response.json()["resolved_api_url"], "https://api.xiaomimimo.com/v1/chat/completions")
+            item = await self.wait_status("done")
+        self.assertEqual(item["text"], "小米转写成功")
+        self.assertEqual(Path(item["raw_path"]).read_bytes(), self.audio)
+
+    async def test_endpoint_resolution_keeps_full_endpoints_and_query(self):
+        cases = [
+            ({"api_url": "https://asr.example/v1/", "model": "whisper"}, ("openai", "https://asr.example/v1/audio/transcriptions")),
+            ({"api_url": "https://asr.example/", "model": "whisper"}, ("openai", "https://asr.example/v1/audio/transcriptions")),
+            ({"api_url": "https://asr.example/transcribe?version=2", "model": "whisper"}, ("openai", "https://asr.example/transcribe?version=2")),
+            ({"api_url": "https://asr.example/v1", "model": "mimo-v2.5-asr"}, ("chat_audio", "https://asr.example/v1/chat/completions")),
+            ({"api_url": "https://api.xiaomimimo.com/v1/audio/transcriptions", "model": "mimo-v2.5-asr"}, ("chat_audio", "https://api.xiaomimimo.com/v1/chat/completions")),
+        ]
+        for config, expected in cases:
+            with self.subTest(config=config):
+                self.assertEqual(resolve_asr_endpoint(config), expected)
+
+    async def test_simplified_settings_preserve_hidden_directory_and_timeout(self):
+        directory = str(self.directory / "custom-archive")
+        await self.client.put("/api/asr-settings", json={"archive_dir": directory, "timeout_seconds": 123})
+        response = await self.client.put("/api/asr-settings", json={"api_url": "https://asr.example/v1", "api_key": "new-key", "model": "new-model", "language": "zh"})
+        self.assertEqual(response.json()["archive_dir"], directory)
+        self.assertEqual(response.json()["resolved_archive_dir"], directory)
+        self.assertEqual(response.json()["timeout_seconds"], 123)
 
     async def test_asr_failure_retains_audio_and_retry_recovers(self):
         await self.upload()

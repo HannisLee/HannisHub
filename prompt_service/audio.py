@@ -1,6 +1,7 @@
 """提示词语音输入：原音频落盘、转码归档和外部 ASR，任务状态以 JSON 持久化。"""
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,19 @@ from fastapi.responses import FileResponse
 MAX_AUDIO_BYTES = 512 * 1024 * 1024
 MIME_EXTENSIONS = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav", "audio/mpeg": "mp3"}
 DEFAULT_ASR = {"api_url": "", "api_key": "", "model": "", "language": "", "archive_dir": "", "timeout_seconds": 300}
+
+
+def resolve_asr_endpoint(config):
+    """兼容基础地址与完整端点，自动识别 MiMo 的音频聊天协议。"""
+    parsed = urlsplit(config["api_url"])
+    path = parsed.path.rstrip("/")
+    mimo = config.get("model", "").lower().startswith("mimo-") or (parsed.hostname or "").endswith(".xiaomimimo.com")
+    protocol = "chat_audio" if mimo or path.endswith("/chat/completions") else "openai"
+    if path in ("", "/v1"):
+        path = "/v1/chat/completions" if protocol == "chat_audio" else "/v1/audio/transcriptions"
+    elif mimo and path.endswith("/audio/transcriptions"):
+        path = path.removesuffix("/audio/transcriptions") + "/chat/completions"
+    return protocol, urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, ""))
 
 
 class AudioService:
@@ -41,7 +55,11 @@ class AudioService:
         return {**DEFAULT_ASR, **self.read_settings().get("external_asr", {})}
 
     async def settings(self):
-        return {**self.config(), "ffmpeg_available": bool(shutil.which("ffmpeg")), "protocol": "openai"}
+        config = self.config()
+        protocol, endpoint = resolve_asr_endpoint(config)
+        directory = Path(config["archive_dir"] or self.app_dir / "data" / "recordings").expanduser().resolve()
+        return {**config, "ffmpeg_available": bool(shutil.which("ffmpeg")), "protocol": protocol,
+                "resolved_api_url": endpoint if config["api_url"] else "", "resolved_archive_dir": str(directory)}
 
     async def save_settings(self, request: Request):
         try:
@@ -50,16 +68,17 @@ class AudioService:
             raise HTTPException(400, "请求体必须是有效 JSON") from exc
         if not isinstance(payload, dict):
             raise HTTPException(400, "请求体必须是 JSON 对象")
+        current = self.config()
         config = {}
         for field in ("api_url", "api_key", "model", "language", "archive_dir"):
-            value = payload.get(field, "")
+            value = payload.get(field, current[field])
             if not isinstance(value, str) or len(value) > 4096 or "\n" in value or "\r" in value:
                 raise HTTPException(400, f"{field} 必须是单行字符串，最长 4096 字符")
             config[field] = value.strip()
         parsed = urlsplit(config["api_url"])
         if config["api_url"] and (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment):
             raise HTTPException(400, "API 地址必须是完整的 HTTP 或 HTTPS 转写端点")
-        timeout = payload.get("timeout_seconds", 300)
+        timeout = payload.get("timeout_seconds", self.config()["timeout_seconds"])
         if type(timeout) is not int or not 10 <= timeout <= 3600:
             raise HTTPException(400, "超时必须为 10 至 3600 秒的整数")
         config["timeout_seconds"] = timeout
@@ -237,16 +256,36 @@ class AudioService:
             if config["language"]:
                 fields["language"] = config["language"]
             headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
+            protocol, endpoint = resolve_asr_endpoint(config)
             async with httpx.AsyncClient(timeout=config["timeout_seconds"]) as client:
-                with target.open("rb") as audio:
-                    response = await client.post(config["api_url"], headers=headers, data=fields, files={"file": (target.name, audio, "audio/mpeg")})
+                if protocol == "chat_audio":
+                    payload = {
+                        "model": config["model"] or "mimo-v2.5-asr",
+                        "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {
+                            "data": "data:audio/mpeg;base64," + base64.b64encode(target.read_bytes()).decode("ascii"),
+                        }}]}],
+                        "asr_options": {"language": config["language"] or "auto"},
+                        "stream": False,
+                    }
+                    response = await client.post(endpoint, headers=headers, json=payload)
+                else:
+                    with target.open("rb") as audio:
+                        response = await client.post(endpoint, headers=headers, data=fields, files={"file": (target.name, audio, "audio/mpeg")})
             if not response.is_success:
                 # 避免第三方错误页回显请求密钥，仅保存状态码。
                 raise RuntimeError(f"外部 ASR 返回 HTTP {response.status_code}，请检查地址、Key、模型和服务音频限制")
             result = response.json()
-            text = result.get("text") if isinstance(result, dict) else None
+            text = None
+            if isinstance(result, dict):
+                if protocol == "chat_audio":
+                    choices = result.get("choices")
+                    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                        message = choices[0].get("message")
+                        text = message.get("content") if isinstance(message, dict) else None
+                else:
+                    text = result.get("text")
             if not isinstance(text, str) or not text.strip():
-                raise RuntimeError("外部 ASR 未返回有效的 text 文本")
+                raise RuntimeError("外部 ASR 未返回有效的转写文本")
             text_path = raw.with_name(f"{recording_id}.txt")
             text_path.write_text(text, encoding="utf-8")
             self.update(recording_id, status="done", text=text, error="")

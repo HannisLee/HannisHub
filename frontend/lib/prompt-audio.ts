@@ -30,6 +30,8 @@ export interface ExternalAsrSettings {
   archive_dir: string;
   timeout_seconds: number;
   ffmpeg_available?: boolean;
+  resolved_api_url?: string;
+  resolved_archive_dir?: string;
 }
 
 function openAudioStore(): Promise<IDBDatabase> {

@@ -57,6 +57,7 @@ export function PromptWorkspace() {
   const [polishing, setPolishing] = useState<PromptPolishLevel | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  const [audioArchiveTarget, setAudioArchiveTarget] = useState<HTMLDivElement | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -336,7 +337,7 @@ export function PromptWorkspace() {
             </div>
           }
         />
-        <VoiceInput disabled={busy} onText={appendVoiceText} onRecordingChange={setVoiceRecording} />
+        <VoiceInput disabled={busy} onText={appendVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} />
         <textarea
           className="prompt-editor"
           value={currentValue}
@@ -393,6 +394,8 @@ export function PromptWorkspace() {
           ) : <EmptyState title="暂无归档提示词" detail="归档内容会按时间顺序出现在这里。" />}
         </Card>
       </div>
+
+      <div ref={setAudioArchiveTarget} />
 
       <Card className="prompt-settings-card">
         <CardHeader
