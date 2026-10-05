@@ -39,17 +39,19 @@ export function CardHeader({
   title,
   description,
   actions,
+  titleActions,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   actions?: ReactNode;
+  titleActions?: ReactNode;
 }) {
   return (
     <div className="card-header">
       <div>
         {eyebrow ? <p className="eyebrow eyebrow-small">{eyebrow}</p> : null}
-        <h2 className="card-title">{title}</h2>
+        {titleActions ? <div className="card-title-row"><h2 className="card-title">{title}</h2>{titleActions}</div> : <h2 className="card-title">{title}</h2>}
         {description ? <p className="card-description">{description}</p> : null}
       </div>
       {actions ? <div className="card-actions">{actions}</div> : null}

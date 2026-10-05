@@ -58,29 +58,27 @@ export function PromptWorkspace() {
   const [archiving, setArchiving] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [audioArchiveTarget, setAudioArchiveTarget] = useState<HTMLDivElement | null>(null);
+  const [voiceFeedbackTarget, setVoiceFeedbackTarget] = useState<HTMLDivElement | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const archiveInFlightRef = useRef(false);
   const messageTokenRef = useRef(0);
   const polishTokenRef = useRef(0);
-  const rawRef = useRef(raw);
-  useEffect(() => { rawRef.current = raw; }, [raw]);
 
   const currentValue = mode === "polished" ? polished : raw;
   const busy = !draftReady || archiving || polishing !== null || voiceRecording;
 
-  const appendVoiceText = useCallback((text: string) => {
-    const next = rawRef.current ? `${rawRef.current}\n${text}` : text;
-    // 插入转写时立即持久化草稿，避免本地已标记插入但页面关闭前草稿尚未保存。
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw: next, polished: "", mode: "raw", stale: true, restoredId }));
-    rawRef.current = next;
-    setRaw(next);
+  const replaceVoiceText = useCallback((text: string) => {
+    // 转写成功立即替换并持久化草稿，录音结果作为新的提示词。
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw: text, polished: "", mode: "raw", stale: true, restoredId: null }));
+    setRaw(text);
     setPolished("");
     setMode("raw");
     setStale(true);
+    setRestoredId(null);
     polishTokenRef.current += 1;
-  }, [restoredId]);
+  }, []);
 
   const loadArchive = useCallback(async () => {
     try {
@@ -312,6 +310,7 @@ export function PromptWorkspace() {
       <Card className="prompt-editor-card">
         <CardHeader
           title="当前提示词"
+          titleActions={<VoiceInput disabled={busy} onText={replaceVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} feedbackTarget={voiceFeedbackTarget} />}
           description={stale && polished ? "原文已修改，润色稿可能不是最新版本。" : "三档润色均使用项目设置中已保存的 AI 模型。"}
           actions={
             <div className="editor-actions">
@@ -337,7 +336,7 @@ export function PromptWorkspace() {
             </div>
           }
         />
-        <VoiceInput disabled={busy} onText={appendVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} />
+        <div ref={setVoiceFeedbackTarget} />
         <textarea
           className="prompt-editor"
           value={currentValue}
