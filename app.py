@@ -93,8 +93,12 @@ SERVICES: list[dict[str, str]] = [
 async def lifespan(_: FastAPI):
     """由 Hub 统一管理子服务生命周期。"""
     await server_manager_app.start_scheduler()
-    yield
-    await server_manager_app.stop_scheduler()
+    await prompt_service_app.audio_service.start()
+    try:
+        yield
+    finally:
+        await prompt_service_app.audio_service.stop()
+        await server_manager_app.stop_scheduler()
 
 
 app = FastAPI(title="HannisHub", lifespan=lifespan)

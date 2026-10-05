@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -29,7 +30,17 @@ UNGROUPED_ID = ""
 _SETTINGS_LOCK = threading.RLock()
 DEFAULT_SETTINGS = {"prompts": [], "groups": []}
 
-app = FastAPI(title="HannisHub Prompt")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """独立运行时管理语音归档任务，Hub 挂载时由主应用管理。"""
+    await audio_service.start()
+    try:
+        yield
+    finally:
+        await audio_service.stop()
+
+
+app = FastAPI(title="HannisHub Prompt", lifespan=lifespan)
 router = APIRouter()
 
 
@@ -57,6 +68,7 @@ def _read_settings() -> dict:
                 prompts = data.get("prompts", [])
                 groups = data.get("groups", [])
                 return {
+                    **data,
                     "prompts": [item for item in prompts if isinstance(item, dict)]
                     if isinstance(prompts, list)
                     else [],
@@ -439,5 +451,9 @@ async def delete_group(group_id: str):
 
 
 # 统一注册 API 路由：Hub 挂载模式和独立运行模式共用同一组处理函数
+from prompt_service.audio import AudioService
+
+audio_service = AudioService(APP_DIR, _read_settings, _write_settings, _SETTINGS_LOCK)
+router.include_router(audio_service.router)
 app.include_router(router, prefix="/api")
 app.include_router(router, prefix="/prompt/api")

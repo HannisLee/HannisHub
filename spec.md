@@ -729,5 +729,17 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | POST | `/api/polish` | 使用统一 AI 配置润色提示词，请求体 `{ "content": string, "level": "light" \| "standard" \| "deep" }`；实际推理强度读取润色设置 |
 | GET | `/api/polish-settings` | 读取三档润色指令、推理强度与内置默认值 |
 | PUT | `/api/polish-settings` | 保存三档润色指令与推理强度，请求体 `{ "prompts": { "light": string, "standard": string, "deep": string }, "reasoning_effort": "auto" \| "low" \| "medium" \| "high" }` |
+| GET | `/api/asr-settings` | 读取外部 ASR 配置，按单用户要求明文回显 Key，同时返回 `ffmpeg_available` 和固定协议 `openai` |
+| PUT | `/api/asr-settings` | 保存 `{ "api_url": string, "api_key": string, "model": string, "language": string, "archive_dir": string, "timeout_seconds": number }`，自动继续等待配置的录音；地址填写完整转写端点 |
+| GET | `/api/recordings` | 返回录音存档列表、处理状态、归档目录、转写文本与错误信息 |
+| POST | `/api/recordings/{recording_id}` | 接收整段原始音频请求体，`Content-Type` 指定音频格式，最大 512 MB；完整写入原音频后返回 JSON，并后台执行转码和外部转写；相同 ID 和 SHA-256 的重试复用原记录，不同音频返回 409 |
+| POST | `/api/recordings/{recording_id}/retry` | 重试转码或外部 ASR，保留原录音 ID 和全部音频；已成功或正在处理的任务不重复转写 |
+| GET | `/api/recordings/{recording_id}/audio` | 下载服务器原音频；`?converted=true` 下载转码 MP3。该文件端点返回音频，其余语音 API 返回 JSON |
+
+语音输入按钮位于当前提示词编辑器，点击后语音播报“开始录音”。采用浏览器 MediaRecorder 录制整段音频，每秒分片写入 IndexedDB；停止时等待全部分片事务提交，再自动上传。前端成功上传后仍保留本地副本，不自动清理；网络失败、超时或断网时保留副本并按退避间隔重试，网络恢复或刷新后继续上传。未正常停止的录音可以手动恢复已保存部分，避免误上传另一个标签页正在录制的音频。录音历史提供本地试听、下载、本地备份导入、服务器音频下载、重试和转写文本；转写完成后追加到原文并立即保存草稿。录音和归档、润色操作互斥，已有文本不会被转写覆盖。
+
+外部 ASR 设置紧接润色提示词设置，地址、Key、模型、语言、归档目录和超时均明确展示，保存到 `prompt_service/settings.json` 的 `external_asr` 字段；录音索引保存在同文件的 `recordings` 字段，提示词写入保留这些字段。默认归档目录为 `prompt_service/data/recordings/`，自定义路径以 `Path.expanduser()` 展开；历史记录保存原归档路径，修改设置不会移动或丢失历史文件。上传先写临时文件，检查完整性后原子落盘，只有完成原音频归档才返回成功；异常上传移除临时文件。服务端使用系统 ffmpeg 转为 16 kHz 单声道 64 kbps MP3 并保留原音频，调用配置的完整转写 URL，使用 Bearer Key 和 multipart `file`、可选 `model`/`language`、`response_format=json`，读取 JSON `text` 并归档为 UTF-8 文本。不调用本地 ASR。第三方服务自己的文件大小和时长限制仍适用。
+
+录音状态依次为 `queued`、`processing`、`done`，未配置接口为 `waiting_config`，转码或外部请求失败为 `failed`；失败不清理音频，用户可重试。后台队列随 Hub 或独立子服务启动，服务重启后继续未完成任务，取消任务会回收 ffmpeg。浏览器录音需要 HTTPS 或 localhost；本地数据与浏览器和源站绑定，清理站点数据会删除本地副本，浏览器关闭前尚未提交的最后片段也无法保证保存。前端请求持久存储并提供下载备份；存储失败时停止录音，并提供内存中整段音频的紧急下载。
 
 服务端限制：归档提示词与原文最长 200 万字符，单次 AI 润色最多 20 万字符。归档数量无上限，前端归档列表按时间倒序渲染全部历史记录，使用固定高度的内部滚动列表，可视区域约 10 条并显示当前归档总数。折叠条目为单行摘要，避免标题在列表内换行。若服务不支持所选推理强度，后端会去掉 `reasoning_effort` 参数重试一次并返回实际生效值。独立启动方式为进入 `prompt_service/` 后执行 `bash run.sh`，默认监听 `0.0.0.0:8084`；常规部署时由 Hub 挂载到 8081 的 `/prompt` 路径，不需要单独暴露端口。为兼容两种运行方式，后端将同一组 API 同时注册到 `/api` 与 `/prompt/api` 两个前缀。

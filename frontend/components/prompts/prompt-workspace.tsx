@@ -12,6 +12,8 @@ import type {
   PromptReasoningEffort,
 } from "../../lib/types";
 import { Button, Card, CardHeader, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
+import { VoiceInput } from "./voice-input";
+import { VoiceSettings } from "./voice-settings";
 
 const DRAFT_KEY = "hannishub_prompt_draft";
 const LEGACY_DRAFT_KEY = "llamamanager_prompt_draft";
@@ -54,14 +56,30 @@ export function PromptWorkspace() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [polishing, setPolishing] = useState<PromptPolishLevel | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const archiveInFlightRef = useRef(false);
   const messageTokenRef = useRef(0);
   const polishTokenRef = useRef(0);
+  const rawRef = useRef(raw);
+  useEffect(() => { rawRef.current = raw; }, [raw]);
 
   const currentValue = mode === "polished" ? polished : raw;
-  const busy = archiving || polishing !== null;
+  const busy = !draftReady || archiving || polishing !== null || voiceRecording;
+
+  const appendVoiceText = useCallback((text: string) => {
+    const next = rawRef.current ? `${rawRef.current}\n${text}` : text;
+    // 插入转写时立即持久化草稿，避免本地已标记插入但页面关闭前草稿尚未保存。
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw: next, polished: "", mode: "raw", stale: true, restoredId }));
+    rawRef.current = next;
+    setRaw(next);
+    setPolished("");
+    setMode("raw");
+    setStale(true);
+    polishTokenRef.current += 1;
+  }, [restoredId]);
 
   const loadArchive = useCallback(async () => {
     try {
@@ -94,6 +112,7 @@ export function PromptWorkspace() {
       void loadArchive();
       void loadPolishSettings();
       const stored = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(LEGACY_DRAFT_KEY);
+      setDraftReady(true);
       if (!stored) return;
       try {
         const draft = JSON.parse(stored) as Partial<Draft>;
@@ -112,11 +131,12 @@ export function PromptWorkspace() {
   }, [loadArchive, loadPolishSettings]);
 
   useEffect(() => {
+    if (!draftReady) return;
     const timer = window.setTimeout(() => {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw, polished, mode, stale, restoredId } satisfies Draft));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [raw, polished, mode, stale, restoredId]);
+  }, [raw, polished, mode, stale, restoredId, draftReady]);
 
   function claimMessage() {
     const token = ++messageTokenRef.current;
@@ -316,6 +336,7 @@ export function PromptWorkspace() {
             </div>
           }
         />
+        <VoiceInput disabled={busy} onText={appendVoiceText} onRecordingChange={setVoiceRecording} />
         <textarea
           className="prompt-editor"
           value={currentValue}
@@ -427,6 +448,7 @@ export function PromptWorkspace() {
           </>
         )}
       </Card>
+      <VoiceSettings />
     </div>
   );
 }

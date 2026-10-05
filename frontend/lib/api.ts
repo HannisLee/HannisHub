@@ -54,11 +54,13 @@ export function uploadBinary<T>(
   body: XMLHttpRequestBodyInit,
   headers: Record<string, string>,
   onProgress: (percent: number) => void,
+  timeoutMs = 0,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", path);
     request.withCredentials = true;
+    request.timeout = timeoutMs;
     for (const [key, value] of Object.entries(headers)) request.setRequestHeader(key, value);
     request.upload.addEventListener("progress", event => {
       if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
@@ -79,6 +81,7 @@ export function uploadBinary<T>(
     });
     request.addEventListener("error", () => reject(new Error("网络请求失败")));
     request.addEventListener("abort", () => reject(new Error("上传已取消")));
+    request.addEventListener("timeout", () => reject(new Error("上传超时")));
     request.send(body);
   });
 }
