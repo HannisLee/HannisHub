@@ -3,28 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { API_PATHS, apiFetch, encodePath, uploadBinary } from "../../lib/api";
-import { errorMessage, formatDate } from "../../lib/format";
+import { errorMessage, formatBytes, formatDate, truncate } from "../../lib/format";
 import { appendAudioChunk, audioExtension, createLocalRecording, downloadAudio, listLocalRecordings, patchLocalRecording, readLocalAudio } from "../../lib/prompt-audio";
 import type { LocalRecording, ServerRecording } from "../../lib/prompt-audio";
 import { Button, Card, CardHeader, EmptyState, ErrorState } from "../ui/primitives";
+import { RecordingPlayer } from "./recording-player";
 
 const STATUS = { queued: "服务器已归档，等待处理", processing: "服务器转码 / 外部 ASR 转写中", waiting_config: "已归档，等待 ASR 配置", failed: "处理失败，可重试", done: "已归档并完成转写" };
 
-function AudioPlayback({ item }: { item: LocalRecording }) {
-  const [url, setUrl] = useState("");
-  const { id, mime_type } = item;
-  useEffect(() => {
-    let active = true;
-    let objectUrl = "";
-    void readLocalAudio({ id, mime_type }).then(blob => {
-      if (active) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); }
-    }).catch(() => {});
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [id, mime_type]);
-  return url ? <audio controls preload="metadata" src={url} /> : null;
-}
-
-export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget, feedbackTarget }: { disabled: boolean; onText: (text: string) => void; onRecordingChange: (recording: boolean) => void; archiveTarget: HTMLElement | null; feedbackTarget: HTMLElement | null }) {
+export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, archiveTarget, feedbackTarget }: { disabled: boolean; onText: (text: string) => void; onRestore: (text: string) => void; onRecordingChange: (recording: boolean) => void; archiveTarget: HTMLElement | null; feedbackTarget: HTMLElement | null }) {
   const [local, setLocal] = useState<LocalRecording[]>([]);
   const [remote, setRemote] = useState<ServerRecording[]>([]);
   const [recording, setRecording] = useState(false);
@@ -35,6 +22,7 @@ export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget,
   const [transcribing, setTranscribing] = useState(false);
   const [uploads, setUploads] = useState<Record<string, string>>({});
   const [emergency, setEmergency] = useState<{ blob: Blob; id: string } | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const pendingIdRef = useRef<string | null>(null);
@@ -209,9 +197,12 @@ export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget,
     } catch (value) { setError(errorMessage(value)); }
   }
 
-  const allIds = [...new Set([...local.map(item => item.id), ...remote.map(item => item.id)])];
+  const allIds = [...new Set([...local.map(item => item.id), ...remote.map(item => item.id)])].sort((a, b) => {
+    const date = (id: string) => local.find(item => item.id === id)?.created_at || remote.find(item => item.id === id)?.created_at || "";
+    return date(b).localeCompare(date(a));
+  });
   return <>
-      <Button size="sm" variant={recording ? "danger" : "secondary"} disabled={starting || transcribing || (!recording && (disabled || !!emergency))}
+      <Button size="sm" variant={recording ? "danger" : "secondary"} className={recording ? "" : "prompt-audio-action"} disabled={starting || transcribing || (!recording && (disabled || !!emergency))}
         onClick={() => recording ? recorderRef.current?.stop() : void start()}>
         {starting ? "准备中…" : recording ? `停止录音 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : transcribing ? "转写中…" : "语音输入"}
       </Button>
@@ -220,31 +211,43 @@ export function VoiceInput({ disabled, onText, onRecordingChange, archiveTarget,
       {emergency ? <div className="row-actions"><Button size="sm" onClick={() => downloadAudio(emergency.blob, `${emergency.id}.${audioExtension(emergency.blob.type)}`)}>下载完整录音备份</Button><Button size="sm" variant="quiet" onClick={() => { setEmergency(null); setError(""); }}>备份完成，继续录音</Button><span className="muted">完整录音暂在内存中，请先下载，避免刷新页面。</span></div> : null}
     </>, feedbackTarget) : null}
     {archiveTarget ? createPortal(<Card className="prompt-settings-card prompt-audio-history">
-      <CardHeader title={`语音归档 · ${allIds.length}`} description="本地与服务器录音，支持试听、下载和转写重试。" />
-      {allIds.length ? <>
-      <p className="muted">本地录音保存在当前浏览器与站点中，上传成功也不会删除。清理站点数据会删除本地副本，请按需下载备份。</p>
+      <CardHeader title={`语音归档 · ${allIds.length}`} />
+      {allIds.length ?
       <div className="prompt-audio-list">{allIds.map(id => {
         const item = local.find(item => item.id === id);
         const server = remote.find(item => item.id === id);
         const active = activeIdRef.current === id;
         const date = item?.created_at || server?.created_at || "";
-        return <div className="prompt-audio-item" key={id}>
-          <div className="prompt-audio-meta"><strong>{formatDate(date)}</strong><span>{((item?.size || server?.size || 0) / 1024 / 1024).toFixed(2)} MB · {item ? "有本地副本" : "仅服务器副本"}</span></div>
-          <p role="status">{active ? "正在录音并保存本地分片" : item && !item.ready ? "录音未正常结束或正在其他标签页录制，可恢复已保存部分" : server ? STATUS[server.status] : uploads[id] || "本地已保存，等待上传"}</p>
-          {server?.error ? <p className="muted">{server.error}</p> : null}
-          <div className="row-actions">
-            {item && !active ? <Button size="sm" variant="quiet" onClick={() => void readLocalAudio(item).then(blob => downloadAudio(blob, `${id}.${audioExtension(item.mime_type)}`)).catch(value => setError(errorMessage(value)))}>下载本地原音频</Button> : null}
-            {server ? <a href={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio`}>下载服务器原音频</a> : null}
-            {server && ["done", "waiting_config"].includes(server.status) ? <a href={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio?converted=true`}>下载转码归档</a> : null}
-            {!active && item && !item.ready ? <Button size="sm" variant="secondary" onClick={() => void retry(id, undefined, true)}>恢复已保存音频并上传</Button> : null}
-            {!active && (!server || ["failed", "waiting_config"].includes(server.status)) && item?.ready !== false ? <Button size="sm" variant="secondary" onClick={() => void retry(id, server)}>重试</Button> : null}
-            {server?.text ? <Button size="sm" variant="quiet" disabled={disabled} onClick={() => textRef.current(server.text)}>使用转写替换提示词</Button> : null}
+        const status = active ? "正在录音" : item && !item.ready ? "录音未完成" : server ? STATUS[server.status] : uploads[id] || "等待上传";
+        const title = server?.text ? truncate(server.text.split(/\r?\n/).find(line => line.trim()) || server.text, 100) : status;
+        return <details className="prompt-item prompt-audio-item" key={id} onToggle={event => {
+          const open = event.currentTarget.open;
+          setExpanded(previous => { const next = new Set(previous); if (open) next.add(id); else next.delete(id); return next; });
+        }}>
+          <summary>
+            <span className="prompt-item-copy">
+              <small className="prompt-item-meta" title={formatDate(date)}>{formatDate(date)}</small>
+              <strong className="prompt-item-title">{title}</strong>
+            </span>
+            <span className="prompt-audio-actions" onClick={event => event.stopPropagation()}>
+              {server ? <a className="button button-secondary button-sm prompt-audio-action" href={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio`} download>下载音频</a> : <Button size="sm" variant="secondary" className="prompt-audio-action" disabled>下载音频</Button>}
+              <Button size="sm" variant="secondary" className="prompt-audio-action" disabled={disabled || !server?.text} onClick={() => { if (server?.text) onRestore(server.text); }}>恢复</Button>
+            </span>
+            <span className="prompt-item-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div className="prompt-item-body">
+            {server?.text ? <pre>{server.text}</pre> : <p className="muted" role="status">{status}</p>}
+            {server?.error ? <p className="prompt-audio-error">{server.error}</p> : null}
+            {!active && expanded.has(id) && (server || item?.size) ? <RecordingPlayer id={id} local={item} archived={!!server} converted={!!server && ["done", "waiting_config"].includes(server.status)} /> : null}
+            <div className="prompt-audio-detail-meta">
+              <span>{formatBytes(item?.size || server?.size)} · {item ? "本地副本已保留" : "服务器已归档"}</span>
+              {!active && item && !item.ready ? <Button size="sm" variant="secondary" className="prompt-audio-action" onClick={() => void retry(id, undefined, true)}>继续上传</Button> : null}
+              {!active && (!server || ["failed", "waiting_config"].includes(server.status)) && item?.ready !== false ? <Button size="sm" variant="secondary" className="prompt-audio-action" onClick={() => void retry(id, server)}>重试</Button> : null}
+            </div>
           </div>
-          {!active && item?.size ? <AudioPlayback item={item} /> : server ? <audio controls preload="none" src={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio`} /> : null}
-          {server?.text ? <details><summary>查看转写文本</summary><pre>{server.text}</pre></details> : null}
-        </div>;
+        </details>;
       })}</div>
-      </> : <EmptyState title="暂无语音归档" detail="点击当前提示词右侧的语音输入按钮开始录音。" />}
+      : <EmptyState title="暂无语音归档" detail="点击当前提示词右侧的语音输入按钮开始录音。" />}
     </Card>, archiveTarget) : null}
   </>;
 }

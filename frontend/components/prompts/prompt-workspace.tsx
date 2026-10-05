@@ -80,6 +80,12 @@ export function PromptWorkspace() {
     polishTokenRef.current += 1;
   }, []);
 
+  const restoreVoiceText = useCallback((text: string) => {
+    replaceVoiceText(text);
+    setMessage("已恢复到编辑器");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [replaceVoiceText]);
+
   const loadArchive = useCallback(async () => {
     try {
       const data = await apiFetch<{ prompts: PromptItem[] }>(`${API_PATHS.prompts}/prompts`);
@@ -310,8 +316,8 @@ export function PromptWorkspace() {
       <Card className="prompt-editor-card">
         <CardHeader
           title="当前提示词"
-          titleActions={<VoiceInput disabled={busy} onText={replaceVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} feedbackTarget={voiceFeedbackTarget} />}
-          description={stale && polished ? "原文已修改，润色稿可能不是最新版本。" : "三档润色均使用项目设置中已保存的 AI 模型。"}
+          titleActions={<VoiceInput disabled={busy} onText={replaceVoiceText} onRestore={restoreVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} feedbackTarget={voiceFeedbackTarget} />}
+          description={stale && polished ? "原文已修改，润色稿可能不是最新版本。" : undefined}
           actions={
             <div className="editor-actions">
               <div className="prompt-polish-actions" aria-label="润色强度">
