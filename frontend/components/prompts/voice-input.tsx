@@ -2,16 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { API_PATHS, apiFetch, encodePath, uploadBinary } from "../../lib/api";
+import { API_PATHS, ApiError, apiFetch, encodePath, uploadBinary } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate, truncate } from "../../lib/format";
-import { appendAudioChunk, audioExtension, createLocalRecording, downloadAudio, listLocalRecordings, patchLocalRecording, readLocalAudio } from "../../lib/prompt-audio";
-import type { LocalRecording, ServerRecording } from "../../lib/prompt-audio";
+import { appendAudioChunk, audioExtension, createLocalRecording, deleteLocalRecording, downloadAudio, listLocalRecordings, patchLocalRecording, readLocalAudio } from "../../lib/prompt-audio";
+import type { LocalRecording, ServerRecording, VoiceInsertMode } from "../../lib/prompt-audio";
 import { Button, Card, CardHeader, EmptyState, ErrorState } from "../ui/primitives";
 import { RecordingPlayer } from "./recording-player";
 
 const STATUS = { queued: "服务器已归档，等待处理", processing: "服务器转码 / 外部 ASR 转写中", waiting_config: "已归档，等待 ASR 配置", failed: "处理失败，可重试", done: "已归档并完成转写" };
 
-export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, archiveTarget, feedbackTarget }: { disabled: boolean; onText: (text: string) => void; onRestore: (text: string) => void; onRecordingChange: (recording: boolean) => void; archiveTarget: HTMLElement | null; feedbackTarget: HTMLElement | null }) {
+export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, onStatusChange, archiveTarget, feedbackTarget }: { disabled: boolean; onText: (text: string, insertMode: VoiceInsertMode) => void; onRestore: (text: string) => void; onRecordingChange: (recording: boolean) => void; onStatusChange: (status: string) => void; archiveTarget: HTMLElement | null; feedbackTarget: HTMLElement | null }) {
   const [local, setLocal] = useState<LocalRecording[]>([]);
   const [remote, setRemote] = useState<ServerRecording[]>([]);
   const [recording, setRecording] = useState(false);
@@ -23,6 +23,9 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
   const [uploads, setUploads] = useState<Record<string, string>>({});
   const [emergency, setEmergency] = useState<{ blob: Blob; id: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [insertMode, setInsertMode] = useState<VoiceInsertMode>("replace");
+  const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const deletingRef = useRef(new Set<string>());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const pendingIdRef = useRef<string | null>(null);
@@ -34,6 +37,10 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
   const disabledRef = useRef(disabled);
   useEffect(() => { textRef.current = onText; recordingChangeRef.current = onRecordingChange; disabledRef.current = disabled; }, [onText, onRecordingChange, disabled]);
 
+  useEffect(() => {
+    onStatusChange(starting ? "正在准备 / 保存录音…" : recording ? `正在录音 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : transcribing ? "语音处理中…" : "");
+  }, [starting, recording, seconds, transcribing, onStatusChange]);
+
   const sync = useCallback(async () => {
     if (syncRef.current) return;
     syncRef.current = true;
@@ -41,21 +48,30 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
     try {
       const locals = await listLocalRecordings();
       if (!aliveRef.current) return;
-      setLocal(locals.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      setLocal(locals.filter(item => !deletingRef.current.has(item.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)));
       // 已持久化但未正常停止的录音必须由用户主动恢复，避免上传另一个标签页正在录的片段。
       for (const item of locals) {
-        if (!item.ready || item.uploaded || !navigator.onLine || Date.now() < (nextAttemptRef.current[item.id]?.at || 0)) continue;
+        if (deletingRef.current.has(item.id) || !item.ready || item.uploaded || !navigator.onLine || Date.now() < (nextAttemptRef.current[item.id]?.at || 0)) continue;
         try {
           const blob = await readLocalAudio(item);
+          if (deletingRef.current.has(item.id)) continue;
           if (!blob.size || blob.size !== item.size) throw Error("本地音频不完整，请先下载检查");
           setUploads(current => ({ ...current, [item.id]: "上传中 0%" }));
           await uploadBinary<ServerRecording>(`${API_PATHS.prompts}/recordings/${encodePath(item.id)}`, blob, { "Content-Type": item.mime_type }, percent => {
             if (aliveRef.current) setUploads(current => ({ ...current, [item.id]: percent === 100 ? "服务器写入归档中…" : `上传中 ${percent}%` }));
           }, 300_000);
+          if (deletingRef.current.has(item.id)) continue;
           await patchLocalRecording(item.id, { uploaded: true });
           setUploads(current => ({ ...current, [item.id]: "服务器已确认归档" }));
           delete nextAttemptRef.current[item.id];
         } catch (value) {
+          if (value instanceof ApiError && value.status === 410) {
+            deletingRef.current.add(item.id);
+            await deleteLocalRecording(item.id);
+            if (pendingIdRef.current === item.id) { pendingIdRef.current = null; setTranscribing(false); }
+            continue;
+          }
+          if (deletingRef.current.has(item.id)) continue;
           syncError = `${errorMessage(value)}；录音已保存在本地，将自动重试上传`;
           if (pendingIdRef.current === item.id) { setTranscribing(false); pendingIdRef.current = null; }
           const count = (nextAttemptRef.current[item.id]?.count || 0) + 1;
@@ -63,14 +79,20 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
           setUploads(current => ({ ...current, [item.id]: `${errorMessage(value)}；本地已保留，稍后自动重试` }));
         }
       }
-      const result = await apiFetch<{ recordings: ServerRecording[] }>(`${API_PATHS.prompts}/recordings`);
+      const result = await apiFetch<{ recordings: ServerRecording[]; deleted_recordings?: string[] }>(`${API_PATHS.prompts}/recordings`);
       if (!aliveRef.current) return;
-      setRemote(result.recordings);
+      for (const id of result.deleted_recordings || []) {
+        if (locals.some(item => item.id === id)) await deleteLocalRecording(id);
+        deletingRef.current.add(id);
+        if (pendingIdRef.current === id) { pendingIdRef.current = null; setTranscribing(false); }
+      }
+      setRemote(result.recordings.filter(item => !deletingRef.current.has(item.id)));
       const latest = (await listLocalRecordings()).sort((a, b) => a.created_at.localeCompare(b.created_at));
       for (const item of latest) {
+        if (deletingRef.current.has(item.id)) continue;
         const server = result.recordings.find(server => server.id === item.id);
         if (server?.status === "done" && !item.applied && !disabledRef.current) {
-          textRef.current(server.text);
+          textRef.current(server.text, item.insert_mode || "replace");
           await patchLocalRecording(item.id, { applied: true });
         }
         if (pendingIdRef.current === item.id && server && ["done", "failed", "waiting_config"].includes(server.status)) {
@@ -81,7 +103,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
       const newest = latest.at(-1);
       const failed = newest && !newest.applied ? result.recordings.find(server => server.id === newest.id && ["failed", "waiting_config"].includes(server.status)) : undefined;
       if (failed) syncError = `语音转写失败：${failed.error || "外部 ASR 未返回有效文本"}。原音频已保留，可在语音归档中重试。`;
-      setLocal((await listLocalRecordings()).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      setLocal((await listLocalRecordings()).filter(item => !deletingRef.current.has(item.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)));
       setTransferError(syncError);
     } catch (value) {
       if (aliveRef.current) setTransferError(errorMessage(value));
@@ -119,9 +141,10 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
     return () => window.clearInterval(timer);
   }, [recording]);
 
-  async function start() {
+  async function start(nextMode: VoiceInsertMode) {
     if (starting || recorderRef.current?.state === "recording") return;
     setStarting(true);
+    setInsertMode(nextMode);
     recordingChangeRef.current(true);
     setError("");
     setTransferError("");
@@ -138,7 +161,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
       const preferred = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find(mime => MediaRecorder.isTypeSupported(mime));
       const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
       const id = `rec_${crypto.randomUUID()}`;
-      await createLocalRecording({ id, created_at: new Date().toISOString(), mime_type: recorder.mimeType || preferred || "audio/webm", size: 0, chunks: 0, ready: false, uploaded: false, applied: false });
+      await createLocalRecording({ id, created_at: new Date().toISOString(), mime_type: recorder.mimeType || preferred || "audio/webm", size: 0, chunks: 0, ready: false, uploaded: false, applied: false, insert_mode: nextMode });
       recorderRef.current = recorder;
       activeIdRef.current = id;
       const memoryChunks: Blob[] = [];
@@ -197,15 +220,36 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
     } catch (value) { setError(errorMessage(value)); }
   }
 
+  async function remove(id: string) {
+    if (deletingRef.current.has(id)) return;
+    deletingRef.current.add(id);
+    setDeleting(current => new Set(current).add(id));
+    setError("");
+    try {
+      await apiFetch(`${API_PATHS.prompts}/recordings/${encodePath(id)}`, { method: "DELETE" });
+      await deleteLocalRecording(id);
+      delete nextAttemptRef.current[id];
+      if (pendingIdRef.current === id) { pendingIdRef.current = null; setTranscribing(false); }
+      setLocal(current => current.filter(item => item.id !== id));
+      setRemote(current => current.filter(item => item.id !== id));
+      setTransferError("");
+    } catch (value) {
+      deletingRef.current.delete(id);
+      setError(`删除录音失败：${errorMessage(value)}`);
+    } finally {
+      setDeleting(current => { const next = new Set(current); next.delete(id); return next; });
+    }
+  }
+
   const allIds = [...new Set([...local.map(item => item.id), ...remote.map(item => item.id)])].sort((a, b) => {
     const date = (id: string) => local.find(item => item.id === id)?.created_at || remote.find(item => item.id === id)?.created_at || "";
     return date(b).localeCompare(date(a));
   });
   return <>
-      <Button size="sm" variant={recording ? "danger" : "secondary"} className={recording ? "" : "prompt-audio-action"} disabled={starting || transcribing || (!recording && (disabled || !!emergency))}
-        onClick={() => recording ? recorderRef.current?.stop() : void start()}>
-        {starting ? "准备中…" : recording ? `停止录音 · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : transcribing ? "转写中…" : "语音输入"}
-      </Button>
+      <span className="prompt-voice-actions">{(["replace", "append"] as const).map(nextMode => <Button key={nextMode} size="sm" variant={recording && insertMode === nextMode ? "danger" : "secondary"} className={recording && insertMode === nextMode ? "" : "prompt-audio-action"} disabled={starting || transcribing || (recording ? insertMode !== nextMode : disabled || !!emergency)}
+        onClick={() => recording ? recorderRef.current?.stop() : void start(nextMode)}>
+        {recording && insertMode === nextMode ? "停止录音" : nextMode === "append" ? "增量语音" : "语音输入"}
+      </Button>)}</span>
     {feedbackTarget ? createPortal(<>
       {error || transferError ? <ErrorState message={error || transferError} /> : null}
       {emergency ? <div className="row-actions"><Button size="sm" onClick={() => downloadAudio(emergency.blob, `${emergency.id}.${audioExtension(emergency.blob.type)}`)}>下载完整录音备份</Button><Button size="sm" variant="quiet" onClick={() => { setEmergency(null); setError(""); }}>备份完成，继续录音</Button><span className="muted">完整录音暂在内存中，请先下载，避免刷新页面。</span></div> : null}
@@ -232,6 +276,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, arc
             <span className="prompt-audio-actions" onClick={event => event.stopPropagation()}>
               {server ? <a className="button button-secondary button-sm prompt-audio-action" href={`${API_PATHS.prompts}/recordings/${encodePath(id)}/audio`} download>下载音频</a> : <Button size="sm" variant="secondary" className="prompt-audio-action" disabled>下载音频</Button>}
               <Button size="sm" variant="secondary" className="prompt-audio-action" disabled={disabled || !server?.text} onClick={() => { if (server?.text) onRestore(server.text); }}>恢复</Button>
+              <Button size="sm" variant="secondary" className="prompt-audio-action" disabled={active || deleting.has(id) || server?.status === "processing"} aria-busy={deleting.has(id)} title={server?.status === "processing" ? "转写完成后可删除" : "删除此录音的本地副本和服务器归档"} onClick={() => void remove(id)}>删除</Button>
             </span>
             <span className="prompt-item-chevron" aria-hidden="true">⌄</span>
           </summary>

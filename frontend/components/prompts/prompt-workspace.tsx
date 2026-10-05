@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
 import { errorMessage, formatDate, truncate } from "../../lib/format";
+import type { VoiceInsertMode } from "../../lib/prompt-audio";
 import type {
   PromptItem,
   PromptPolishLevel,
@@ -57,6 +58,7 @@ export function PromptWorkspace() {
   const [polishing, setPolishing] = useState<PromptPolishLevel | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("");
   const [audioArchiveTarget, setAudioArchiveTarget] = useState<HTMLDivElement | null>(null);
   const [voiceFeedbackTarget, setVoiceFeedbackTarget] = useState<HTMLDivElement | null>(null);
   const [draftReady, setDraftReady] = useState(false);
@@ -67,17 +69,23 @@ export function PromptWorkspace() {
   const polishTokenRef = useRef(0);
 
   const currentValue = mode === "polished" ? polished : raw;
+  const currentValueRef = useRef(currentValue);
+  useLayoutEffect(() => { currentValueRef.current = currentValue; }, [currentValue]);
   const busy = !draftReady || archiving || polishing !== null || voiceRecording;
 
-  const replaceVoiceText = useCallback((text: string) => {
-    // 转写成功立即替换并持久化草稿，录音结果作为新的提示词。
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw: text, polished: "", mode: "raw", stale: true, restoredId: null }));
-    setRaw(text);
+  const replaceVoiceText = useCallback((text: string, insertMode: VoiceInsertMode = "replace") => {
+    // 使用当前显示的文本追加，并立即保存；同批返回多条录音也不会互相覆盖。
+    const current = currentValueRef.current;
+    const content = insertMode === "append" && current ? `${current}${current.endsWith("\n") ? "" : "\n"}${text}` : text;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ raw: content, polished: "", mode: "raw", stale: true, restoredId: null }));
+    currentValueRef.current = content;
+    setRaw(content);
     setPolished("");
     setMode("raw");
     setStale(true);
     setRestoredId(null);
     polishTokenRef.current += 1;
+    setMessage(insertMode === "append" ? "语音已追加到当前提示词" : "语音已转写到当前提示词");
   }, []);
 
   const restoreVoiceText = useCallback((text: string) => {
@@ -309,15 +317,16 @@ export function PromptWorkspace() {
 
   return (
     <div className="prompt-workspace">
-      <h1 className="prompt-workspace-title">提示词</h1>
+      <div className="prompt-workspace-heading">
+        <h1 className="prompt-workspace-title">提示词</h1>
+        <span className="prompt-workspace-status" role="status" title={voiceStatus || message}>{voiceStatus || message}</span>
+      </div>
       {error ? <ErrorState message={error} /> : null}
-      {message ? <div className="inline-message">{message}</div> : null}
 
       <Card className="prompt-editor-card">
         <CardHeader
           title="当前提示词"
-          titleActions={<VoiceInput disabled={busy} onText={replaceVoiceText} onRestore={restoreVoiceText} onRecordingChange={setVoiceRecording} archiveTarget={audioArchiveTarget} feedbackTarget={voiceFeedbackTarget} />}
-          description={stale && polished ? "原文已修改，润色稿可能不是最新版本。" : undefined}
+          titleActions={<VoiceInput disabled={busy} onText={replaceVoiceText} onRestore={restoreVoiceText} onRecordingChange={setVoiceRecording} onStatusChange={setVoiceStatus} archiveTarget={audioArchiveTarget} feedbackTarget={voiceFeedbackTarget} />}
           actions={
             <div className="editor-actions">
               <div className="prompt-polish-actions" aria-label="润色强度">
@@ -329,7 +338,7 @@ export function PromptWorkspace() {
                     disabled={busy || !raw.trim()}
                     key={level.id}
                   >
-                    {polishing === level.id ? `${level.label}…` : level.label}
+                    {level.label}
                   </button>
                 ))}
               </div>
@@ -338,7 +347,7 @@ export function PromptWorkspace() {
                 <button type="button" role="tab" aria-selected={mode === "polished"} onClick={() => setMode("polished")} disabled={busy || !polished}>润色稿</button>
               </div>
               <Button variant="secondary" size="sm" onClick={() => copyText(currentValue, mode === "polished" ? "润色稿已复制" : "原文已复制")} disabled={busy}>复制</Button>
-              <Button size="sm" onClick={() => void archive()} disabled={busy}>{archiving ? "归档中…" : "归档"}</Button>
+              <Button size="sm" onClick={() => void archive()} disabled={busy}>归档</Button>
             </div>
           }
         />

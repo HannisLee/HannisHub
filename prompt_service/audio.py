@@ -48,6 +48,7 @@ class AudioService:
         self.router.add_api_route("/asr-settings", self.save_settings, methods=["PUT"])
         self.router.add_api_route("/recordings", self.list_recordings, methods=["GET"])
         self.router.add_api_route("/recordings/{recording_id}", self.upload, methods=["POST"])
+        self.router.add_api_route("/recordings/{recording_id}", self.delete, methods=["DELETE"])
         self.router.add_api_route("/recordings/{recording_id}/retry", self.retry, methods=["POST"])
         self.router.add_api_route("/recordings/{recording_id}/audio", self.audio, methods=["GET"])
 
@@ -119,7 +120,8 @@ class AudioService:
         return {key: value for key, value in item.items() if key not in ("raw_path", "converted_path", "sha256")}
 
     async def list_recordings(self):
-        return {"recordings": [self.public(item) for item in reversed(self.records())]}
+        return {"recordings": [self.public(item) for item in reversed(self.records())],
+                "deleted_recordings": self.read_settings().get("deleted_recordings", [])}
 
     async def upload(self, recording_id: str, request: Request):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", recording_id):
@@ -135,6 +137,8 @@ class AudioService:
             raise HTTPException(413, "录音最大为 512 MB")
         # 串行写入和不可变 ID 避免重试、多标签页同时上传覆盖原音频。
         async with self.upload_lock:
+            if recording_id in self.read_settings().get("deleted_recordings", []):
+                raise HTTPException(410, "录音已删除，不能重新上传")
             existing = next((item for item in self.records() if item["id"] == recording_id), None)
             directory = Path(self.config()["archive_dir"] or self.app_dir / "data" / "recordings").expanduser().resolve()
             directory.mkdir(parents=True, exist_ok=True)
@@ -174,6 +178,31 @@ class AudioService:
         await self.start()
         self.wake.set()
         return self.public(item)
+
+    async def delete(self, recording_id: str):
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", recording_id):
+            raise HTTPException(400, "录音 ID 格式无效")
+        # 等待上传落盘后再删除；处理中的任务由用户在完成后删除，避免后台重建文件。
+        async with self.upload_lock:
+            with self.settings_lock:
+                data = self.read_settings()
+                item = next((item for item in data.get("recordings", []) if item["id"] == recording_id), None)
+                if item and item["status"] == "processing":
+                    raise HTTPException(409, "录音正在处理，请完成后再删除")
+                if item:
+                    raw = Path(item["raw_path"])
+                    paths = {raw, raw.with_name(f"{recording_id}.archive.mp3"), raw.with_name(f"{recording_id}.txt")}
+                    if item.get("converted_path"):
+                        paths.add(Path(item["converted_path"]))
+                    for path in paths:
+                        path.unlink(missing_ok=True)
+                data["recordings"] = [item for item in data.get("recordings", []) if item["id"] != recording_id]
+                # 保留删除标记，阻止断网重试或另一个标签页把已删除的录音重新上传。
+                deleted = data.setdefault("deleted_recordings", [])
+                if recording_id not in deleted:
+                    deleted.append(recording_id)
+                self.write_settings(data)
+        return {"ok": True}
 
     async def retry(self, recording_id: str):
         item = self.find(recording_id)
@@ -302,5 +331,7 @@ class AudioService:
             await self.wake.wait()
             self.wake.clear()
             for item in self.records():
-                if item["status"] == "queued":
-                    await self.process(item)
+                # 上一条任务等待期间，后续排队记录可能已被删除。
+                current = next((current for current in self.records() if current["id"] == item["id"]), None)
+                if current and current["status"] == "queued":
+                    await self.process(current)

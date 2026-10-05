@@ -9,7 +9,7 @@ import threading
 import unittest
 import wave
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -79,6 +79,85 @@ class AudioTests(unittest.IsolatedAsyncioTestCase):
         saved = json.loads(self.settings_path.read_text())
         self.assertEqual(saved["prompts"], [{"id": "existing"}])
         self.assertEqual(saved["custom"], "保留")
+
+    async def test_delete_archives_and_prevent_reupload(self):
+        await self.upload()
+        item = await self.wait_status("waiting_config")
+        raw = Path(item["raw_path"])
+        converted = Path(item["converted_path"])
+        text = raw.with_name("rec_test_001.txt")
+        text.write_text("需要删除的转写", encoding="utf-8")
+        await self.upload("rec_keep_002")
+        await self.wait_status("waiting_config", "rec_keep_002")
+        self.assertEqual((await self.client.delete("/api/recordings/rec_test_001")).status_code, 200)
+        self.assertTrue(all(not path.exists() for path in (raw, converted, text)))
+        self.assertEqual([item["id"] for item in self.service.records()], ["rec_keep_002"])
+        self.assertEqual((await self.client.get("/api/recordings/rec_test_001/audio")).status_code, 404)
+        self.assertEqual((await self.upload()).status_code, 410)
+        self.assertEqual((await self.client.delete("/api/recordings/rec_test_001")).status_code, 200)
+        saved = json.loads(self.settings_path.read_text())
+        self.assertEqual(saved["prompts"], [{"id": "existing"}])
+        self.assertEqual(saved["custom"], "保留")
+        self.assertEqual((await self.client.get("/api/recordings")).json()["deleted_recordings"], ["rec_test_001"])
+        await self.service.stop()
+        restarted = self.new_service()
+        self.assertEqual(restarted.read_settings()["deleted_recordings"], ["rec_test_001"])
+
+    async def test_delete_local_only_and_processing_guard(self):
+        self.assertEqual((await self.client.delete("/api/recordings/rec_local_003")).status_code, 200)
+        self.assertEqual((await self.upload("rec_local_003")).status_code, 410)
+        await self.upload()
+        item = await self.wait_status("waiting_config")
+        self.service.update(item["id"], status="processing")
+        self.assertEqual((await self.client.delete("/api/recordings/rec_test_001")).status_code, 409)
+        self.assertTrue(Path(item["raw_path"]).is_file())
+        self.assertNotIn(item["id"], self.service.read_settings()["deleted_recordings"])
+        self.assertEqual((await self.client.delete("/api/recordings/bad")).status_code, 400)
+
+    async def test_delete_queued_job_during_another_job(self):
+        with patch.object(self.service, "start", new=AsyncMock()):
+            await self.upload()
+            await self.upload("rec_queued_002")
+        entered, release = asyncio.Event(), asyncio.Event()
+        processed = []
+
+        async def process(item):
+            processed.append(item["id"])
+            self.service.update(item["id"], status="processing")
+            entered.set()
+            await release.wait()
+            self.service.update(item["id"], status="waiting_config")
+
+        with patch.object(self.service, "process", side_effect=process):
+            self.service.task = asyncio.create_task(self.service.worker())
+            self.service.wake.set()
+            await asyncio.wait_for(entered.wait(), 2)
+            self.assertEqual((await self.client.delete("/api/recordings/rec_queued_002")).status_code, 200)
+            release.set()
+            await self.wait_status("waiting_config")
+            await asyncio.sleep(0.02)
+            self.assertEqual(processed, ["rec_test_001"])
+            self.assertFalse(self.service.task.done())
+
+    async def test_delete_waits_for_upload_commit(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def stream():
+            entered.set()
+            await release.wait()
+            yield self.audio
+
+        with patch.object(self.service, "start", new=AsyncMock()):
+            uploading = asyncio.create_task(self.client.post("/api/recordings/rec_race_004", content=stream(), headers={"content-type": "audio/wav"}))
+            await asyncio.wait_for(entered.wait(), 2)
+            deleting = asyncio.create_task(self.client.delete("/api/recordings/rec_race_004"))
+            await asyncio.sleep(0.02)
+            self.assertFalse(deleting.done())
+            release.set()
+            self.assertEqual((await uploading).status_code, 200)
+            self.assertEqual((await deleting).status_code, 200)
+        self.assertEqual(self.service.records(), [])
+        self.assertFalse((self.directory / "data/recordings/rec_race_004.wav").exists())
 
     async def test_external_asr_protocol_and_text_archive(self):
         await self.upload()

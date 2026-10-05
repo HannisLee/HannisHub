@@ -438,7 +438,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .loading-line { display: inline-block; width: 32px; height: 2px; background: var(--color-brand); animation: loading-pulse 1.2s ease-in-out infinite; }
 .app-error-screen, .app-loading-screen { min-height: 100vh; border: 0; border-radius: 0; background: var(--color-bg); }
 
-.prompt-workspace-title { margin: 0 0 var(--space-4); color: var(--color-brand); font: 500 13px/1.4 var(--font-ui); letter-spacing: 0.04em; }
+.prompt-workspace-heading { display: flex; min-width: 0; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.prompt-workspace-title { flex: 0 0 auto; margin: 0; color: var(--color-brand); font: 500 13px/1.4 var(--font-ui); letter-spacing: 0.04em; }
+.prompt-workspace-status { min-width: 0; overflow: hidden; color: var(--color-text-muted); font: 400 12px/1.4 var(--font-ui); text-overflow: ellipsis; white-space: nowrap; }
 .prompt-workspace .inline-message { margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); font-size: 12px; }
 .prompt-editor-card { padding: var(--space-5); padding-bottom: var(--space-3); }
 .prompt-editor-card .card-header { gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -451,9 +453,13 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-editor-card .segmented { padding: 2px; border-radius: var(--radius-md); }
 .prompt-editor-card .segmented button { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-editor-card .button-sm { min-height: 28px; padding: 0 var(--space-2); font-size: 12px; }
+.prompt-editor-card .card-header { flex-wrap: wrap; }
+.prompt-editor-card .card-title-row { flex-wrap: nowrap; }
+.prompt-voice-actions { display: inline-flex; flex: 0 0 auto; gap: var(--space-1); }
 .prompt-editor { min-height: clamp(480px, 62vh, 760px); font: 400 15px/1.65 var(--font-mono); }
 .prompt-polish-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); }
 .prompt-polish-button {
+  white-space: nowrap;
   min-height: 28px;
   padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
@@ -881,6 +887,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .editor-meta span:last-child { justify-content: flex-start; }
   .prompt-editor { min-height: min(62vh, 640px); }
   .prompt-settings-grid { grid-template-columns: 1fr; }
+  .prompt-reasoning-setting { align-items: stretch; flex-direction: column; }
+  .prompt-reasoning-field { grid-template-columns: 96px minmax(0, 1fr); }
   .prompt-polish-actions { flex: 1 1 auto; }
   .prompt-polish-button { flex: 1 1 0; }
   .prompt-archive-list { height: min(68vh, 620px); }
@@ -888,6 +896,9 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .prompt-audio-item summary { gap: var(--space-2); padding-block: var(--space-2); }
   .prompt-audio-item .prompt-item-meta { font-size: 11px; }
   .prompt-audio-actions { gap: var(--space-1); }
+  .prompt-audio-item summary { flex-wrap: wrap; }
+  .prompt-audio-item .prompt-item-copy { flex-basis: calc(100% - 24px); }
+  .prompt-audio-item .prompt-audio-actions { order: 1; width: 100%; }
   .file-manager-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
   .file-manager-upload-actions { justify-content: flex-start; }
   .file-manager-upload .upload-row > div { flex-direction: column; align-items: flex-start; gap: var(--space-1); }

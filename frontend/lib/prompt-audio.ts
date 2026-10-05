@@ -9,7 +9,10 @@ export interface LocalRecording {
   uploaded: boolean;
   applied: boolean;
   interrupted?: boolean;
+  insert_mode?: VoiceInsertMode;
 }
+
+export type VoiceInsertMode = "replace" | "append";
 
 export interface ServerRecording {
   id: string;
@@ -91,6 +94,13 @@ export function listLocalRecordings(): Promise<LocalRecording[]> {
   return transaction(["recordings"], "readonly", (tx, result) => {
     const request = tx.objectStore("recordings").getAll();
     request.onsuccess = () => result(request.result as LocalRecording[]);
+  });
+}
+
+export function deleteLocalRecording(id: string): Promise<void> {
+  return transaction(["recordings", "chunks"], "readwrite", tx => {
+    tx.objectStore("recordings").delete(id);
+    tx.objectStore("chunks").delete(IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]));
   });
 }
 
