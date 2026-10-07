@@ -414,7 +414,10 @@ export function PromptWorkspace() {
                     </span>
                     <span className="prompt-item-actions" onClick={event => event.stopPropagation()}>
                       {item.favorite ? (
-                        <Button size="sm" variant="secondary" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
+                        <>
+                          <Button size="sm" variant="secondary" type="button" onClick={() => copyText(item.content, "归档提示词已复制")}>复制</Button>
+                          <Button size="sm" variant="secondary" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
+                        </>
                       ) : null}
                       <Button
                         size="sm"
