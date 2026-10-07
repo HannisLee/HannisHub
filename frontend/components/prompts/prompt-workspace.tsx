@@ -61,6 +61,7 @@ export function PromptWorkspace() {
   const [voiceStatus, setVoiceStatus] = useState("");
   const [audioArchiveTarget, setAudioArchiveTarget] = useState<HTMLDivElement | null>(null);
   const [voiceFeedbackTarget, setVoiceFeedbackTarget] = useState<HTMLDivElement | null>(null);
+  const [favoriteSavingId, setFavoriteSavingId] = useState<string | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -285,6 +286,25 @@ export function PromptWorkspace() {
     }
   }
 
+  async function toggleFavoritePrompt(item: PromptItem) {
+    if (favoriteSavingId) return;
+    const nextFavorite = !item.favorite;
+    setFavoriteSavingId(item.id);
+    setError("");
+    try {
+      await apiFetch(`${API_PATHS.prompts}/prompts/${encodePath(item.id)}/favorite`, {
+        method: "PUT",
+        body: jsonBody({ favorite: nextFavorite }),
+      });
+      await loadArchive();
+      setMessage(nextFavorite ? "已收藏，归档已置顶" : "已取消收藏");
+    } catch (value) {
+      setError(errorMessage(value));
+    } finally {
+      setFavoriteSavingId(null);
+    }
+  }
+
   function restorePrompt(item: PromptItem) {
     const rawContent = item.raw_content || item.content;
     setRaw(rawContent);
@@ -381,7 +401,7 @@ export function PromptWorkspace() {
           <Card className="prompt-archive-card">
             <CardHeader
               title={`归档列表 · ${items.length}`}
-              description="按时间倒序展示全部归档；固定高度内滚动。"
+              description="收藏项置顶，其余按时间倒序展示；固定高度内滚动。"
           />
           {loading ? <LoadingState /> : items.length ? (
             <div className="prompt-archive-list">
@@ -392,14 +412,32 @@ export function PromptWorkspace() {
                       <small className="prompt-item-meta">{formatDate(item.updated_at)} · {item.content.length.toLocaleString("zh-CN")} 字符</small>
                       <strong className="prompt-item-title">{truncate(item.content.split(/\r?\n/).find(line => line.trim()) || item.content, 100)}</strong>
                     </span>
+                    <span className="prompt-item-actions" onClick={event => event.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className={item.favorite ? "prompt-favorite-active" : ""}
+                        type="button"
+                        aria-pressed={item.favorite}
+                        disabled={!!favoriteSavingId}
+                        aria-busy={favoriteSavingId === item.id}
+                        title={item.favorite ? "取消收藏，恢复按时间排列" : "收藏后置顶显示"}
+                        onClick={() => void toggleFavoritePrompt(item)}
+                      >
+                        {item.favorite ? "已收藏" : "收藏"}
+                      </Button>
+                      {item.favorite ? (
+                        <Button size="sm" variant="secondary" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
+                      ) : null}
+                    </span>
                     <span className="prompt-item-chevron" aria-hidden="true">⌄</span>
                   </summary>
                   <div className="prompt-item-body">
                     <pre>{item.content}</pre>
                     <div className="row-actions">
-                      <Button size="sm" variant="secondary" onClick={() => copyText(item.content, "归档提示词已复制")}>复制</Button>
-                      <Button size="sm" variant="quiet" onClick={() => restorePrompt(item)}>恢复</Button>
-                      <Button size="sm" variant="danger" onClick={() => void removePrompt(item)}>删除</Button>
+                      <Button size="sm" variant="secondary" type="button" onClick={() => copyText(item.content, "归档提示词已复制")}>复制</Button>
+                      <Button size="sm" variant="quiet" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
+                      <Button size="sm" variant="danger" type="button" onClick={() => void removePrompt(item)}>删除</Button>
                     </div>
                   </div>
                 </details>

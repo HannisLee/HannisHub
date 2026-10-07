@@ -372,6 +372,7 @@ export interface PromptItem {
   raw_content?: string;
   polished_content?: string;
   group_id?: string;
+  favorite?: boolean;
   created_at?: string;
   updated_at?: string;
 }

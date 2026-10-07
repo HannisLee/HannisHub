@@ -110,13 +110,14 @@ def _public_prompt(item: dict) -> dict:
         "raw_content": str(item.get("raw_content") or item.get("content") or ""),
         "polished_content": str(item.get("polished_content") or ""),
         "group_id": str(item.get("group_id") or "") if item.get("group_id") else UNGROUPED_ID,
+        "favorite": bool(item.get("favorite")),
         "created_at": item.get("created_at") or _now_iso(),
         "updated_at": item.get("updated_at") or item.get("created_at") or _now_iso(),
     }
 
 
 def _sorted_prompts() -> list[dict]:
-    """按更新时间倒序返回提示词，保证每个分组内越新越靠上。"""
+    """收藏提示词置顶，其余按更新时间倒序返回。"""
     data = _read_settings()
     known_groups = {str(item.get("id")) for item in data["groups"]}
     ordered: list[dict] = []
@@ -127,7 +128,10 @@ def _sorted_prompts() -> list[dict]:
             # 分组被删除或数据被手工修改时回落到无分组，避免条目在页面里消失
             prompt["group_id"] = UNGROUPED_ID
         ordered.append(prompt)
-    ordered.sort(key=lambda item: str(item["updated_at"]), reverse=True)
+    ordered.sort(
+        key=lambda item: (item["favorite"], str(item["updated_at"])),
+        reverse=True,
+    )
     return ordered
 
 
@@ -294,6 +298,7 @@ async def create_prompt(request: Request):
             "raw_content": raw_content,
             "polished_content": polished_content,
             "group_id": UNGROUPED_ID,
+            "favorite": False,
             "created_at": now,
             "updated_at": now,
         }
@@ -332,6 +337,29 @@ async def update_prompt(prompt_id: str, request: Request):
             item["polished_content"] = polished_content
         # 恢复后再次归档等同于更新同一条记录，保留原记录时间与列表位置
         item["updated_at"] = item.get("updated_at") or item.get("created_at") or _now_iso()
+        _write_settings(data)
+        updated = dict(item)
+    return JSONResponse(_public_prompt(updated))
+
+
+@router.put("/prompts/{prompt_id}/favorite")
+async def update_prompt_favorite(prompt_id: str, request: Request):
+    """收藏或取消收藏提示词，收藏项在归档列表置顶。"""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="请求体必须是有效 JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
+    favorite = payload.get("favorite")
+    if type(favorite) is not bool:
+        raise HTTPException(status_code=400, detail="favorite 必须是布尔值")
+    with _SETTINGS_LOCK:
+        data = _read_settings()
+        item = _find_prompt(data["prompts"], prompt_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="提示词不存在")
+        item["favorite"] = favorite
         _write_settings(data)
         updated = dict(item)
     return JSONResponse(_public_prompt(updated))
