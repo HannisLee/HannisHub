@@ -413,6 +413,9 @@ export function PromptWorkspace() {
                       <strong className="prompt-item-title">{truncate(item.content.split(/\r?\n/).find(line => line.trim()) || item.content, 100)}</strong>
                     </span>
                     <span className="prompt-item-actions" onClick={event => event.stopPropagation()}>
+                      {item.favorite ? (
+                        <Button size="sm" variant="secondary" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="secondary"
@@ -426,9 +429,6 @@ export function PromptWorkspace() {
                       >
                         {item.favorite ? "已收藏" : "收藏"}
                       </Button>
-                      {item.favorite ? (
-                        <Button size="sm" variant="secondary" type="button" onClick={() => restorePrompt(item)}>恢复</Button>
-                      ) : null}
                     </span>
                     <span className="prompt-item-chevron" aria-hidden="true">⌄</span>
                   </summary>

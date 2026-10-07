@@ -498,15 +498,21 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-layout .button-sm { min-height: 30px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-archive-card { overflow: hidden; }
 .prompt-archive-list { display: grid; height: clamp(560px, 72vh, 820px); align-content: start; gap: var(--space-2); padding-right: var(--space-2); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.prompt-archive-list, .prompt-audio-list { scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
+.prompt-archive-list::-webkit-scrollbar, .prompt-audio-list::-webkit-scrollbar { width: 8px; }
+.prompt-archive-list::-webkit-scrollbar-track, .prompt-audio-list::-webkit-scrollbar-track { background: transparent; }
+.prompt-archive-list::-webkit-scrollbar-thumb, .prompt-audio-list::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: var(--color-control-border); background-clip: padding-box; }
+.prompt-archive-list::-webkit-scrollbar-thumb:hover, .prompt-audio-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); background-clip: padding-box; }
 .prompt-item { border: 1px solid var(--color-divider); border-radius: var(--radius-sm); background: var(--color-bg); }
 .prompt-item summary { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) var(--space-3); color: var(--color-text-primary); cursor: pointer; font-size: 13px; list-style: none; }
 .prompt-item summary::-webkit-details-marker { display: none; }
 .prompt-item[open] { border-color: var(--color-control-border); }
 .prompt-item-chevron { flex: 0 0 auto; color: var(--color-text-muted); transition: transform 160ms ease; }
-.prompt-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
+.prompt-item-copy { flex: 1 1 auto; }
+.prompt-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); margin-left: auto; }
 .prompt-item-actions .button-sm { min-height: 28px; padding-inline: var(--space-2); font-size: 12px; white-space: nowrap; }
-.prompt-favorite-active { border-color: var(--color-brand); color: var(--color-brand); }
-.prompt-favorite-active:hover:not(:disabled) { border-color: var(--color-brand); background: var(--color-surface-hover); }
+.prompt-favorite-active { border-color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 14%, transparent); color: var(--color-brand); }
+.prompt-favorite-active:hover:not(:disabled) { border-color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 22%, transparent); color: var(--color-brand); }
 .prompt-item[open] .prompt-item-chevron { transform: rotate(180deg); }
 .prompt-page { padding-top: var(--space-8); }
 .prompt-item-copy { display: grid; grid-template-columns: minmax(148px, auto) minmax(0, 1fr); align-items: center; column-gap: var(--space-3); min-width: 0; }
@@ -532,7 +538,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-audio-history { overflow: hidden; }
 .prompt-audio-history .card-title { font-size: 16px; }
 .prompt-audio-list { display: grid; height: clamp(240px, 40vh, 420px); align-content: start; gap: var(--space-2); padding-right: var(--space-2); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.prompt-audio-list { scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
 .prompt-audio-item .prompt-item-copy { flex: 1; }
 .prompt-audio-item .prompt-item-meta { overflow: hidden; text-overflow: ellipsis; }
 .prompt-audio-actions { display: flex; flex: 0 0 auto; gap: var(--space-2); }
@@ -898,7 +903,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .prompt-archive-list { height: min(68vh, 620px); }
   .prompt-item summary { flex-wrap: wrap; }
   .prompt-item-copy { flex: 1 1 minmax(0, 240px); }
-  .prompt-item-actions { flex: 1 1 100%; order: 1; justify-content: flex-start; }
+  .prompt-item-actions { flex: 1 1 100%; order: 1; justify-content: space-between; }
   .prompt-audio-item .prompt-item-copy { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
   .prompt-audio-item summary { gap: var(--space-2); padding-block: var(--space-2); }
   .prompt-audio-item .prompt-item-meta { font-size: 11px; }
