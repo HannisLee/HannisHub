@@ -744,6 +744,19 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .document-folder-path { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border: 0; background: transparent; color: var(--color-text-secondary); text-align: left; }
 .document-folder-path > span { min-width: 0; overflow: hidden; font-family: var(--font-mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .document-folder-path b { flex: 0 0 auto; color: var(--color-text-primary); font-size: 13px; font-weight: 500; }
+.document-favorites { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.document-favorites-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.document-favorites-head > div { display: grid; gap: var(--space-1); min-width: 0; }
+.document-favorites-head strong { color: var(--color-text-primary); font-size: 15px; font-weight: 500; }
+.document-favorites-head span { color: var(--color-text-muted); font-size: 12px; }
+.document-favorite-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.document-favorite { display: flex; min-width: 0; flex: 0 1 420px; align-items: center; gap: var(--space-2); padding: var(--space-1); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-soft); transition: border-color 160ms ease, background-color 160ms ease; }
+.document-favorite:hover { border-color: var(--color-card-hover-border); background: var(--color-surface-hover); }
+.document-favorite.is-selected { border-color: var(--color-brand); }
+.document-favorite-main { display: grid; min-width: 0; flex: 1 1 auto; gap: 2px; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: inherit; text-align: left; }
+.document-favorite-main strong { overflow: hidden; color: var(--color-text-primary); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.document-favorite-main small { min-width: 0; overflow: hidden; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.document-favorites-empty { margin: 0; color: var(--color-text-muted); font-size: 13px; }
 .document-folder-picker { padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .document-picker-head, .document-picker-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .document-picker-head > div { display: grid; gap: var(--space-1); }
@@ -882,6 +895,12 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .overview-wide { grid-column: auto; }
   .form-grid, .form-row { grid-template-columns: 1fr; }
   .field-wide { grid-column: auto; }
+  .document-folder-bar { flex-wrap: wrap; }
+  .document-folder-control { flex: 1 1 100%; }
+  .document-favorites-head { align-items: flex-start; flex-direction: column; }
+  .document-favorites-head > .button { width: 100%; }
+  .document-favorite { flex: 1 1 100%; }
+  .document-favorite-main small { max-width: min(70vw, 420px); }
   .card-header { align-items: flex-start; flex-direction: column; gap: var(--space-3); }
   .card-actions { width: 100%; flex-wrap: wrap; }
   .search-input { width: 100%; }

@@ -1,15 +1,39 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { API_PATHS, apiFetch } from "../../lib/api";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { FileManagerDirectoryResponse, FileManagerEntry, MarkdownDocument } from "../../lib/types";
+import type { FileManagerDirectoryResponse, FileManagerEntry, FileManagerFavorite, MarkdownDocument } from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
 type MarkdownLinkHandler = (path: string) => void;
 
 const DEFAULT_DOCUMENT_FOLDER = "/home/lihan/reproduce/RadioGS-stage1";
+const DOCUMENT_LOCATION_KEY = "hannishub_document_viewer_location";
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkdn"]);
+
+interface SavedDocumentLocation {
+  root: string;
+  folder: string;
+  document: string;
+}
+
+/** 读取并校验文档页上次浏览位置；顶层目录按展开后的真实路径匹配。 */
+function readSavedDocumentLocation(storage: Pick<Storage, "getItem">, resolvedRoots: string[]): SavedDocumentLocation | null {
+  try {
+    const saved = JSON.parse(storage.getItem(DOCUMENT_LOCATION_KEY) || "null") as Partial<SavedDocumentLocation> | null;
+    if (!saved || typeof saved.root !== "string" || typeof saved.folder !== "string" || typeof saved.document !== "string") return null;
+    const rootIndex = resolvedRoots.indexOf(saved.root);
+    if (rootIndex < 0) return null;
+    const folderParts = saved.folder ? saved.folder.split("/") : [];
+    const documentParts = saved.document ? saved.document.split("/") : [];
+    if (folderParts.some(part => !part || part === "." || part === "..") || documentParts.some(part => !part || part === "." || part === "..")) return null;
+    if (saved.document && saved.document.split("/").slice(0, -1).join("/") !== saved.folder) return null;
+    return { root: resolvedRoots[rootIndex], folder: saved.folder, document: saved.document };
+  } catch {
+    return null;
+  }
+}
 
 function isMarkdownFile(entry: FileManagerEntry): boolean {
   return entry.type === "file" && MARKDOWN_EXTENSIONS.has(entry.extension);
@@ -214,23 +238,63 @@ export function DocumentViewer() {
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [loadingPicker, setLoadingPicker] = useState(false);
   const [error, setError] = useState("");
+  const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
+  const [favoriteError, setFavoriteError] = useState("");
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const restoredDirectoryRef = useRef<FileManagerDirectoryResponse | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch<{ favorites: FileManagerFavorite[] }>(`${API_PATHS.fileManager}/favorites`)
+      .then(value => { if (active) setFavorites(value.favorites); })
+      .catch(value => { if (active) setFavoriteError(errorMessage(value)); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
     apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
-      .then(value => {
+      .then(async value => {
         if (!active) return;
         const nextRoots = value.roots || [];
         const nextResolvedRoots = value.resolved_roots || nextRoots;
-        const defaultRootIndex = nextResolvedRoots.findIndex(root => DEFAULT_DOCUMENT_FOLDER === root || DEFAULT_DOCUMENT_FOLDER.startsWith(`${root.replace(/\/+$/, "")}/`));
+        let nextRootIndex = 0;
+        let nextFolder = "";
+        let nextDocumentPath = "";
+        let nextDirectory: FileManagerDirectoryResponse | null = null;
+        let saved: SavedDocumentLocation | null = null;
+        try { saved = readSavedDocumentLocation(window.localStorage, nextResolvedRoots); } catch { /* 浏览器禁用存储时使用默认目录。 */ }
+        if (saved) {
+          try {
+            const data = await apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(nextResolvedRoots.indexOf(saved.root)), path: saved.folder })}`);
+            if (!active) return;
+            nextRootIndex = data.root_index;
+            nextFolder = data.path;
+            nextDirectory = data;
+            nextDocumentPath = data.entries.some(entry => entry.path === saved?.document) ? saved.document : "";
+          } catch {
+            // 上次目录被删除或链接失效时回退到默认目录。
+          }
+        }
+        if (!nextDirectory) {
+          const defaultRootIndex = nextResolvedRoots.findIndex(root => DEFAULT_DOCUMENT_FOLDER === root || DEFAULT_DOCUMENT_FOLDER.startsWith(`${root.replace(/\/+$/, "")}/`));
+          if (defaultRootIndex >= 0) {
+            const rootPath = nextResolvedRoots[defaultRootIndex].replace(/\/+$/, "");
+            nextRootIndex = defaultRootIndex;
+            nextFolder = DEFAULT_DOCUMENT_FOLDER.slice(rootPath.length).replace(/^\/+/, "");
+          }
+        }
         setRoots(nextRoots);
         setResolvedRoots(nextResolvedRoots);
-        if (defaultRootIndex >= 0) {
-          const rootPath = nextResolvedRoots[defaultRootIndex].replace(/\/+$/, "");
-          setRootIndex(defaultRootIndex);
-          setFolder(DEFAULT_DOCUMENT_FOLDER.slice(rootPath.length).replace(/^\/+/, ""));
+        setRootIndex(nextRootIndex);
+        setFolder(nextFolder);
+        setSelectedPath(nextDocumentPath);
+        setLoadingDocument(Boolean(nextDocumentPath));
+        if (nextDirectory) {
+          restoredDirectoryRef.current = nextDirectory;
+          setDirectory(nextDirectory);
         }
-        if (!value.roots?.length) setLoadingFiles(false);
+        if (!nextRoots.length) setLoadingFiles(false);
       })
       .catch(value => { if (active) { setError(errorMessage(value)); setLoadingFiles(false); } });
     return () => { active = false; };
@@ -238,6 +302,24 @@ export function DocumentViewer() {
 
   useEffect(() => {
     if (!roots.length) return;
+    if (restoredDirectoryRef.current) {
+      // 初始化时已校验并取回上次目录，这里直接复用，避免同一次打开重复请求。
+      const value = restoredDirectoryRef.current;
+      restoredDirectoryRef.current = null;
+      setDirectory(value);
+      setSelectedPath(current => {
+        const markdownFiles = value.entries.filter(isMarkdownFile);
+        const nextPath = markdownFiles.some(entry => entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
+        if (nextPath !== current) {
+          setMarkdownDocument(null);
+          setLoadingDocument(Boolean(nextPath));
+        }
+        return nextPath;
+      });
+      setError("");
+      setLoadingFiles(false);
+      return;
+    }
     let active = true;
     apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: folder })}`)
       .then(value => {
@@ -270,6 +352,18 @@ export function DocumentViewer() {
   }, [rootIndex, selectedPath]);
 
   useEffect(() => {
+    if (!roots.length || !directory || directory.root_index !== rootIndex || directory.path !== folder || loadingDocument) return;
+    const openedDocument = markdownDocument
+      && markdownDocument.root_index === rootIndex
+      && markdownDocument.path.split("/").slice(0, -1).join("/") === folder
+      ? markdownDocument.path
+      : "";
+    try {
+      window.localStorage.setItem(DOCUMENT_LOCATION_KEY, JSON.stringify({ root: resolvedRoots[rootIndex], folder, document: openedDocument }));
+    } catch { /* 存储不可写时仅跳过记录。 */ }
+  }, [roots, resolvedRoots, rootIndex, folder, directory, markdownDocument, loadingDocument]);
+
+  useEffect(() => {
     if (!pickerOpen || !roots.length) return;
     let active = true;
     apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: pickerPath })}`)
@@ -288,6 +382,7 @@ export function DocumentViewer() {
   }, [directory, filter]);
   const pickerFolders = useMemo(() => pickerDirectory?.entries.filter(entry => entry.type === "directory") || [], [pickerDirectory]);
   const folderLabel = `${resolvedRoots[rootIndex] || roots[rootIndex] || ""}${folder ? `/${folder}` : ""}`;
+  const currentFavorite = favorites.find(item => item.root_path === roots[rootIndex] && item.path === folder);
 
   function chooseRoot(nextRoot: number) {
     setLoadingFiles(true);
@@ -347,6 +442,35 @@ export function DocumentViewer() {
     setPickerPath(path);
   }
 
+  async function updateFavorites(request: Promise<{ favorites: FileManagerFavorite[] }>) {
+    setFavoriteBusy(true);
+    setFavoriteError("");
+    try {
+      const value = await request;
+      setFavorites(value.favorites);
+    } catch (value) {
+      setFavoriteError(errorMessage(value));
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
+  function addCurrentFavorite() {
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: rootIndex, path: folder }) }));
+  }
+
+  function removeFavorite(id: string) {
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  }
+
+  function openFavorite(favorite: FileManagerFavorite) {
+    const nextRootIndex = roots.indexOf(favorite.root_path);
+    if (nextRootIndex < 0) return;
+    if (nextRootIndex !== rootIndex) setRootIndex(nextRootIndex);
+    if (nextRootIndex !== rootIndex || favorite.path !== folder) openDirectory(favorite.path);
+    setPickerOpen(false);
+  }
+
   return <section className="document-viewer">
     <div className="document-folder-bar">
       <div className="document-folder-control">
@@ -360,6 +484,26 @@ export function DocumentViewer() {
       </button>
       <Button variant="secondary" size="sm" type="button" onClick={openPicker} disabled={!roots.length}>浏览</Button>
     </div>
+
+    <section className="document-favorites" aria-label="收藏文档路径">
+      <div className="document-favorites-head">
+        <div><strong>收藏路径</strong><span>{favorites.length ? "点击收藏项可直接打开对应目录" : "收藏常用项目路径后可快速切换"}</span></div>
+        <Button variant="secondary" size="sm" type="button" onClick={addCurrentFavorite} disabled={!roots.length || Boolean(currentFavorite) || favoriteBusy}>{currentFavorite ? "已收藏当前路径" : "收藏当前路径"}</Button>
+      </div>
+      {favoriteError ? <ErrorState message={favoriteError} /> : null}
+      {favorites.length ? <div className="document-favorite-list">
+        {favorites.map(favorite => {
+          const favoriteRootIndex = roots.indexOf(favorite.root_path);
+          return <div className={`document-favorite${favorite.id === currentFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
+            <button className="document-favorite-main" type="button" onClick={() => openFavorite(favorite)} disabled={favoriteRootIndex < 0} title={`${favorite.root_path}/${favorite.path}`}>
+              <strong>{favorite.name}</strong>
+              <small>{favorite.root_path}/{favorite.path}</small>
+            </button>
+            <Button variant="quiet" size="sm" type="button" onClick={() => removeFavorite(favorite.id)} disabled={favoriteBusy}>移除</Button>
+          </div>;
+        })}
+      </div> : <p className="document-favorites-empty">还没有收藏路径。浏览到常用项目目录后，点击右上角“收藏当前路径”。</p>}
+    </section>
 
     {pickerOpen ? <section className="document-folder-picker" aria-label="选择文档文件夹">
       <div className="document-picker-head"><div><strong>选择文档文件夹</strong><span>左侧会以文件夹层级展示当前目录中的 Markdown 文档。</span></div><Button variant="quiet" size="sm" type="button" onClick={() => setPickerOpen(false)}>关闭</Button></div>
