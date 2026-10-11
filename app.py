@@ -41,6 +41,7 @@ from file_manager import (
     save_date_search_folders,
     search_ply_by_date,
     search_ply_by_range,
+    pull_project_updates,
     upload_file as upload_file_to_directory,
     sync_roots,
 )
@@ -366,6 +367,12 @@ async def file_manager_ply_by_date(payload: dict[str, Any] = Body(...)):
 async def file_manager_sync(payload: dict[str, Any] = Body(default_factory=dict)):
     """递归预读所选项目的目录列表。"""
     return JSONResponse(await run_in_threadpool(sync_roots, payload.get("targets")))
+
+
+@app.post("/api/file-manager/git-pull")
+async def file_manager_git_pull(payload: dict[str, Any] = Body(...)):
+    """拉取收藏项目目录的最新 Git 提交，并返回 LIHAN/DOC 检查结果。"""
+    return JSONResponse(await run_in_threadpool(pull_project_updates, payload.get("root"), payload.get("path")))
 
 
 @app.get("/api/file-manager/favorites")

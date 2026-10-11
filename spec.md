@@ -149,6 +149,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | PUT | `/api/file-manager/date-search-folders` | 保存 `folders` 路径数组到 `settings.json` 的 `ply_date_search` 区段；路径必须存在且位于已开放顶层目录内，最多 24 个 |
 | POST | `/api/file-manager/ply-by-date` | 接收 `start_date`、`end_date`（`YYYY-MM-DD`，含边界）、`iteration_mode`（`latest`、`exact`、`all`）、可选 `iteration` 和 `refresh`；跨已保存项目目录筛选 PLY，返回实验日期、迭代数和文件路径；首次自动查找复用缓存，手动查找刷新扫描；继续兼容旧的 `date` + `iteration` 请求 |
 | POST | `/api/file-manager/sync` | 接收 `targets` 数组，选用 `RadioGS-perlight`、`RadioGS-stage1`；省略时默认两者，递归预读目录并返回缓存目录数 |
+| POST | `/api/file-manager/git-pull` | 接收 `root` 顶层目录索引与项目相对路径 `path`；在受限范围内执行固定参数的 `git pull --ff-only`，比较前后 HEAD 判断是否更新，返回 `LIHAN/DOC` 相对路径与是否存在，成功后清除该顶层目录缓存 |
 | POST | `/api/file-manager/upload?root=<index>&path=<relative_path>&overwrite=<bool>` | 以原始请求体上传单个不超过 4 GB 的文件；URL 编码后的文件相对路径放在 `x-file-path` 请求头，可包含文件夹相对结构，服务端逐段校验路径、跟随顶层目录内出现的符号链接并原子写入，成功后清除该顶层目录相关缓存 |
 | GET | `/api/file-manager/favorites` | 读取当前仍在已开放顶层目录下的目录收藏 |
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
@@ -191,6 +192,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - “文档查看”页复用相同的受限目录边界。首次打开时优先定位 `/home/lihan/reproduce/RadioGS-stage1`（该路径须位于已开放范围），顶部文件夹选择器与左侧目录均可逐层切换；左侧只显示文件夹与 Markdown 文档，文件名最多显示两行。目录和文档会优先按文件名开头的 `YYYY-MM-DD` 或 `YYYYMMDD` 日期倒序排列，再按修改时间倒序排列；阅读区渲染标题、段落、列表、代码块、表格、引用和链接。相对图片与附件通过受限资源接口解析，不会暴露开放目录外的文件。单次递归扫描最多返回 2,000 篇文档，单篇读取上限为 3 MB。
 - 文档查看页在浏览器 `localStorage.hannishub_document_viewer_location` 保存最后一次成功读取的顶层目录真实路径、相对目录和 Markdown 相对路径；再次打开时优先恢复上次的文件夹与文档，记录损坏、目录或文档已不存在、链接失效时回退默认目录。浏览器禁用本地存储时仍使用默认目录，不影响文件游览页自己的位置记录。
 - 文档查看页顶部提供“收藏路径”板块，复用 `settings.json.file_favorites` 的目录收藏；可收藏当前路径、点击收藏项直接切换对应的顶层目录与相对目录，也可移除收藏。收藏记录与点云页共享，新增与删除继续复用文件管理收藏接口。
+- 收藏路径按项目目录使用：点击收藏项会先调用 Git 拉取接口更新项目，再直接打开 `<项目目录>/LIHAN/DOC` 展示文档；页面打开时如果当前浏览位置属于某个收藏项目，也会自动拉取一次并刷新目录。收藏卡片提供“拉取最新修改”按钮与拉取状态，非 Git 目录会跳过拉取但仍返回 `LIHAN/DOC` 检查结果；在 `LIHAN/DOC` 内点击“收藏当前路径”时会自动收藏上级项目目录。后端只执行固定参数命令并设置 120 秒超时，不拼接用户输入，路径仍先经过受限目录校验。
 - 目录收藏单独保存在 `settings.json.file_favorites`，最多 100 个；记录顶层目录文本、相对目录、显示名称和 ID。新增时验证目录仍属于已开放顶层目录，重复路径拒绝收藏；读取时将旧顶层路径映射到当前开放范围，无法访问的目录暂不展示。
 
 ### 点云预览

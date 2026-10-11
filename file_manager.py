@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import threading
 import time
 from datetime import date, datetime
@@ -25,6 +26,8 @@ MAX_FAVORITES = 100
 MAX_DATE_SEARCH_FOLDERS = 24
 MAX_MARKDOWN_FILES = 2_000
 MAX_MARKDOWN_FILE_BYTES = 3 * 1024 * 1024
+MAX_GIT_PULL_SECONDS = 120
+PROJECT_DOCUMENT_DIRECTORY = Path("LIHAN") / "DOC"
 MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024 * 1024
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
@@ -861,6 +864,55 @@ def delete_favorite(favorite_id: str) -> list[dict[str, str]]:
             raise HTTPException(status_code=404, detail="收藏目录不存在")
         update_settings_section("file_favorites", remaining)
     return list_favorites()
+
+
+def _git_command(directory: Path, arguments: list[str]) -> str:
+    """在项目目录内执行只读或固定参数的 Git 命令，并返回合并输出。"""
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        timeout=MAX_GIT_PULL_SECONDS,
+        check=False,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
+    output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"Git 命令失败：{output[:2_000] or result.returncode}")
+    return output
+
+
+def pull_project_updates(root_index: object, relative_path: object) -> dict[str, Any]:
+    """拉取收藏项目目录的最新提交，并检查 LIHAN/DOC 文档目录。"""
+    if not isinstance(root_index, int) or isinstance(root_index, bool) or not isinstance(relative_path, str):
+        raise HTTPException(status_code=422, detail="拉取项目参数无效")
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    root = _resolve_root(roots[root_index])
+    safe_path = _normalize_relative_path(relative_path)
+    directory = _resolve_directory(root, safe_path)
+    document_relative_path = _normalize_relative_path(f"{safe_path}/{PROJECT_DOCUMENT_DIRECTORY}" if safe_path else str(PROJECT_DOCUMENT_DIRECTORY))
+    document_directory = root / document_relative_path
+    base_result = {
+        "root_index": root_index,
+        "path": safe_path,
+        "document_path": document_relative_path,
+        "pulled_at": time.time(),
+    }
+
+    if not (directory / ".git").exists():
+        return {**base_result, "document_exists": document_directory.is_dir(), "repository": False, "updated": False,
+                "output": "当前收藏路径不是 Git 仓库，已跳过拉取。"}
+
+    previous_head = _git_command(directory, ["rev-parse", "HEAD"])
+    pull_output = _git_command(directory, ["pull", "--ff-only"])
+    current_head = _git_command(directory, ["rev-parse", "HEAD"])
+    _invalidate_root_caches(root)
+    # 拉取可能新建 LIHAN/DOC，因此必须在 pull 完成后重新检查。
+    return {**base_result, "document_exists": document_directory.is_dir(), "repository": True,
+            "updated": previous_head != current_head, "output": pull_output[:4_000]}
 
 
 def clear_directory_cache() -> None:

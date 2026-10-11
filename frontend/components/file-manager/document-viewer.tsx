@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { FileManagerDirectoryResponse, FileManagerEntry, FileManagerFavorite, MarkdownDocument } from "../../lib/types";
+import type { FileManagerDirectoryResponse, FileManagerEntry, FileManagerFavorite, FileManagerGitPullResponse, MarkdownDocument } from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
 type MarkdownLinkHandler = (path: string) => void;
 
 const DEFAULT_DOCUMENT_FOLDER = "/home/lihan/reproduce/RadioGS-stage1";
 const DOCUMENT_LOCATION_KEY = "hannishub_document_viewer_location";
+const PROJECT_DOCUMENT_SUFFIX = "LIHAN/DOC";
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkdn"]);
 
 interface SavedDocumentLocation {
@@ -241,7 +242,12 @@ export function DocumentViewer() {
   const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
   const [favoriteError, setFavoriteError] = useState("");
   const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [pullBusy, setPullBusy] = useState(false);
+  const [pullMessage, setPullMessage] = useState("");
+  const [pullError, setPullError] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
   const restoredDirectoryRef = useRef<FileManagerDirectoryResponse | null>(null);
+  const pulledFavoriteIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -339,7 +345,7 @@ export function DocumentViewer() {
       .catch(value => { if (active) setError(errorMessage(value)); })
       .finally(() => { if (active) setLoadingFiles(false); });
     return () => { active = false; };
-  }, [roots, rootIndex, folder]);
+  }, [roots, rootIndex, folder, refreshToken]);
 
   useEffect(() => {
     if (!selectedPath) return;
@@ -382,7 +388,10 @@ export function DocumentViewer() {
   }, [directory, filter]);
   const pickerFolders = useMemo(() => pickerDirectory?.entries.filter(entry => entry.type === "directory") || [], [pickerDirectory]);
   const folderLabel = `${resolvedRoots[rootIndex] || roots[rootIndex] || ""}${folder ? `/${folder}` : ""}`;
-  const currentFavorite = favorites.find(item => item.root_path === roots[rootIndex] && item.path === folder);
+  const currentFavorite = favorites.find(item => item.root_path === roots[rootIndex] && (item.path === folder || `${item.path ? `${item.path}/` : ""}${PROJECT_DOCUMENT_SUFFIX}` === folder));
+  const activeFavorite = favorites
+    .filter(item => item.root_path === roots[rootIndex] && (item.path === "" || folder === item.path || folder.startsWith(`${item.path}/`)))
+    .sort((left, right) => right.path.length - left.path.length)[0];
 
   function chooseRoot(nextRoot: number) {
     setLoadingFiles(true);
@@ -456,20 +465,72 @@ export function DocumentViewer() {
   }
 
   function addCurrentFavorite() {
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: rootIndex, path: folder }) }));
+    // 在 LIHAN/DOC 内点击收藏时，收藏上级项目目录而不是文档目录本身。
+    const favoritePath = folder === PROJECT_DOCUMENT_SUFFIX
+      ? ""
+      : folder.endsWith(`/${PROJECT_DOCUMENT_SUFFIX}`)
+        ? folder.slice(0, -PROJECT_DOCUMENT_SUFFIX.length - 1)
+        : folder;
+    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: rootIndex, path: favoritePath }) }));
   }
 
   function removeFavorite(id: string) {
     void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" }));
   }
 
-  function openFavorite(favorite: FileManagerFavorite) {
+  function projectDocumentPath(favorite: FileManagerFavorite): string {
+    return favorite.path ? `${favorite.path}/${PROJECT_DOCUMENT_SUFFIX}` : PROJECT_DOCUMENT_SUFFIX;
+  }
+
+  const pullFavorite = useCallback(async (favorite: FileManagerFavorite): Promise<FileManagerGitPullResponse | null> => {
+    const nextRootIndex = roots.indexOf(favorite.root_path);
+    if (nextRootIndex < 0) return null;
+    setPullBusy(true);
+    setPullError("");
+    setPullMessage(`正在拉取 ${favorite.name} 的最新修改…`);
+    try {
+      const value = await apiFetch<FileManagerGitPullResponse>(`${API_PATHS.fileManager}/git-pull`, {
+        method: "POST",
+        body: jsonBody({ root: nextRootIndex, path: favorite.path }),
+      });
+      const documentState = value.document_exists ? "" : "；未找到 LIHAN/DOC";
+      setPullMessage(`${value.repository ? (value.updated ? "已拉取最新修改" : "项目已是最新") : "该收藏不是 Git 仓库，已跳过拉取"}${documentState}`);
+      return value;
+    } catch (value) {
+      const message = errorMessage(value);
+      setPullError(message);
+      setPullMessage("");
+      return null;
+    } finally {
+      setPullBusy(false);
+    }
+  }, [roots]);
+
+  async function pullActiveFavorite() {
+    if (!activeFavorite) return;
+    const result = await pullFavorite(activeFavorite);
+    if (result) setRefreshToken(value => value + 1);
+  }
+
+  async function openFavorite(favorite: FileManagerFavorite) {
     const nextRootIndex = roots.indexOf(favorite.root_path);
     if (nextRootIndex < 0) return;
-    if (nextRootIndex !== rootIndex) setRootIndex(nextRootIndex);
-    if (nextRootIndex !== rootIndex || favorite.path !== folder) openDirectory(favorite.path);
     setPickerOpen(false);
+    const result = await pullFavorite(favorite);
+    const nextFolder = result?.document_exists ? result.document_path : projectDocumentPath(favorite);
+    if (nextRootIndex !== rootIndex) setRootIndex(nextRootIndex);
+    if (nextRootIndex !== rootIndex || nextFolder !== folder) openDirectory(nextFolder);
   }
+
+
+  useEffect(() => {
+    if (!roots.length || !activeFavorite) return;
+    if (pulledFavoriteIdsRef.current.has(activeFavorite.id)) return;
+    pulledFavoriteIdsRef.current.add(activeFavorite.id);
+    void pullFavorite(activeFavorite).then(result => {
+      if (result) setRefreshToken(value => value + 1);
+    });
+  }, [roots, activeFavorite, pullFavorite]);
 
   return <section className="document-viewer">
     <div className="document-folder-bar">
@@ -487,17 +548,22 @@ export function DocumentViewer() {
 
     <section className="document-favorites" aria-label="收藏文档路径">
       <div className="document-favorites-head">
-        <div><strong>收藏路径</strong><span>{favorites.length ? "点击收藏项可直接打开对应目录" : "收藏常用项目路径后可快速切换"}</span></div>
-        <Button variant="secondary" size="sm" type="button" onClick={addCurrentFavorite} disabled={!roots.length || Boolean(currentFavorite) || favoriteBusy}>{currentFavorite ? "已收藏当前路径" : "收藏当前路径"}</Button>
+        <div><strong>收藏路径</strong><span>{favorites.length ? "点击收藏项会先拉取项目，再打开 LIHAN/DOC" : "收藏常用项目路径后可快速切换"}</span></div>
+        <div className="document-favorites-actions">
+          <Button variant="secondary" size="sm" type="button" onClick={pullActiveFavorite} disabled={!activeFavorite || pullBusy || favoriteBusy}>{pullBusy ? "正在拉取…" : "拉取最新修改"}</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={addCurrentFavorite} disabled={!roots.length || Boolean(currentFavorite) || favoriteBusy}>{currentFavorite ? "已收藏当前路径" : "收藏当前路径"}</Button>
+        </div>
       </div>
+      {pullBusy || pullMessage ? <p className="document-sync-status" aria-live="polite">{pullBusy ? pullMessage || "正在拉取最新修改…" : pullMessage}</p> : null}
+      {pullError ? <ErrorState message={pullError} /> : null}
       {favoriteError ? <ErrorState message={favoriteError} /> : null}
       {favorites.length ? <div className="document-favorite-list">
         {favorites.map(favorite => {
           const favoriteRootIndex = roots.indexOf(favorite.root_path);
-          return <div className={`document-favorite${favorite.id === currentFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
-            <button className="document-favorite-main" type="button" onClick={() => openFavorite(favorite)} disabled={favoriteRootIndex < 0} title={`${favorite.root_path}/${favorite.path}`}>
+          return <div className={`document-favorite${favorite.id === activeFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
+            <button className="document-favorite-main" type="button" onClick={() => openFavorite(favorite)} disabled={favoriteRootIndex < 0 || pullBusy} title={`${favorite.root_path}/${favorite.path}/${PROJECT_DOCUMENT_SUFFIX}`}>
               <strong>{favorite.name}</strong>
-              <small>{favorite.root_path}/{favorite.path}</small>
+              <small>{favorite.root_path}/{favorite.path}/{PROJECT_DOCUMENT_SUFFIX}</small>
             </button>
             <Button variant="quiet" size="sm" type="button" onClick={() => removeFavorite(favorite.id)} disabled={favoriteBusy}>移除</Button>
           </div>;

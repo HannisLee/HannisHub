@@ -156,6 +156,17 @@ export interface FileManagerFavorite {
   path: string;
 }
 
+export interface FileManagerGitPullResponse {
+  root_index: number;
+  path: string;
+  document_path: string;
+  document_exists: boolean;
+  repository: boolean;
+  updated: boolean;
+  output: string;
+  pulled_at: number;
+}
+
 export interface ModelFile {
   name: string;
   path: string;
