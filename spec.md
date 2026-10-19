@@ -546,7 +546,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `auth.username` | string | `""` | 管理员用户名；为空表示尚未初始化 |
 | `auth.password_hash` | string | `""` | Argon2id 密码哈希；永不通过 API 返回 |
 | `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
-| `auth.session_max_age_seconds` | number | `43200` | 会话有效期，默认 12 小时 |
+| `auth.session_max_age_seconds` | number | `604800` | 会话有效期，默认 7 天 |
 | `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
 | `file_favorites` | array | `[]` | 目录收藏，包含 `id`、`name`、`root_path` 和相对目录 `path` |
 

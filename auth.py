@@ -16,7 +16,8 @@ from pwdlib import PasswordHash
 
 ROOT_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = ROOT_DIR / "settings.json"
-DEFAULT_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
+DEFAULT_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+LEGACY_DEFAULT_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 PUBLIC_PATHS = {
     "/api/auth/status",
     "/api/auth/login",
@@ -70,7 +71,10 @@ def ensure_auth_settings() -> dict[str, Any]:
             auth["session_secret"] = secrets.token_urlsafe(48)
             changed = True
         try:
-            max_age = int(auth.get("session_max_age_seconds", DEFAULT_SESSION_MAX_AGE_SECONDS))
+            configured_max_age = auth.get("session_max_age_seconds", DEFAULT_SESSION_MAX_AGE_SECONDS)
+            max_age = int(configured_max_age)
+            if max_age == LEGACY_DEFAULT_SESSION_MAX_AGE_SECONDS:
+                max_age = DEFAULT_SESSION_MAX_AGE_SECONDS
         except (TypeError, ValueError):
             max_age = DEFAULT_SESSION_MAX_AGE_SECONDS
         if max_age <= 0:

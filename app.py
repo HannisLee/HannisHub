@@ -112,7 +112,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=str(_auth_settings.get("session_secret")),
     session_cookie="hannishub_session",
-    max_age=int(_auth_settings.get("session_max_age_seconds", 12 * 60 * 60)),
+    max_age=int(_auth_settings.get("session_max_age_seconds", 7 * 24 * 60 * 60)),
     same_site="strict",
     https_only=False,
 )
