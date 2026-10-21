@@ -36,7 +36,7 @@ export function VoiceSettings() {
   }
 
   return <Card className="prompt-settings-card">
-    <CardHeader title="语音输入 · 外部 ASR 设置" description="填写服务地址、Key 和模型即可。支持小米 MiMo ASR 与 OpenAI 兼容转写服务，接口自动适配。"
+    <CardHeader title="语音输入 · ASR 设置" description="检测到本机 ASR 运行时优先本机转写；未运行时使用下面的外部配置。支持小米 MiMo ASR 与 OpenAI 兼容服务。"
       actions={<Button size="sm" disabled={!loaded || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存 ASR 设置"}</Button>} />
     {error ? <ErrorState message={error} /> : null}
     {message ? <p className="inline-message">{message}</p> : null}
@@ -53,9 +53,13 @@ export function VoiceSettings() {
     </div>
     {loaded ? <>
       <p className="muted">录音自动归档，保留原音频、转码音频和转写文本。</p>
+      {config.local_asr?.available ?
+        <p className="inline-message">已检测到本机 ASR「{config.local_asr.name}」，新录音和重试任务会优先使用本机切片转写。</p>
+        : <p className="muted">当前未检测到运行中的本机 ASR，将使用外部配置。</p>}
       <details className="prompt-audio-storage"><summary>查看归档位置与实际接口</summary>
         <p className="muted">归档位置：{config.resolved_archive_dir || config.archive_dir || "prompt_service/data/recordings"}</p>
-        <p className="muted">实际接口：{config.resolved_api_url || "尚未配置"}</p>
+        <p className="muted">优先接口：{config.local_asr?.available ? `本机 ${config.local_asr.name}` : "未运行"}</p>
+        <p className="muted">外部接口：{config.resolved_api_url || "尚未配置"}</p>
       </details>
       {!config.ffmpeg_available ? <ErrorState message="服务器尚未安装 ffmpeg，原音频会保留，安装后可重试转码。" /> : null}
     </> : <p className="muted">正在读取配置…</p>}

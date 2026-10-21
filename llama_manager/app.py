@@ -1716,6 +1716,19 @@ def _get_asr_service_item() -> dict:
         }
 
 
+def get_running_asr_service() -> dict:
+    """返回唯一运行中的 ASR 实例信息，供同进程的提示词模块复用。"""
+    return _get_asr_service_item()
+
+
+def transcribe_with_managed_asr(
+    item: dict, input_path: Path, work_dir: Path, on_progress=None,
+) -> dict:
+    """使用受管 ASR 的 FFmpeg 切片流程同步转写一个音频文件。"""
+    with _asr_task_semaphore:
+        return _transcribe_qwen3_asr(item, input_path, work_dir, on_progress)
+
+
 def _qwen3_asr_model_from_command(command: list) -> str:
     """从 qwen-asr-serve 命令中读取模型位置。"""
     tokens = []

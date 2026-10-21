@@ -11,6 +11,18 @@ import { RecordingPlayer } from "./recording-player";
 
 const STATUS = { queued: "服务器已归档，等待处理", processing: "服务器转码 / 外部 ASR 转写中", waiting_config: "已归档，等待 ASR 配置", failed: "处理失败，可重试", done: "已归档并完成转写" };
 
+function recordingStatus(server?: ServerRecording): string {
+  if (!server) return "";
+  if (server.status === "processing") {
+    const engine = server.engine === "local" ? "本机 ASR" : "外部 ASR";
+    return server.progress_detail ? `服务器转码 / ${engine}转写中 · ${server.progress_detail}` : `服务器转码 / ${engine}转写中`;
+  }
+  if (server.status === "done" && server.engine) {
+    return server.engine === "local" ? "已归档并由本机 ASR 完成转写" : "已归档并由外部 ASR 完成转写";
+  }
+  return STATUS[server.status];
+}
+
 export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, onStatusChange, archiveTarget, feedbackTarget }: { disabled: boolean; onText: (text: string, insertMode: VoiceInsertMode) => void; onRestore: (text: string) => void; onRecordingChange: (recording: boolean) => void; onStatusChange: (status: string) => void; archiveTarget: HTMLElement | null; feedbackTarget: HTMLElement | null }) {
   const [local, setLocal] = useState<LocalRecording[]>([]);
   const [remote, setRemote] = useState<ServerRecording[]>([]);
@@ -102,7 +114,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, onS
       }
       const newest = latest.at(-1);
       const failed = newest && !newest.applied ? result.recordings.find(server => server.id === newest.id && ["failed", "waiting_config"].includes(server.status)) : undefined;
-      if (failed) syncError = `语音转写失败：${failed.error || "外部 ASR 未返回有效文本"}。原音频已保留，可在语音归档中重试。`;
+      if (failed) syncError = `语音转写失败：${failed.error || "转写服务未返回有效文本"}。原音频已保留，可在语音归档中重试。`;
       setLocal((await listLocalRecordings()).filter(item => !deletingRef.current.has(item.id)).sort((a, b) => b.created_at.localeCompare(a.created_at)));
       setTransferError(syncError);
     } catch (value) {
@@ -262,7 +274,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, onS
         const server = remote.find(item => item.id === id);
         const active = activeIdRef.current === id;
         const date = item?.created_at || server?.created_at || "";
-        const status = active ? "正在录音" : item && !item.ready ? "录音未完成" : server ? STATUS[server.status] : uploads[id] || "等待上传";
+        const status = active ? "正在录音" : item && !item.ready ? "录音未完成" : server ? recordingStatus(server) : uploads[id] || "等待上传";
         const title = server?.text ? truncate(server.text.split(/\r?\n/).find(line => line.trim()) || server.text, 100) : status;
         return <details className="prompt-item prompt-audio-item" key={id} onToggle={event => {
           const open = event.currentTarget.open;
@@ -285,7 +297,7 @@ export function VoiceInput({ disabled, onText, onRestore, onRecordingChange, onS
             {server?.error ? <p className="prompt-audio-error">{server.error}</p> : null}
             {!active && expanded.has(id) && (server || item?.size) ? <RecordingPlayer id={id} local={item} archived={!!server} converted={!!server && ["done", "waiting_config"].includes(server.status)} /> : null}
             <div className="prompt-audio-detail-meta">
-              <span>{formatBytes(item?.size || server?.size)} · {item ? "本地副本已保留" : "服务器已归档"}</span>
+              <span>{formatBytes(item?.size || server?.size)} · {item ? "本地副本已保留" : "服务器已归档"}{server?.engine ? ` · ${server.engine === "local" ? "本机 ASR" : "外部 ASR"}` : ""}</span>
               {!active && item && !item.ready ? <Button size="sm" variant="secondary" className="prompt-audio-action" onClick={() => void retry(id, undefined, true)}>继续上传</Button> : null}
               {!active && (!server || ["failed", "waiting_config"].includes(server.status)) && item?.ready !== false ? <Button size="sm" variant="secondary" className="prompt-audio-action" onClick={() => void retry(id, server)}>重试</Button> : null}
             </div>

@@ -51,6 +51,11 @@ import server.app as server_manager_app
 
 ROOT_DIR = Path(__file__).resolve().parent
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
+# 提示词语音输入与模型管理运行在同一 Hub 进程中，优先复用受管本机 ASR。
+prompt_service_app.audio_service.configure_local_asr(
+    llama_manager_app.get_running_asr_service,
+    llama_manager_app.transcribe_with_managed_asr,
+)
 SERVICES: list[dict[str, str]] = [
     {
         "id": "llama-manager",

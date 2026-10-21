@@ -23,6 +23,9 @@ export interface ServerRecording {
   text: string;
   error: string;
   archive_dir: string;
+  engine?: "local" | "external" | "";
+  progress?: number;
+  progress_detail?: string;
 }
 
 export interface ExternalAsrSettings {
@@ -35,6 +38,11 @@ export interface ExternalAsrSettings {
   ffmpeg_available?: boolean;
   resolved_api_url?: string;
   resolved_archive_dir?: string;
+  local_asr?: {
+    available: boolean;
+    name: string;
+    pid: number | null;
+  };
 }
 
 function openAudioStore(): Promise<IDBDatabase> {

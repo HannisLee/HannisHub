@@ -183,6 +183,43 @@ class AudioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["text"], "这是完整转写")
         self.assertEqual(Path(item["raw_path"]).with_name("rec_test_001.txt").read_text(), item["text"])
 
+    async def test_running_local_asr_takes_priority_without_external_config(self):
+        local_service = {"pid": 123, "port": 8000, "display_name": "Qwen3-ASR-1.7B"}
+        transcriber = AsyncMock(return_value={"text": "本机切片转写", "chunks": 3, "duration": 1.2})
+        with patch.object(self.service, "local_asr", return_value=local_service), patch.object(
+            self.service, "transcribe_local", transcriber
+        ):
+            response = await self.client.get("/api/asr-settings")
+            self.assertEqual(response.json()["local_asr"], {
+                "available": True, "name": "Qwen3-ASR-1.7B", "pid": 123,
+            })
+            await self.upload()
+            item = await self.wait_status("done")
+            transcriber.assert_awaited_once_with(local_service, Path(item["converted_path"]), item["id"])
+        self.assertEqual(item["engine"], "local")
+        self.assertEqual(item["progress_detail"], "本机 ASR 完成，共转写 3 个片段")
+        self.assertEqual(item["text"], "本机切片转写")
+        self.assertEqual(Path(item["raw_path"]).with_name("rec_test_001.txt").read_text(), item["text"])
+
+    async def test_local_transcription_uses_injected_pipeline_and_cleans_workdir(self):
+        source = self.directory / "source.archive.mp3"
+        source.write_bytes(b"audio")
+        work_dirs = []
+
+        def transcriber(service, input_path, work_dir, report):
+            work_dirs.append(work_dir)
+            report("processing", 10, "FFmpeg 正在分析音频和静音位置")
+            self.assertEqual(service["pid"], 123)
+            self.assertEqual(input_path, source)
+            self.assertTrue(work_dir.is_dir())
+            return {"text": " 本机流水线转写 ", "chunks": 2, "duration": 3.0}
+
+        self.service.configure_local_asr(lambda: {"pid": 123, "port": 8000}, transcriber)
+        result = await self.service.transcribe_local({"pid": 123, "port": 8000}, source, "rec_test_001")
+        self.assertEqual(result["text"], " 本机流水线转写 ")
+        self.assertEqual(len(work_dirs), 1)
+        self.assertFalse(work_dirs[0].exists())
+
     async def test_mimo_base_address_audio_protocol_and_archive(self):
         await self.upload()
         before = await self.wait_status("waiting_config")

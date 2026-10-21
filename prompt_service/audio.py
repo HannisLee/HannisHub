@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -43,6 +44,8 @@ class AudioService:
         self.task = None
         self.wake = asyncio.Event()
         self.upload_lock = asyncio.Lock()
+        self.local_asr_provider = None
+        self.local_asr_transcriber = None
         self.router = APIRouter()
         self.router.add_api_route("/asr-settings", self.settings, methods=["GET"])
         self.router.add_api_route("/asr-settings", self.save_settings, methods=["PUT"])
@@ -52,6 +55,11 @@ class AudioService:
         self.router.add_api_route("/recordings/{recording_id}/retry", self.retry, methods=["POST"])
         self.router.add_api_route("/recordings/{recording_id}/audio", self.audio, methods=["GET"])
 
+    def configure_local_asr(self, provider, transcriber):
+        """由 Hub 注入模型管理模块的本机 ASR 探测与转写能力。"""
+        self.local_asr_provider = provider
+        self.local_asr_transcriber = transcriber
+
     def config(self):
         return {**DEFAULT_ASR, **self.read_settings().get("external_asr", {})}
 
@@ -59,8 +67,27 @@ class AudioService:
         config = self.config()
         protocol, endpoint = resolve_asr_endpoint(config)
         directory = Path(config["archive_dir"] or self.app_dir / "data" / "recordings").expanduser().resolve()
+        local = self.local_asr()
+        local_asr = {
+            "available": bool(local),
+            "name": str(local.get("display_name") or "本机 ASR") if local else "",
+            "pid": local.get("pid") if local else None,
+        }
         return {**config, "ffmpeg_available": bool(shutil.which("ffmpeg")), "protocol": protocol,
-                "resolved_api_url": endpoint if config["api_url"] else "", "resolved_archive_dir": str(directory)}
+                "resolved_api_url": endpoint if config["api_url"] else "", "resolved_archive_dir": str(directory),
+                "local_asr": local_asr}
+
+    def local_asr(self):
+        """读取唯一运行中的本机 ASR；未运行或独立部署时返回 None。"""
+        if not callable(self.local_asr_provider):
+            return None
+        try:
+            item = self.local_asr_provider()
+        except HTTPException:
+            return None
+        if not isinstance(item, dict) or not item.get("port"):
+            return None
+        return item
 
     async def save_settings(self, request: Request):
         try:
@@ -167,7 +194,8 @@ class AudioService:
                     "id": recording_id, "created_at": datetime.now(timezone.utc).isoformat(),
                     "size": size, "mime_type": mime, "sha256": digest.hexdigest(),
                     "raw_path": str(raw_path), "converted_path": "", "status": "queued",
-                    "text": "", "error": "", "archive_dir": str(directory),
+                    "text": "", "error": "", "archive_dir": str(directory), "engine": "",
+                    "progress": 0, "progress_detail": "",
                 }
                 with self.settings_lock:
                     data = self.read_settings()
@@ -266,18 +294,63 @@ class AudioService:
                 await process.wait()
             temp.unlink(missing_ok=True)
 
+    async def transcribe_local(self, service, source, recording_id):
+        """复用模型管理的 FFmpeg 静音检测、切片和 FLAC 转码流程。"""
+        if not callable(self.local_asr_transcriber):
+            raise RuntimeError("Hub 未注入本机 ASR 转写能力")
+        work_dir = source.parent / f".{source.stem}.asr-work"
+        shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        last_detail = ""
+        last_report_at = 0.0
+
+        def report(_status, progress, detail):
+            nonlocal last_detail, last_report_at
+            now = time.monotonic()
+            if detail == last_detail or now - last_report_at < 0.8:
+                return
+            last_detail, last_report_at = detail, now
+            try:
+                self.update(recording_id, progress=max(0, min(100, int(progress))), progress_detail=str(detail)[:300])
+            except HTTPException:
+                # 服务重启或记录被清理时，后台线程允许静默结束进度写入。
+                pass
+
+        try:
+            result = await asyncio.to_thread(self.local_asr_transcriber, service, source, work_dir, report)
+        except Exception as exc:
+            detail = str(exc).strip() or exc.__class__.__name__
+            raise RuntimeError(f"本机 ASR 转写失败：{detail}") from exc
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        if not isinstance(result, dict) or not isinstance(result.get("text"), str) or not result["text"].strip():
+            raise RuntimeError("本机 ASR 未返回有效的转写文本")
+        return result
+
     async def process(self, item):
         recording_id = item["id"]
-        self.update(recording_id, status="processing", error="")
+        self.update(recording_id, status="processing", error="", progress=0, progress_detail="")
         try:
             raw = Path(item["raw_path"])
             target = raw.with_name(f"{recording_id}.archive.mp3")
             if not target.is_file():
                 await self.transcode(raw, target)
             self.update(recording_id, converted_path=str(target))
+            local = self.local_asr()
+            if local:
+                # 本机服务优先；长录音会在本机流程中按静音切成 FLAC 片段逐段提交。
+                self.update(recording_id, engine="local", progress_detail="本机 ASR 正在分析并切片转写")
+                result = await self.transcribe_local(local, target, recording_id)
+                text = result["text"].strip()
+                raw.with_name(f"{recording_id}.txt").write_text(text, encoding="utf-8")
+                chunks = result.get("chunks")
+                detail = f"本机 ASR 完成，共转写 {chunks} 个片段" if isinstance(chunks, int) else "本机 ASR 转写完成"
+                self.update(recording_id, status="done", text=text, error="", progress=100, progress_detail=detail)
+                return
+            self.update(recording_id, engine="external", progress_detail="正在调用外部 ASR")
             config = self.config()
             if not config["api_url"]:
-                self.update(recording_id, status="waiting_config", error="原音频与转码音频已归档，请配置外部 ASR")
+                self.update(recording_id, status="waiting_config", error="原音频与转码音频已归档，未检测到本机 ASR，请配置外部 ASR", engine="")
                 return
             fields = {"response_format": "json"}
             if config["model"]:
@@ -317,7 +390,7 @@ class AudioService:
                 raise RuntimeError("外部 ASR 未返回有效的转写文本")
             text_path = raw.with_name(f"{recording_id}.txt")
             text_path.write_text(text, encoding="utf-8")
-            self.update(recording_id, status="done", text=text, error="")
+            self.update(recording_id, status="done", text=text, error="", progress=100, progress_detail="外部 ASR 转写完成")
         except asyncio.CancelledError:
             self.update(recording_id, status="queued", error="服务重启后继续处理")
             raise
