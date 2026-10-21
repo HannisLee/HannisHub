@@ -1945,8 +1945,9 @@ def _asr_extract_text(response: dict) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if text:
         compact = re.sub(r"[\s\W]+", "", text, flags=re.UNICODE)
-        # 噪声片段可能让模型无限输出同一个短词；唯一字符占比过低时视为无效语音。
-        if len(compact) >= 240 and len(set(compact)) / len(compact) < 0.08:
+        # 噪声片段可能让模型无限输出同一个短词；唯一字符占比极低时视为无效语音。
+        # 正常英文也会反复使用少量字母，阈值必须明显低于自然语音的观测值。
+        if len(compact) >= 240 and len(set(compact)) / len(compact) < 0.02:
             return ""
     return text
 

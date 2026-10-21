@@ -30,6 +30,15 @@ class AsrHelperTests(unittest.TestCase):
         text = "".join(chr(index) for index in range(200, 700))
         self.assertEqual(_asr_extract_text({"text": text}), text)
 
+    def test_normal_long_english_transcript_is_preserved(self):
+        text = (
+            "So actually, I ask you to create some overview slides of every meeting. "
+            "You can use that as this. First we talk about the static dataset result, "
+            "and then we focus on the dynamic things. The light direction optimization "
+            "improves the reconstruction because shadows provide strong constraints."
+        ) * 3
+        self.assertTrue(_asr_extract_text({"text": text}))
+
 
 class AsrRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_interrupted_tasks_are_requeued_after_service_ready(self):
