@@ -1,5 +1,6 @@
 """HannisHub：综合管理站入口与登录网关。"""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -100,9 +101,15 @@ async def lifespan(_: FastAPI):
     """由 Hub 统一管理子服务生命周期。"""
     await server_manager_app.start_scheduler()
     await prompt_service_app.audio_service.start()
+    asr_recovery_task = asyncio.create_task(llama_manager_app.recover_interrupted_asr_tasks())
     try:
         yield
     finally:
+        asr_recovery_task.cancel()
+        try:
+            await asr_recovery_task
+        except asyncio.CancelledError:
+            pass
         await prompt_service_app.audio_service.stop()
         await server_manager_app.stop_scheduler()
 

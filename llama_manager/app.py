@@ -83,6 +83,9 @@ ASR_MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 ASR_MAX_CHUNK_SECONDS = 600
 ASR_TARGET_CHUNK_BYTES = 16 * 1024 * 1024
 ASR_MIN_CHUNK_SECONDS = 15
+ASR_COMPLETION_TOKENS_PER_SECOND = 12
+ASR_MIN_COMPLETION_TOKENS = 256
+ASR_MAX_COMPLETION_TOKENS = 8192
 SERVICE_CATEGORIES = {"asr", "llm"}
 GPU_PROTECTED_PROCESS_NAMES = {
     "xorg",
@@ -1907,6 +1910,14 @@ def _asr_split_count_for_size(duration: float, file_size: int) -> int:
     return min(max(2, by_size), by_duration)
 
 
+def _asr_max_completion_tokens(duration: float) -> int:
+    """按片段时长限制生成 token 数，避免噪声触发无限重复输出。"""
+    return max(
+        ASR_MIN_COMPLETION_TOKENS,
+        min(ASR_MAX_COMPLETION_TOKENS, math.ceil(duration * ASR_COMPLETION_TOKENS_PER_SECOND)),
+    )
+
+
 def _export_asr_chunk(input_path: Path, chunk_path: Path, start: float, end: float) -> int:
     """导出一个 FLAC 转写片段并返回其实际文件大小。"""
     _run_asr_command([
@@ -1931,7 +1942,13 @@ def _asr_extract_text(response: dict) -> str:
         return ""
     text = re.sub(r"language\s+\S+\s*<asr_text>", " ", text, flags=re.I)
     text = text.replace("<asr_text>", " ")
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if text:
+        compact = re.sub(r"[\s\W]+", "", text, flags=re.UNICODE)
+        # 噪声片段可能让模型无限输出同一个短词；唯一字符占比过低时视为无效语音。
+        if len(compact) >= 240 and len(set(compact)) / len(compact) < 0.08:
+            return ""
+    return text
 
 
 def _asr_upload_suffix(filename: str) -> str:
@@ -1973,7 +1990,7 @@ def _transcribe_qwen3_asr(item: dict, input_path: Path, work_dir: Path, on_progr
     chunk_serial = 0
     chunk_position = 0
     texts: list[str] = []
-    timeout = httpx.Timeout(900.0, connect=10.0)
+    timeout = httpx.Timeout(300.0, connect=10.0)
     with httpx.Client(timeout=timeout) as client:
         while chunk_position < len(pending_chunks):
             start, end = pending_chunks[chunk_position]
@@ -2016,7 +2033,11 @@ def _transcribe_qwen3_asr(item: dict, input_path: Path, work_dir: Path, on_progr
                     )
                 response = client.post(
                     endpoint,
-                    data={"model": model, "response_format": "json"},
+                    data={
+                        "model": model,
+                        "response_format": "json",
+                        "max_completion_tokens": _asr_max_completion_tokens(duration),
+                    },
                     files={"file": (chunk_path.name, audio_file, "audio/flac")},
                 )
             if response.is_error:
@@ -2258,6 +2279,51 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
                 pass
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
+
+
+async def recover_interrupted_asr_tasks():
+    """等待本机 ASR 可用后，继续服务重启前未完成的转写任务。"""
+    while True:
+        try:
+            item = _get_asr_service_item()
+            break
+        except HTTPException as exc:
+            if exc.status_code in (404, 409):
+                await asyncio.sleep(5 if exc.status_code == 404 else 15)
+                continue
+            raise
+
+    recoverable = []
+    with _asr_history_lock:
+        records = _load_asr_history()
+        for record in records:
+            if record.get("status") not in ("uploading", "queued", "processing", "transcribing"):
+                continue
+            record_id = str(record.get("id") or "")
+            work_dir = ASR_JOB_DIR / record_id
+            suffix = _asr_upload_suffix(str(record.get("original_filename") or "audio"))
+            input_path = work_dir / f"audio{suffix}"
+            if record_id and input_path.is_file():
+                record.update({
+                    "status": "queued",
+                    "progress": 0,
+                    "progress_detail": "服务重启后继续等待转写队列",
+                    "error": None,
+                })
+                recoverable.append((record_id, input_path, work_dir))
+            else:
+                record.update({
+                    "status": "error",
+                    "progress_detail": "服务重启后未找到音频",
+                    "error": "服务重启后未找到音频，无法继续转写",
+                })
+        _write_asr_history(records)
+
+    for record_id, input_path, work_dir in recoverable:
+        task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, record_id, item, input_path, work_dir))
+        _asr_background_tasks.add(task)
+        task.add_done_callback(_asr_background_tasks.discard)
+    return len(recoverable)
 
 
 def _find_asr_history_record(record_id: str) -> dict:
