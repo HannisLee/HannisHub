@@ -2264,10 +2264,12 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
     """按队列执行一个转写任务，并将结果写回本地历史。"""
     with _asr_task_semaphore:
         report_progress = _make_asr_progress_reporter(record_id)
+        completed = False
         try:
             report_progress("processing", 0, "任务已开始，正在等待 FFmpeg 处理")
             result = _transcribe_qwen3_asr(item, input_path, work_dir, report_progress)
             _complete_asr_history_record(record_id, result)
+            completed = True
         except Exception as exc:
             try:
                 _update_asr_history_record(record_id, {
@@ -2278,20 +2280,41 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
             except Exception:
                 pass
         finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
+            if completed:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            else:
+                # 失败时保留原始音频，便于之后重试；仅清理可再生成的 FLAC 切片。
+                for pattern in ("chunk-*.flac", "*.tmp"):
+                    for path in work_dir.glob(pattern):
+                        try:
+                            path.unlink()
+                        except OSError:
+                            pass
 
 
-async def recover_interrupted_asr_tasks():
-    """等待本机 ASR 可用后，继续服务重启前未完成的转写任务。"""
+async def _wait_for_running_asr_service():
+    """等待受管 ASR 进程出现，并确认其 HTTP 接口完成启动。"""
     while True:
         try:
             item = _get_asr_service_item()
-            break
         except HTTPException as exc:
             if exc.status_code in (404, 409):
                 await asyncio.sleep(5 if exc.status_code == 404 else 15)
                 continue
             raise
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
+                response = await client.get(f"http://127.0.0.1:{int(item['port'])}/health")
+            if response.is_success:
+                return item
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(2)
+
+
+async def recover_interrupted_asr_tasks():
+    """等待本机 ASR 可用后，继续服务重启前未完成的转写任务。"""
+    item = await _wait_for_running_asr_service()
 
     recoverable = []
     with _asr_history_lock:

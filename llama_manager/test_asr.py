@@ -55,7 +55,7 @@ class AsrRecoveryTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(app, "ASR_HISTORY_INDEX_PATH", history_dir / "records.json"), \
                     patch.object(app, "ASR_JOB_DIR", jobs_dir), \
                     patch.object(app, "_asr_background_tasks", tasks), \
-                    patch.object(app, "_get_asr_service_item", return_value={"pid": 123, "port": 8000}), \
+                    patch.object(app, "_wait_for_running_asr_service", return_value={"pid": 123, "port": 8000}), \
                     patch.object(app, "_run_asr_history_task", side_effect=run_task):
                 count = await app.recover_interrupted_asr_tasks()
                 self.assertEqual(count, 1)
@@ -67,6 +67,21 @@ class AsrRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(records[2]["status"], "completed")
             self.assertEqual(processed[0][0], "asr_active")
             self.assertEqual(processed[0][1], 123)
+
+    def test_failed_task_keeps_original_audio_for_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work_dir = Path(directory)
+            audio = work_dir / "audio.m4a"
+            chunk = work_dir / "chunk-001.flac"
+            audio.write_bytes(b"audio")
+            chunk.write_bytes(b"chunk")
+            with patch.object(app, "_make_asr_progress_reporter", return_value=lambda *args: None), \
+                    patch.object(app, "_transcribe_qwen3_asr", side_effect=RuntimeError("连接失败")), \
+                    patch.object(app, "_update_asr_history_record"), \
+                    patch.object(app, "_complete_asr_history_record"):
+                app._run_asr_history_task("asr_failed", {"pid": 123}, audio, work_dir)
+            self.assertTrue(audio.is_file())
+            self.assertFalse(chunk.exists())
 
 
 if __name__ == "__main__":
