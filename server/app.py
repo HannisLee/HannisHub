@@ -3,8 +3,11 @@
 import asyncio
 import json
 import os
+import queue
 import re
 import shlex
+import shutil
+import stat as stat_module
 import subprocess
 import threading
 import time
@@ -27,11 +30,21 @@ except ImportError:  # 保留系统 ssh 降级路径，方便临时使用
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.json"
 MANAGED_KEY_DIR = APP_DIR / "data" / "ssh"
+REMOTE_DOWNLOAD_DIR = APP_DIR / "data" / "remote-downloads"
+REMOTE_DOWNLOAD_DATA_FILE = "payload"
+REMOTE_DOWNLOAD_METADATA_FILE = "job.json"
+MAX_REMOTE_DIRECTORY_ENTRIES = 1_000
+MAX_REMOTE_DOWNLOAD_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_SETTINGS = {"connections": {}, "tasks": {}}
 SETTINGS_LOCK = threading.RLock()
 TASK_LOCK = threading.RLock()
 TASK_RUNS: set[str] = set()
 SCHEDULER_TASK: Optional[asyncio.Task] = None
+DOWNLOAD_QUEUE: "queue.Queue[str]" = queue.Queue()
+DOWNLOAD_WORKER: Optional[threading.Thread] = None
+DOWNLOAD_LOCK = threading.RLock()
+DOWNLOAD_JOBS: dict[str, dict] = {}
+DOWNLOAD_SHUTDOWN = threading.Event()
 TASK_DISPATCH_MARKER = "__HANNISHUB_TASK_DISPATCHED__"
 CODEX_EXECUTORS = {"codex", "codexc"}
 CODEX_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
@@ -184,8 +197,10 @@ def _key_path(item: dict) -> str:
     return str(Path(str(item.get("private_key_path") or "")).expanduser())
 
 
-def _run_with_paramiko(item: dict, command: str) -> tuple[int, str, str]:
-    """通过 Paramiko 建立 SSH 连接并执行命令。"""
+def _open_ssh_client(item: dict):
+    """按连接配置建立 Paramiko SSH 客户端。"""
+    if paramiko is None:
+        raise RuntimeError("服务器文件浏览与下载需要安装 Paramiko")
     client = paramiko.SSHClient()
     client.load_system_host_keys()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -213,8 +228,14 @@ def _run_with_paramiko(item: dict, command: str) -> tuple[int, str, str]:
             # 留空时沿用 OpenSSH/Paramiko 的默认私钥搜索规则。
             kwargs["allow_agent"] = True
             kwargs["look_for_keys"] = True
+    client.connect(**kwargs)
+    return client
+
+
+def _run_with_paramiko(item: dict, command: str) -> tuple[int, str, str]:
+    """通过 Paramiko 建立 SSH 连接并执行命令。"""
+    client = _open_ssh_client(item)
     try:
-        client.connect(**kwargs)
         stdin, stdout, stderr = client.exec_command(command, timeout=30)
         output = stdout.read().decode("utf-8", errors="replace")
         error = stderr.read().decode("utf-8", errors="replace")
@@ -225,6 +246,13 @@ def _run_with_paramiko(item: dict, command: str) -> tuple[int, str, str]:
 
 def _run_with_system_ssh(item: dict, command: str) -> tuple[int, str, str]:
     """Paramiko 不可用时调用系统 ssh；密码认证需要 sshpass。"""
+    args, env = _system_ssh_command(item, command)
+    result = subprocess.run(args, capture_output=True, text=True, timeout=45, env=env)
+    return result.returncode, result.stdout, result.stderr
+
+
+def _system_ssh_command(item: dict, command: str) -> tuple[list[str], dict[str, str]]:
+    """生成系统 ssh 命令；密码认证通过 sshpass 注入环境变量。"""
     target = f"{item['username']}@{item['host']}"
     args = [
         "ssh", "-p", str(item["port"]), "-o", "ConnectTimeout=12",
@@ -240,8 +268,7 @@ def _run_with_system_ssh(item: dict, command: str) -> tuple[int, str, str]:
     env = os.environ.copy()
     if item["auth_type"] == "password":
         env["SSHPASS"] = item.get("password", "")
-    result = subprocess.run(args, capture_output=True, text=True, timeout=45, env=env)
-    return result.returncode, result.stdout, result.stderr
+    return args, env
 
 
 def shutil_which(name: str) -> Optional[str]:
@@ -257,6 +284,558 @@ def _run_remote(item: dict, command: str) -> tuple[int, str, str]:
     if paramiko is not None:
         return _run_with_paramiko(item, command)
     return _run_with_system_ssh(item, command)
+
+
+def _normalize_remote_path(value: object) -> str:
+    """校验远端路径文本；空值表示 SSH 登录后的默认目录。"""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="远端路径必须是字符串")
+    text = value.strip()
+    if len(text) > 4_096 or any(char in text for char in ("\x00", "\r", "\n")):
+        raise HTTPException(status_code=422, detail="远端路径格式不受支持")
+    return text
+
+
+def _remote_normalize(sftp, path: str) -> str:
+    """把空路径或 ~ 转换为远端绝对路径。"""
+    try:
+        return sftp.normalize(path or ".")
+    except OSError as exc:
+        raise RuntimeError(f"远端路径不可访问：{str(exc)[:500]}") from exc
+
+
+def _remote_stat(sftp, path: str):
+    """读取远端文件元信息。"""
+    try:
+        return sftp.stat(path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="远端路径不存在") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="没有权限读取远端路径") from exc
+    except OSError as exc:
+        raise RuntimeError(f"读取远端文件信息失败：{str(exc)[:500]}") from exc
+
+
+def _quote_remote_path_for_shell(path: str) -> str:
+    """保留 Shell 的 ~ 前缀展开，同时安全引用其余路径。"""
+    if path == "~":
+        return "~"
+    if path.startswith("~/"):
+        return f"~/{shlex.quote(path[2:])}"
+    return shlex.quote(path)
+
+
+def _system_remote_output(item: dict, command: str, label: str) -> str:
+    """执行一次降级 SSH 命令并校验返回码。"""
+    code, output, error = _run_with_system_ssh(item, command)
+    if code != 0:
+        message = (error or output).strip()
+        raise RuntimeError(f"{label}：{message[:800] or code}")
+    return output
+
+
+def _remote_normalize_system(item: dict, path: str) -> str:
+    """Paramiko 不可用时，通过远端 pwd 解析默认目录和 ~。"""
+    command = "pwd" if not path else f"cd {_quote_remote_path_for_shell(path)} && pwd"
+    output = _system_remote_output(item, command, "远端路径不可访问")
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError("远端没有返回绝对路径")
+    return lines[-1]
+
+
+def _remote_stat_system(item: dict, path: str) -> tuple[str, int, float, str]:
+    """Paramiko 不可用时，用固定参数 stat 读取远端元信息。"""
+    command = f"stat -L -c '%F\\t%s\\t%Y\\t%n' -- {_quote_remote_path_for_shell(path)}"
+    output = _system_remote_output(item, command, "读取远端文件信息失败")
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError("远端没有返回文件信息")
+    parts = lines[-1].split("\t", 3)
+    if len(parts) != 4:
+        raise RuntimeError("远端文件信息格式不受支持")
+    try:
+        return parts[0], int(parts[1]), float(parts[2]), parts[3]
+    except ValueError as exc:
+        raise RuntimeError("远端文件信息格式不受支持") from exc
+
+
+def _system_stat_kind_to_type(kind: str) -> str:
+    """把 find/stat 输出的文件类型转换为目录条目类型。"""
+    if kind in {"d", "directory"} or kind.startswith("directory"):
+        return "directory"
+    if kind in {"f", "regular file"} or kind.startswith("regular file"):
+        return "file"
+    return "other"
+
+
+def _remote_directory_system(item: dict, path: str) -> dict:
+    """Paramiko 不可用时，通过固定参数 find/stat 浏览远端目录。"""
+    normalized = _remote_normalize_system(item, path)
+    quoted_path = _quote_remote_path_for_shell(normalized)
+    output = _system_remote_output(
+        item,
+        f"test -d {quoted_path} && find {quoted_path} -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\t%l\\n'",
+        "读取远端目录失败",
+    )
+    entries: list[dict] = []
+    truncated = False
+    for line in output.splitlines():
+        parts = line.split("\t", 4)
+        if len(parts) != 5:
+            continue
+        kind, size_text, mtime_text, name, _link = parts
+        if not name or name in (".", ".."):
+            continue
+        if len(entries) >= MAX_REMOTE_DIRECTORY_ENTRIES:
+            truncated = True
+            break
+        try:
+            size = int(size_text)
+            modified = float(mtime_text)
+        except ValueError:
+            continue
+        child_path = f"{normalized.rstrip('/')}/{name}" if normalized != "/" else f"/{name}"
+        entries.append({
+            "name": name,
+            "path": child_path,
+            "type": _system_stat_kind_to_type(kind) if kind != "l" else "other",
+            "size": size,
+            "modified": modified,
+            "extension": name.rsplit(".", 1)[-1].lower() if "." in name else "",
+            "symlink": kind == "l",
+        })
+
+    # 降级模式下 find 不跟随软链接；这里分批 stat 一次，恢复软链接目标的真实类型。
+    symlink_entries = [entry for entry in entries if entry["symlink"]]
+    for offset in range(0, len(symlink_entries), 50):
+        chunk = symlink_entries[offset:offset + 50]
+        arguments = " ".join(_quote_remote_path_for_shell(entry["path"]) for entry in chunk)
+        stat_output = _system_remote_output(
+            item,
+            f"stat -L -c '%F\\t%s\\t%Y\\t%n' -- {arguments}",
+            "读取远端软链接信息失败",
+        )
+        stat_map: dict[str, tuple[str, int, float]] = {}
+        for line in stat_output.splitlines():
+            parts = line.split("\t", 3)
+            if len(parts) != 4:
+                continue
+            try:
+                stat_map[parts[3]] = (parts[0], int(parts[1]), float(parts[2]))
+            except ValueError:
+                continue
+        for entry in chunk:
+            info = stat_map.get(entry["path"])
+            if info:
+                entry["type"] = _system_stat_kind_to_type(info[0])
+                entry["size"] = info[1]
+                entry["modified"] = info[2]
+
+    entries.sort(key=lambda entry: (entry["type"] != "directory", entry["name"].lower(), entry["name"]))
+    return {
+        "connection_id": item["id"],
+        "path": normalized,
+        "entries": entries,
+        "truncated": truncated,
+        "max_entries": MAX_REMOTE_DIRECTORY_ENTRIES,
+    }
+
+
+def _remote_file_attributes(item: dict, path: str) -> tuple[str, dict]:
+    """统一返回远端路径与文件属性，优先 SFTP，缺失 Paramiko 时降级。"""
+    if paramiko is None:
+        normalized = _remote_normalize_system(item, path)
+        kind, size, modified, _display_path = _remote_stat_system(item, normalized)
+        if kind.startswith("directory"):
+            mode = stat_module.S_IFDIR
+        elif kind.startswith("regular file"):
+            mode = stat_module.S_IFREG
+        else:
+            mode = 0
+        return normalized, {"st_mode": mode, "st_size": size, "st_mtime": modified}
+
+    client = _open_ssh_client(item)
+    try:
+        sftp = client.open_sftp()
+        normalized = _remote_normalize(sftp, path)
+        attr = _remote_stat(sftp, normalized)
+        return normalized, {"st_mode": attr.st_mode or 0, "st_size": int(attr.st_size or 0), "st_mtime": float(attr.st_mtime or 0)}
+    finally:
+        client.close()
+
+
+def _remote_entry_payload(sftp, directory: str, attr) -> dict:
+    """把 SFTP 属性转换为前端可用的远端目录条目。"""
+    name = attr.filename or ""
+    if not name or name in (".", ".."):
+        return {}
+    child_path = f"{directory.rstrip('/')}/{name}" if directory != "/" else f"/{name}"
+    mode = attr.st_mode or 0
+    symlink = stat_module.S_ISLNK(mode)
+    target_attr = attr
+    if symlink:
+        try:
+            target_attr = sftp.stat(child_path)
+            mode = target_attr.st_mode or 0
+        except OSError:
+            mode = 0
+
+    if stat_module.S_ISDIR(mode):
+        entry_type = "directory"
+    elif stat_module.S_ISREG(mode):
+        entry_type = "file"
+    else:
+        entry_type = "other"
+    return {
+        "name": name,
+        "path": child_path,
+        "type": entry_type,
+        "size": int(target_attr.st_size or 0),
+        "modified": float(target_attr.st_mtime or 0),
+        "extension": name.rsplit(".", 1)[-1].lower() if "." in name else "",
+        "symlink": symlink,
+    }
+
+
+def _remote_directory(item: dict, path: str) -> dict:
+    """优先通过 SFTP 浏览远端目录；缺少 Paramiko 时使用固定参数命令降级。"""
+    safe_path = _normalize_remote_path(path)
+    if paramiko is None:
+        return _remote_directory_system(item, safe_path)
+    client = _open_ssh_client(item)
+    try:
+        sftp = client.open_sftp()
+        normalized = _remote_normalize(sftp, safe_path)
+        attr = _remote_stat(sftp, normalized)
+        if not stat_module.S_ISDIR(attr.st_mode or 0):
+            raise HTTPException(status_code=422, detail="远端路径不是目录")
+        try:
+            attrs = sftp.listdir_attr(normalized)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="没有权限读取远端目录") from exc
+        except OSError as exc:
+            raise RuntimeError(f"读取远端目录失败：{str(exc)[:500]}") from exc
+
+        entries: list[dict] = []
+        truncated = False
+        for index, child_attr in enumerate(attrs):
+            if index >= MAX_REMOTE_DIRECTORY_ENTRIES:
+                truncated = True
+                break
+            payload = _remote_entry_payload(sftp, normalized, child_attr)
+            if payload:
+                entries.append(payload)
+        entries.sort(key=lambda entry: (entry["type"] != "directory", entry["name"].lower(), entry["name"]))
+        return {
+            "connection_id": item["id"],
+            "path": normalized,
+            "entries": entries,
+            "truncated": truncated,
+            "max_entries": MAX_REMOTE_DIRECTORY_ENTRIES,
+        }
+    finally:
+        client.close()
+
+
+class _RemoteDownloadCancelled(Exception):
+    """用户请求取消远端文件拉取。"""
+
+
+def _download_job_public(job: dict) -> dict:
+    """生成不含 Hub 本地落盘路径的下载任务响应。"""
+    payload = {key: value for key, value in job.items() if key not in {"local_path"}}
+    if job.get("status") == "completed" and Path(str(job.get("local_path"))).is_file():
+        payload["download_url"] = f"/server/api/files/downloads/{job['id']}/content"
+    return payload
+
+
+def _write_download_job(job: dict) -> None:
+    """原子保存远端下载任务状态，服务重启后可恢复。"""
+    job_dir = REMOTE_DOWNLOAD_DIR / str(job["id"])
+    job_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = job_dir / f"{REMOTE_DOWNLOAD_METADATA_FILE}.tmp"
+    temp_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temp_path, job_dir / REMOTE_DOWNLOAD_METADATA_FILE)
+
+
+def _resume_download_jobs() -> None:
+    """从磁盘恢复下载任务；中断的任务重新排队。"""
+    DOWNLOAD_JOBS.clear()
+    if not REMOTE_DOWNLOAD_DIR.is_dir():
+        return
+    for job_dir in sorted(path for path in REMOTE_DOWNLOAD_DIR.iterdir() if path.is_dir()):
+        metadata_path = job_dir / REMOTE_DOWNLOAD_METADATA_FILE
+        try:
+            job = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(job, dict) or not job.get("id"):
+            continue
+        job_id = str(job["id"])
+        if job_dir.name != job_id:
+            continue
+        if job.get("status") in {"queued", "running"}:
+            job["status"] = "queued"
+            job["cancel_requested"] = False
+            job["error"] = ""
+            DOWNLOAD_QUEUE.put(job_id)
+        elif job.get("status") == "completed" and not Path(str(job.get("local_path"))).is_file():
+            job["status"] = "failed"
+            job["error"] = "Hub 缓存文件不存在"
+        DOWNLOAD_JOBS[job_id] = job
+        _write_download_job(job)
+
+
+def start_download_worker() -> None:
+    """启动单并发 SSH 拉取工作线程。"""
+    global DOWNLOAD_WORKER
+    with DOWNLOAD_LOCK:
+        if DOWNLOAD_WORKER is not None and DOWNLOAD_WORKER.is_alive():
+            return
+        while True:
+            try:
+                DOWNLOAD_QUEUE.get_nowait()
+                DOWNLOAD_QUEUE.task_done()
+            except queue.Empty:
+                break
+        DOWNLOAD_SHUTDOWN.clear()
+        _resume_download_jobs()
+        DOWNLOAD_WORKER = threading.Thread(target=_download_worker_loop, name="remote-download-worker", daemon=True)
+        DOWNLOAD_WORKER.start()
+
+
+def stop_download_worker() -> None:
+    """通知下载工作线程退出；正在传输的任务会在下次启动时重新排队。"""
+    global DOWNLOAD_WORKER
+    DOWNLOAD_SHUTDOWN.set()
+    worker = DOWNLOAD_WORKER
+    if worker is not None and worker.is_alive():
+        worker.join(timeout=2)
+    with DOWNLOAD_LOCK:
+        if DOWNLOAD_WORKER is None or not DOWNLOAD_WORKER.is_alive():
+            DOWNLOAD_WORKER = None
+
+
+def _download_worker_loop() -> None:
+    """串行处理远端文件拉取，避免多个 SSH 传输抢占局域网带宽。"""
+    while not DOWNLOAD_SHUTDOWN.is_set():
+        try:
+            job_id = DOWNLOAD_QUEUE.get(timeout=0.25)
+        except queue.Empty:
+            continue
+        try:
+            _process_download_job(job_id)
+        finally:
+            DOWNLOAD_QUEUE.task_done()
+
+
+def _update_download_job(job_id: str, **changes) -> None:
+    with DOWNLOAD_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+        if job is None:
+            return
+        job.update(changes)
+        _write_download_job(job)
+
+
+def _finish_download_job(job_id: str, status: str, error: str = "") -> None:
+    with DOWNLOAD_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+        if job is None:
+            return
+        job.update({"status": status, "error": error[:2_000], "completed_at": time.time()})
+        if status in {"failed", "canceled"}:
+            part_path = Path(str(job.get("local_path"))).with_name(f"{REMOTE_DOWNLOAD_DATA_FILE}.part")
+            try:
+                part_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        _write_download_job(job)
+
+
+def _transfer_remote_file(item: dict, remote_path: str, temp_path: Path, expected_size: int, progress) -> None:
+    """优先使用 SFTP 拉取；缺少 Paramiko 时通过 ssh cat 流式降级。"""
+    if paramiko is not None:
+        client = _open_ssh_client(item)
+        try:
+            sftp = client.open_sftp()
+            sftp.get(remote_path, str(temp_path), callback=progress)
+        finally:
+            client.close()
+        return
+
+    args, env = _system_ssh_command(item, f"cat -- {_quote_remote_path_for_shell(remote_path)}")
+    with temp_path.open("wb") as output_file:
+        process = subprocess.Popen(args, stdout=output_file, stderr=subprocess.PIPE, env=env)
+        last_bytes = -1
+        try:
+            while True:
+                transferred = temp_path.stat().st_size if temp_path.exists() else 0
+                if transferred != last_bytes or process.poll() is not None:
+                    last_bytes = transferred
+                    progress(transferred, expected_size)
+                if process.poll() is not None:
+                    break
+                time.sleep(0.25)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+        error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        if process.returncode != 0:
+            raise RuntimeError(f"远端文件读取失败：{error.strip()[:800] or process.returncode}")
+
+
+def _process_download_job(job_id: str) -> None:
+    """把一个远端普通文件先拉取到 Hub，再供浏览器下载。"""
+    with DOWNLOAD_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+        if job is None or job.get("status") not in {"queued", "running"}:
+            return
+        job.update({
+            "status": "running",
+            "started_at": job.get("started_at") or time.time(),
+            "downloaded_bytes": 0,
+            "progress": 0,
+            "speed_bytes_per_second": 0,
+            "error": "",
+        })
+        _write_download_job(job)
+        connection_id = str(job.get("connection_id"))
+        remote_path = str(job.get("remote_path"))
+        local_path_text = str(job.get("local_path"))
+
+    item = _read_settings()["connections"].get(connection_id)
+    if item is None:
+        _finish_download_job(job_id, "failed", "服务器连接已被删除")
+        return
+
+    local_path = Path(local_path_text)
+    temp_path = local_path.with_name(f"{REMOTE_DOWNLOAD_DATA_FILE}.part")
+    try:
+        _normalized_path, attr = _remote_file_attributes(item, remote_path)
+        if not stat_module.S_ISREG(int(attr.get("st_mode") or 0)):
+            raise HTTPException(status_code=422, detail="远端路径不是普通文件")
+        total_bytes = int(attr.get("st_size") or 0)
+        if total_bytes > MAX_REMOTE_DOWNLOAD_BYTES:
+            raise HTTPException(status_code=422, detail=f"单个文件最大支持 {MAX_REMOTE_DOWNLOAD_BYTES // (1024 ** 3)} GB")
+
+        last_save = 0.0
+
+        def progress(transferred: int, total: int) -> None:
+            nonlocal last_save
+            now = time.time()
+            with DOWNLOAD_LOCK:
+                current = DOWNLOAD_JOBS.get(job_id)
+                if current is None:
+                    return
+                if current.get("cancel_requested"):
+                    raise _RemoteDownloadCancelled()
+                current["size"] = int(total or current.get("size") or 0)
+                if int(total or 0) > MAX_REMOTE_DOWNLOAD_BYTES:
+                    raise RuntimeError(f"远端文件传输中超过 {MAX_REMOTE_DOWNLOAD_BYTES // (1024 ** 3)} GB 上限")
+                current["downloaded_bytes"] = int(transferred)
+                current["progress"] = round(transferred * 100 / total, 2) if total else 100
+                elapsed = max(now - float(current.get("started_at") or now), 0.001)
+                current["speed_bytes_per_second"] = int(transferred / elapsed)
+                if now - last_save >= 0.5 or transferred == total:
+                    last_save = now
+                    _write_download_job(current)
+
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.unlink(missing_ok=True)
+        _transfer_remote_file(item, remote_path, temp_path, total_bytes, progress)
+        if total_bytes and temp_path.stat().st_size != total_bytes:
+            raise RuntimeError(f"传输不完整：Hub 收到 {temp_path.stat().st_size} 字节，应为 {total_bytes} 字节")
+        os.replace(temp_path, local_path)
+        with DOWNLOAD_LOCK:
+            current = DOWNLOAD_JOBS.get(job_id)
+            if current is None:
+                return
+            current.update({
+                "status": "completed",
+                "size": total_bytes,
+                "downloaded_bytes": total_bytes,
+                "progress": 100,
+                "speed_bytes_per_second": 0,
+                "error": "",
+                "completed_at": time.time(),
+            })
+            _write_download_job(current)
+    except _RemoteDownloadCancelled:
+        _finish_download_job(job_id, "canceled", "已取消")
+    except HTTPException as exc:
+        _finish_download_job(job_id, "failed", str(exc.detail))
+    except Exception as exc:
+        _finish_download_job(job_id, "failed", str(exc))
+
+
+def _create_remote_download(item: dict, path: object) -> dict:
+    """校验远端文件并创建一个后台拉取任务。"""
+    safe_path = _normalize_remote_path(path)
+    remote_path, attr = _remote_file_attributes(item, safe_path)
+    if not stat_module.S_ISREG(int(attr.get("st_mode") or 0)):
+        raise HTTPException(status_code=422, detail="只能下载远端普通文件")
+    size = int(attr.get("st_size") or 0)
+    if size > MAX_REMOTE_DOWNLOAD_BYTES:
+        raise HTTPException(status_code=422, detail=f"单个文件最大支持 {MAX_REMOTE_DOWNLOAD_BYTES // (1024 ** 3)} GB")
+
+    with DOWNLOAD_LOCK:
+        active = any(
+            job.get("connection_id") == item["id"] and job.get("remote_path") == remote_path
+            and job.get("status") in {"queued", "running"}
+            for job in DOWNLOAD_JOBS.values()
+        )
+        if active:
+            raise HTTPException(status_code=409, detail="这个文件已经在拉取队列中")
+
+        job_id = f"rfd_{uuid.uuid4().hex[:16]}"
+        job_dir = REMOTE_DOWNLOAD_DIR / job_id
+        local_path = job_dir / REMOTE_DOWNLOAD_DATA_FILE
+        job = {
+            "id": job_id,
+            "connection_id": item["id"],
+            "connection_name": item["name"],
+            "remote_path": remote_path,
+            "name": remote_path.rstrip("/").split("/")[-1] or "remote-file",
+            "size": size,
+            "downloaded_bytes": 0,
+            "progress": 0,
+            "speed_bytes_per_second": 0,
+            "status": "queued",
+            "cancel_requested": False,
+            "error": "",
+            "created_at": time.time(),
+            "started_at": None,
+            "completed_at": None,
+            "local_path": str(local_path),
+        }
+        DOWNLOAD_JOBS[job_id] = job
+        _write_download_job(job)
+        DOWNLOAD_QUEUE.put(job_id)
+        return _download_job_public(job)
+
+
+def _list_remote_downloads(connection_id: str | None = None) -> list[dict]:
+    """按创建时间倒序返回拉取任务。"""
+    with DOWNLOAD_LOCK:
+        jobs = [job for job in DOWNLOAD_JOBS.values() if connection_id is None or job.get("connection_id") == connection_id]
+        return [_download_job_public(job) for job in sorted(jobs, key=lambda item: item.get("created_at", 0), reverse=True)]
+
+
+def _download_job(job_id: str) -> dict:
+    with DOWNLOAD_LOCK:
+        job = DOWNLOAD_JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="下载任务不存在")
+        return job
 
 
 def _background_task_command(command: str) -> str:
@@ -696,6 +1275,7 @@ async def _scheduler_loop():
 
 async def start_scheduler():
     """启动定时任务调度器，供独立运行和外层应用挂载时共同使用。"""
+    start_download_worker()
     global SCHEDULER_TASK
     if SCHEDULER_TASK is None or SCHEDULER_TASK.done():
         SCHEDULER_TASK = asyncio.create_task(_scheduler_loop())
@@ -703,6 +1283,7 @@ async def start_scheduler():
 
 async def stop_scheduler():
     """停止定时任务调度器。"""
+    stop_download_worker()
     global SCHEDULER_TASK
     if SCHEDULER_TASK is not None:
         SCHEDULER_TASK.cancel()
@@ -822,6 +1403,73 @@ async def get_connection_time(connection_id: str):
         return JSONResponse({"ok": True, "time": result["time"], "connection": result["connection"]})
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"读取服务器时间失败：{str(exc)[:1000]}") from exc
+
+
+@app.get("/api/files/downloads")
+async def list_remote_file_downloads(connection_id: Optional[str] = None):
+    """返回远端文件到 Hub 的拉取任务列表。"""
+    return JSONResponse({"downloads": _list_remote_downloads(connection_id)})
+
+
+@app.get("/api/files/downloads/{job_id}")
+async def get_remote_file_download(job_id: str):
+    """查询单个远端文件拉取任务。"""
+    return JSONResponse({"download": _download_job_public(_download_job(job_id))})
+
+
+@app.get("/api/files/downloads/{job_id}/content")
+async def download_remote_file_to_browser(job_id: str):
+    """把已经拉取到 Hub 的远端文件流式提供给浏览器。"""
+    job = _download_job(job_id)
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="文件尚未完成拉取")
+    local_path = Path(str(job.get("local_path")))
+    if not local_path.is_file():
+        raise HTTPException(status_code=404, detail="Hub 缓存文件不存在")
+    return FileResponse(
+        local_path,
+        filename=str(job.get("name") or "remote-file"),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.delete("/api/files/downloads/{job_id}")
+async def delete_remote_file_download(job_id: str):
+    """删除已完成或失败的拉取任务及 Hub 缓存文件。"""
+    job = _download_job(job_id)
+    if job.get("status") in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="任务正在拉取，暂时不能删除")
+    job_dir = REMOTE_DOWNLOAD_DIR / job_id
+    shutil.rmtree(job_dir, ignore_errors=True)
+    with DOWNLOAD_LOCK:
+        DOWNLOAD_JOBS.pop(job_id, None)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/files/{connection_id}")
+async def browse_remote_files(connection_id: str, path: str = ""):
+    """通过已保存的 SSH 连接浏览远端目录。"""
+    item = _connection(connection_id)
+    try:
+        return JSONResponse(await asyncio.to_thread(_remote_directory, item, path))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"浏览远端文件失败：{str(exc)[:1000]}") from exc
+
+
+@app.post("/api/files/{connection_id}/download")
+async def create_remote_file_download(connection_id: str, body: dict):
+    """创建远端文件拉取任务：先经 SSH 传到 Hub，再供浏览器下载。"""
+    item = _connection(connection_id)
+    try:
+        job = await asyncio.to_thread(_create_remote_download, item, body.get("path"))
+        return JSONResponse({"ok": True, "download": job})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"创建远端下载失败：{str(exc)[:1000]}") from exc
 
 
 @app.get("/api/tasks")

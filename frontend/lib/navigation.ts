@@ -36,6 +36,7 @@ export const navigation: NavGroup[] = [
     label: "文件管理",
     items: [
       { href: "/files", label: "文件游览", icon: "files" },
+      { href: "/files/server", label: "服务器文件", title: "服务器文件", icon: "downloads" },
       { href: "/files/documents", label: "文档查看", icon: "documents" },
       { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
     ],

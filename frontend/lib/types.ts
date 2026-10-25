@@ -167,6 +167,45 @@ export interface FileManagerGitPullResponse {
   pulled_at: number;
 }
 
+export interface RemoteFileEntry {
+  name: string;
+  path: string;
+  type: "directory" | "file" | "other";
+  size: number;
+  modified: number;
+  extension: string;
+  symlink?: boolean;
+}
+
+export interface RemoteFileDirectoryResponse {
+  connection_id: string;
+  path: string;
+  entries: RemoteFileEntry[];
+  truncated: boolean;
+  max_entries: number;
+}
+
+export type RemoteFileDownloadStatus = "queued" | "running" | "completed" | "failed" | "canceled";
+
+export interface RemoteFileDownloadJob {
+  id: string;
+  connection_id: string;
+  connection_name: string;
+  remote_path: string;
+  name: string;
+  size: number;
+  downloaded_bytes: number;
+  progress: number;
+  speed_bytes_per_second: number;
+  status: RemoteFileDownloadStatus;
+  cancel_requested?: boolean;
+  error?: string;
+  created_at: number;
+  started_at?: number | null;
+  completed_at?: number | null;
+  download_url?: string;
+}
+
 export interface ModelFile {
   name: string;
   path: string;

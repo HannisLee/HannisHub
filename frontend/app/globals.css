@@ -644,6 +644,10 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .file-manager-browser .card-header { display: block; }
 .file-manager-browser .card-actions { width: 100%; margin-top: var(--space-3); }
 .file-manager-toolbar { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto minmax(150px, 180px) auto; width: 100%; align-items: center; gap: var(--space-2); }
+.remote-file-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.remote-file-toolbar select { flex: 0 1 min(180px, 100%); width: auto; min-height: 34px; font-size: 12px; }
+.remote-file-toolbar .search-input { flex: 1 1 240px; width: auto; }
+.remote-file-filter { justify-content: flex-end; margin-top: calc(var(--space-2) * -1); margin-bottom: var(--space-2); }
 .file-manager-toolbar.is-point-cloud { display: flex; justify-content: flex-end; }
 .file-manager-toolbar.is-point-cloud select { width: min(180px, 100%); }
 .file-manager-toolbar select { width: 100%; min-height: 30px; font-size: 12px; }

@@ -229,6 +229,12 @@ async def files_documents_page():
     return await _new_frontend_route("files/documents")
 
 
+@app.get("/files/server", include_in_schema=False)
+@app.get("/files/server/", include_in_schema=False)
+async def files_server_page():
+    return await _new_frontend_route("files/server")
+
+
 @app.get("/files/point-clouds", include_in_schema=False)
 @app.get("/files/point-clouds/", include_in_schema=False)
 async def files_point_clouds_page():
