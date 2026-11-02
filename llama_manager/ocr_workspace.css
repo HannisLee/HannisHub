@@ -1,0 +1,47 @@
+/* 小米 OCR 工作台在 HannisHub 内使用统一的设计变量。 */
+html[data-theme], html {
+  --accent: var(--color-brand); --accent-soft: var(--color-surface-hover);
+  --bg: var(--color-bg); --bg2: var(--color-surface-soft); --panel-solid: var(--color-surface);
+  --line: var(--color-border); --line2: var(--color-divider);
+  --ink: var(--color-text-primary); --ink2: var(--color-text-secondary); --ink3: var(--color-text-muted);
+  --ok: var(--color-success); --err: var(--color-error);
+  --sans: var(--font-ui); --mono: var(--font-mono); color-scheme: dark;
+}
+body { background: var(--color-bg); font: 400 16px/1.55 var(--font-ui); }
+.topbar { border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-4) var(--space-6); height: auto; min-height: 72px; gap: var(--space-4); flex-wrap: wrap; }
+.brand b { font-size: 16px; } .brand-label, .conn, .source-link { font-size: 13px; }
+#btnTheme { display: none; }
+.main { max-width: none; padding: var(--space-8) 0 var(--space-4); }
+.hero { margin-bottom: var(--space-8); }
+.hero h1 { font: 400 clamp(32px, 4vw, 48px)/1.15 var(--font-display); letter-spacing: -.02em; }
+.hero p { font-size: 16px; } .eyebrow { font-size: 12px; }
+.workspace, .community { border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: none; }
+.workspace-tools { padding: var(--space-4) var(--space-6); }
+.task-tabs button, .ghost, .btn-small, .primary { min-height: 40px; border-radius: var(--radius-sm); font-size: 14px; box-shadow: none; }
+.primary { background: var(--color-control-light); color: var(--color-on-light); border: 1px solid var(--color-control-light); font-weight: 500; }
+.primary:hover { background: var(--color-white); filter: none; }
+.task-tabs button.active, .seg button.active { color: var(--color-on-light); background: var(--color-control-light); box-shadow: none; }
+.task-inputs { padding: var(--space-4) var(--space-6); font-size: 14px; }
+.prompt-details summary, .task-input small, .task-input textarea, .task-input input, .task-note { font-size: 14px; }
+.stage { --stage-h: 560px; }
+.pane-title, .pane-hd, .seg button, .source-caption, #stageTitle, #stageHint, .format-note, .art-foot, .result-foot, .pill, .badge, #resText, #resText.typing, #resText.source-view, .res-empty p { font-size: 14px; }
+.art-body { background-image: none; }
+.img-wrap img, .seg button.active, .film.active, .film-upload.active, .drawer { box-shadow: none; }
+.click-hint { background: var(--color-surface); color: var(--color-text-primary); font-size: 13px; }
+.section-heading h2 { font: 400 22px/1.3 var(--font-display); }
+.section-heading span, .film .cap, .film .cap small, .film-upload, .film-upload .sub { font-size: 13px; }
+.film, .film-upload { border-radius: var(--radius-md); }
+.film:hover, .film-upload:hover { transform: none; }
+.community { padding: var(--space-8); }
+.community h2 { font: 400 32px/1.2 var(--font-display); }
+.community p, .support-links a, .issue-link, .footer, .tip, .field>label, .field .tip { font-size: 14px; }
+.backdrop { backdrop-filter: none; }
+@media (max-width: 720px) {
+  .topbar { padding: var(--space-4); }
+  .hero { align-items: flex-start; }
+  .hero h1 { font-size: 32px; }
+  .workspace-tools, .task-inputs { padding: var(--space-4); }
+  .stage { height: auto; }
+  .pane { height: 440px; }
+  .community { padding: var(--space-6); }
+}

@@ -22,6 +22,7 @@ export const navigation: NavGroup[] = [
       { href: "/llama/gpu", label: "GPU 监控", icon: "gpu" },
       { href: "/llama/downloads", label: "模型下载", icon: "downloads" },
       { href: "/llama/asr", label: "ASR 转写", icon: "asr" },
+      { href: "/llama/ocr", label: "OCR识别", icon: "documents" },
       { href: "/llama/settings", label: "模型设置", icon: "settings" },
     ],
   },

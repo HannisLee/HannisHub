@@ -187,6 +187,12 @@ async def llama_asr_page():
     return await _new_frontend_route("llama/asr")
 
 
+@app.get("/llama/ocr", include_in_schema=False)
+@app.get("/llama/ocr/", include_in_schema=False)
+async def llama_ocr_page():
+    return await _new_frontend_route("llama/ocr")
+
+
 @app.get("/llama/settings", include_in_schema=False)
 @app.get("/llama/settings/", include_in_schema=False)
 async def llama_settings_page():

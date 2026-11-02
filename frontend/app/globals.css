@@ -970,3 +970,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* OCR 工作台按内容高度展开，避免出现双重滚动条。 */
+.ocr-workspace-frame { display: block; width: 100%; min-height: 720px; border: 0; background: var(--color-bg); }

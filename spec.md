@@ -75,6 +75,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
+- `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面
@@ -766,4 +767,6 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 
 - 注册 OCR 命令 `scripts/start-xiaomi-ocr.sh --port 8787`，由受管进程同时启动本机 llama-server（127.0.0.1:8080）与官方 Demo（127.0.0.1:8787），停止时一并结束子进程；端口被占用时启动失败并记录日志。
 - 模型和视觉投影器存于 `/home/lihan/models/Xiaomi-OCR-0/`，官方仓库存于 `/home/lihan/run/Xiaomi-OCR-0/`。整页、公式和问答使用官方服务层；区域解析需要另装可选依赖。
-- 从 HannisHub 打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。
+- 通过推理服务的 Open 独立打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。
+
+- 统一前端 `/llama/ocr` 提供服务状态与默认启动，轮询健康检查；完整官方工作台通过登录保护的受管服务代理嵌入，并使用 HannisHub 设计变量。文档、字段提取、问答、PDF、区域模式提示、样例、设置及结果视图继续调用官方工作台接口。

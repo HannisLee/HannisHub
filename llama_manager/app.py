@@ -3422,7 +3422,14 @@ async def proxy_to_managed_llama(pid: int, request: Request, path: str = ""):
                     content = content.replace(root, prefix + root)
                 if "text/html" in content_type:
                     content = content.replace('href="/"', f'href="{prefix}/"')
-                    if item.get("service_id") == "xiaomi_ocr_0":
+                    if item.get("service_id") == "xiaomi_ocr_0" and request.query_params.get("embedded") == "1":
+                        # 嵌入工作台复用官方交互及接口，样式使用统一前端的设计变量。
+                        content = content.replace(f'class="brand" href="{prefix}/"', 'class="brand" href="/llama/ocr" target="_top"', 1)
+                        tokens = (APP_DIR.parent / "frontend/app/globals.css").read_text(encoding="utf-8").split("\n}\n", 1)[0] + "\n}"
+                        style = (APP_DIR / "ocr_workspace.css").read_text(encoding="utf-8")
+                        script = """<script>window.addEventListener('load',function(){function size(){window.parent.postMessage({type:'hannishub-ocr-height',height:document.body.scrollHeight},location.origin)}new ResizeObserver(size).observe(document.body);size()});</script>"""
+                        content = content.replace("</head>", f"<style>{tokens}\n{style}</style></head>", 1).replace("</body>", script + "</body>", 1)
+                    elif item.get("service_id") == "xiaomi_ocr_0":
                         # 调整小米工作台默认显示大小，保留浏览器自身缩放功能。
                         content = content.replace("</head>", "<style>html { zoom: 1.25; }</style></head>", 1)
                 headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "content-encoding")}
