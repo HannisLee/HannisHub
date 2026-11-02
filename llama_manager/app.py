@@ -86,7 +86,7 @@ ASR_MIN_CHUNK_SECONDS = 15
 ASR_COMPLETION_TOKENS_PER_SECOND = 12
 ASR_MIN_COMPLETION_TOKENS = 256
 ASR_MAX_COMPLETION_TOKENS = 8192
-SERVICE_CATEGORIES = {"asr", "llm"}
+SERVICE_CATEGORIES = {"asr", "llm", "ocr"}
 GPU_PROTECTED_PROCESS_NAMES = {
     "xorg",
     "xorg.wrap",
@@ -743,7 +743,7 @@ def _normalize_custom_service(raw: dict) -> dict:
     if not service_category:
         service_category = _infer_service_category(raw)
     if service_category not in SERVICE_CATEGORIES:
-        raise HTTPException(status_code=400, detail="服务类型只能是 ASR 或标准 LLM")
+        raise HTTPException(status_code=400, detail="服务类型只能是 ASR、OCR 或标准 LLM")
     return {
         "id": service_id,
         "name": name,
@@ -1214,6 +1214,7 @@ def _managed_process_snapshot() -> dict[int, dict]:
                 "display_name": display_name,
                 "service_kind": item.get("service_kind", "command"),
                 "service_type": item.get("service_type", "command"),
+                "service_category": item.get("service_category", "llm"),
                 "service_id": item.get("service_id"),
                 "host": item["host"],
                 "port": item["port"],
@@ -3411,7 +3412,19 @@ async def proxy_to_managed_llama(pid: int, request: Request, path: str = ""):
         base_url = f"http://127.0.0.1:{item['port']}"
 
     try:
-        return await _proxy_request_to_base(base_url, path, request)
+        response = await _proxy_request_to_base(base_url, path, request)
+        if request.method == "GET" and item.get("service_category") == "ocr" and isinstance(response, Response) and not isinstance(response, StreamingResponse):
+            content_type = response.headers.get("content-type", "")
+            if any(kind in content_type for kind in ("text/html", "javascript", "application/json")):
+                prefix = f"/llama-manager/llama-process/{pid}"
+                content = response.body.decode("utf-8")
+                for root in ("/api/", "/example_pics/", "/img/", "/katex/", "/style.css", "/app.js", "/i18n.js", "/showcase.json"):
+                    content = content.replace(root, prefix + root)
+                if "text/html" in content_type:
+                    content = content.replace('href="/"', f'href="{prefix}/"')
+                headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "content-encoding")}
+                response = Response(content=content, status_code=response.status_code, headers=headers)
+        return response
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="llama-server 未运行或无法连接")
     except httpx.RequestError as e:

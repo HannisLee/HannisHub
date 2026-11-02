@@ -182,7 +182,7 @@ export function InferencePanel() {
             <CardHeader title="注册服务" description="支持 llama.cpp、vLLM 和 ASR 等完整启动命令。" />
             <form className="form-grid" onSubmit={saveService}>
               <Field label="服务名" hint="留空时由后端根据命令推断。"><input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} placeholder="例如：Qwen ASR" /></Field>
-              <Field label="服务类型"><select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}><option value="llm">标准 LLM</option><option value="asr">ASR</option></select></Field>
+              <Field label="服务类型"><select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}><option value="llm">标准 LLM</option><option value="asr">ASR</option><option value="ocr">OCR</option></select></Field>
               <Field label="启动命令" className="field-wide" hint="命令中的 --port 会被用于打开服务入口。"><textarea value={form.command} onChange={event => setForm({ ...form, command: event.target.value })} rows={5} placeholder="python -m vllm.entrypoints.openai.api_server --model /path/to/model --port 8085" required /></Field>
               <div className="field field-wide"><span className="field-label">GPU 选择</span><div className="choice-row">{gpus.gpus?.length ? gpus.gpus.map(gpu => <label className="check-choice" key={gpu.index}><input type="checkbox" checked={form.gpus.includes(gpu.index)} onChange={() => toggleGpu(gpu.index)} />GPU {gpu.index}</label>) : <span className="field-hint">自动使用全部可见 GPU</span>}</div></div>
               <div className="form-actions field-wide"><Button type="submit" disabled={busy === "save"}>{busy === "save" ? "保存中…" : form.id ? "更新服务" : "保存服务"}</Button>{form.id ? <Button type="button" variant="quiet" onClick={() => setForm(emptyForm)}>取消编辑</Button> : null}</div>
@@ -196,13 +196,13 @@ export function InferencePanel() {
                 const running = runningByService.get(service.id);
                 return <article className="service-row" key={service.id}>
                   <div className="service-row-main">
-                    <div className="service-row-title"><strong>{service.name}</strong><Badge tone={service.service_category === "asr" ? "warning" : "info"}>{service.service_category === "asr" ? "ASR" : "LLM"}</Badge></div>
+                    <div className="service-row-title"><strong>{service.name}</strong><Badge tone={service.service_category === "asr" ? "warning" : "info"}>{service.service_category === "asr" ? "ASR" : service.service_category === "ocr" ? "OCR" : "LLM"}</Badge></div>
                     <code>{service.command}</code>
                     <span className="muted-line">{service.gpu_indexes?.length ? `GPU ${service.gpu_indexes.join(", ")}` : "全部 GPU"}{running ? ` · PID ${running.pid}` : ""}</span>
                   </div>
                   <div className="row-actions">
                     {running ? <><Button size="sm" variant="danger" onClick={() => void processAction("stop", running.pid)} disabled={busy === `stop-${running.pid}`}>停止</Button><Button size="sm" variant="secondary" onClick={() => void processAction("restart", running.pid)} disabled={busy === `restart-${running.pid}`}>重启</Button></> : <Button size="sm" onClick={() => void processAction("start", undefined, service.id)} disabled={busy === `start-${service.id}`}>启动</Button>}
-                    <Button size="sm" variant="quiet" onClick={() => editService(service)}>编辑</Button>
+                    {running && service.service_category === "ocr" && running.port ? <a className="button button-quiet button-sm" href={`/llama-manager/llama-process/${running.pid}/`} target="_blank" rel="noreferrer">Open</a> : null}<Button size="sm" variant="quiet" onClick={() => editService(service)}>编辑</Button>
                     <Button size="sm" variant="quiet" onClick={() => void deleteService(service.id)} disabled={busy === `delete-${service.id}`}>删除</Button>
                   </div>
                 </article>;
@@ -225,7 +225,7 @@ export function InferencePanel() {
                       <td><strong>{process.display_name || process.model_name || "未命名服务"}</strong><small className="table-subline">{process.service_category || "llm"}</small></td>
                       <td>{process.pid}</td><td>{process.port || "—"}</td><td>{process.gpu_indexes?.length ? process.gpu_indexes.join(", ") : "全部"}</td><td>{formatDate(process.started_at)}</td>
                       <td><Badge tone={process.running === false ? "neutral" : "success"}>{process.running === false ? "已停止" : "运行中"}</Badge></td>
-                      <td><div className="row-actions">{process.running !== false ? <><Button size="sm" variant="quiet" onClick={() => { setSelectedPid(process.pid); void loadLogs(process.pid); }}>日志</Button><Button size="sm" variant="danger" onClick={() => void processAction("stop", process.pid)}>停止</Button></> : null}{process.port ? <a className="button button-quiet button-sm" href={process.service_category === "asr" ? "/llama/asr" : `${API_PATHS.llama.replace("/api", "")}/chat/${process.pid}`} target={process.service_category === "asr" ? undefined : "_blank"} rel={process.service_category === "asr" ? undefined : "noreferrer"}>{process.service_category === "asr" ? "转写" : "聊天"}</a> : null}</div></td>
+                      <td><div className="row-actions">{process.running !== false ? <><Button size="sm" variant="quiet" onClick={() => { setSelectedPid(process.pid); void loadLogs(process.pid); }}>日志</Button><Button size="sm" variant="danger" onClick={() => void processAction("stop", process.pid)}>停止</Button></> : null}{process.port ? <a className="button button-quiet button-sm" href={process.service_category === "asr" ? "/llama/asr" : process.service_category === "ocr" ? `/llama-manager/llama-process/${process.pid}/` : `${API_PATHS.llama.replace("/api", "")}/chat/${process.pid}`} target={process.service_category === "asr" ? undefined : "_blank"} rel={process.service_category === "asr" ? undefined : "noreferrer"}>{process.service_category === "asr" ? "转写" : process.service_category === "ocr" ? "Open" : "聊天"}</a> : null}</div></td>
                     </tr>
                   ))}</tbody>
                 </table>
