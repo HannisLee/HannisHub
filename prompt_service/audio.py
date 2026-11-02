@@ -16,10 +16,22 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+from asr_audio import (
+    ASR_MAX_CHUNK_SECONDS,
+    ASR_MIN_CHUNK_SECONDS,
+    build_chunks,
+    export_mp3_chunk,
+    probe_duration,
+    speech_intervals,
+    split_chunk,
+    split_count_for_size,
+)
 
 MAX_AUDIO_BYTES = 512 * 1024 * 1024
 MIME_EXTENSIONS = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/wav": "wav", "audio/mpeg": "mp3"}
 DEFAULT_ASR = {"api_url": "", "api_key": "", "model": "", "language": "", "archive_dir": "", "timeout_seconds": 300}
+# MiMo 要求 Base64 字符串不超过 10 MB；Base64 膨胀约 4/3，7 MB 原始 MP3 有安全余量。
+EXTERNAL_ASR_TARGET_CHUNK_BYTES = 7 * 1024 * 1024
 
 
 def resolve_asr_endpoint(config):
@@ -33,6 +45,20 @@ def resolve_asr_endpoint(config):
     elif mimo and path.endswith("/audio/transcriptions"):
         path = path.removesuffix("/audio/transcriptions") + "/chat/completions"
     return protocol, urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, ""))
+
+
+def extract_external_asr_text(payload, protocol: str) -> str:
+    """从外部 ASR 的 JSON 返回中提取转写文本。"""
+    text = None
+    if isinstance(payload, dict):
+        if protocol == "chat_audio":
+            choices = payload.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                text = message.get("content") if isinstance(message, dict) else None
+        else:
+            text = payload.get("text")
+    return text.strip() if isinstance(text, str) else ""
 
 
 class AudioService:
@@ -327,6 +353,132 @@ class AudioService:
             raise RuntimeError("本机 ASR 未返回有效的转写文本")
         return result
 
+    async def transcribe_external(self, source: Path, recording_id: str, config: dict):
+        """复用静音检测和切片流程，逐段调用外部 ASR 后合并文本。"""
+        work_dir = source.parent / f".{source.stem}.external-asr-work"
+        shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.update(recording_id, progress=1, progress_detail="外部 ASR 正在读取音频信息")
+            total_duration = await asyncio.to_thread(probe_duration, source)
+            self.update(recording_id, progress=2, progress_detail="外部 ASR 正在分析音频和静音位置")
+
+            last_report_at = 0.0
+
+            def report_analysis(value: float):
+                nonlocal last_report_at
+                now = time.monotonic()
+                if value < 1.0 and now - last_report_at < 0.8:
+                    return
+                last_report_at = now
+                self.update(
+                    recording_id,
+                    progress=max(2, min(8, round(value * 8))),
+                    progress_detail="外部 ASR 正在分析音频和静音位置",
+                )
+
+            intervals = await asyncio.to_thread(speech_intervals, source, total_duration, report_analysis)
+            chunks = build_chunks(intervals, total_duration, ASR_MAX_CHUNK_SECONDS)
+            if not chunks:
+                raise RuntimeError("外部 ASR 未检测到可转写内容")
+            self.update(
+                recording_id,
+                progress=8,
+                progress_detail=f"外部 ASR 分析完成，已规划 {len(chunks)} 个转写片段",
+            )
+
+            fields = {"response_format": "json"}
+            if config["model"]:
+                fields["model"] = config["model"]
+            if config["language"]:
+                fields["language"] = config["language"]
+            headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
+            protocol, endpoint = resolve_asr_endpoint(config)
+            pending_chunks = list(chunks)
+            completed_chunks = 0
+            chunk_serial = 0
+            chunk_position = 0
+            texts: list[str] = []
+            async with httpx.AsyncClient(timeout=config["timeout_seconds"]) as client:
+                while chunk_position < len(pending_chunks):
+                    start, end = pending_chunks[chunk_position]
+                    duration = end - start
+                    chunk_serial += 1
+                    chunk_path = work_dir / f"chunk-{chunk_serial:03d}.mp3"
+                    total_chunks = len(pending_chunks)
+                    current_progress = max(8, round(8 + completed_chunks / total_chunks * 92))
+                    self.update(
+                        recording_id,
+                        progress=current_progress,
+                        progress_detail=f"外部 ASR 正在转码第 {chunk_position + 1}/{total_chunks} 个片段",
+                    )
+                    file_size = await asyncio.to_thread(export_mp3_chunk, source, chunk_path, start, end)
+
+                    # MP3 使用固定 64 kbps 重编码；若第三方限制比预期更严格，则按实际
+                    # 文件大小继续切分，仍保留本机流程的最短 15 秒保护。
+                    if file_size > EXTERNAL_ASR_TARGET_CHUNK_BYTES:
+                        split_count = split_count_for_size(
+                            duration, file_size, EXTERNAL_ASR_TARGET_CHUNK_BYTES, ASR_MIN_CHUNK_SECONDS,
+                        )
+                        if split_count < 2:
+                            raise RuntimeError(
+                                f"第 {completed_chunks + 1} 段外部 ASR MP3 大小为 "
+                                f"{file_size / 1024 / 1024:.1f} MB，无法在保证至少 "
+                                f"{ASR_MIN_CHUNK_SECONDS} 秒长度的前提下继续切分"
+                            )
+                        pending_chunks[chunk_position:chunk_position + 1] = split_chunk(start, end, split_count)
+                        self.update(recording_id, progress=current_progress, progress_detail="外部 ASR 片段较大，正在重新切分")
+                        chunk_path.unlink(missing_ok=True)
+                        continue
+
+                    self.update(
+                        recording_id,
+                        progress=current_progress,
+                        progress_detail=f"外部 ASR 正在转写第 {chunk_position + 1}/{total_chunks} 个片段",
+                    )
+                    if protocol == "chat_audio":
+                        audio_data = "data:audio/mpeg;base64," + base64.b64encode(chunk_path.read_bytes()).decode("ascii")
+                        payload = {
+                            "model": config["model"] or "mimo-v2.5-asr",
+                            "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": audio_data}}]}],
+                            "asr_options": {"language": config["language"] or "auto"},
+                            "stream": False,
+                        }
+                        response = await client.post(endpoint, headers=headers, json=payload)
+                    else:
+                        with chunk_path.open("rb") as audio:
+                            response = await client.post(
+                                endpoint,
+                                headers=headers,
+                                data=fields,
+                                files={"file": (chunk_path.name, audio, "audio/mpeg")},
+                            )
+                    if not response.is_success:
+                        # 避免第三方错误页回显请求密钥，仅保存状态码。
+                        raise RuntimeError(
+                            f"外部 ASR 第 {completed_chunks + 1} 段返回 HTTP {response.status_code}，"
+                            "请检查地址、Key、模型和服务音频限制"
+                        )
+                    result = response.json()
+                    text = extract_external_asr_text(result, protocol)
+                    if text:
+                        texts.append(text)
+                    completed_chunks += 1
+                    chunk_position += 1
+                    self.update(
+                        recording_id,
+                        progress=max(8, round(8 + completed_chunks / len(pending_chunks) * 92)),
+                        progress_detail=f"外部 ASR 已完成 {completed_chunks}/{len(pending_chunks)} 个片段",
+                    )
+                    chunk_path.unlink(missing_ok=True)
+
+            transcript = "\n\n".join(texts).strip()
+            if not transcript:
+                raise RuntimeError("外部 ASR 未返回有效的转写文本")
+            return {"text": transcript, "chunks": completed_chunks}
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     async def process(self, item):
         recording_id = item["id"]
         self.update(recording_id, status="processing", error="", progress=0, progress_detail="")
@@ -352,45 +504,13 @@ class AudioService:
             if not config["api_url"]:
                 self.update(recording_id, status="waiting_config", error="原音频与转码音频已归档，未检测到本机 ASR，请配置外部 ASR", engine="")
                 return
-            fields = {"response_format": "json"}
-            if config["model"]:
-                fields["model"] = config["model"]
-            if config["language"]:
-                fields["language"] = config["language"]
-            headers = {"Authorization": f"Bearer {config['api_key']}"} if config["api_key"] else {}
-            protocol, endpoint = resolve_asr_endpoint(config)
-            async with httpx.AsyncClient(timeout=config["timeout_seconds"]) as client:
-                if protocol == "chat_audio":
-                    payload = {
-                        "model": config["model"] or "mimo-v2.5-asr",
-                        "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {
-                            "data": "data:audio/mpeg;base64," + base64.b64encode(target.read_bytes()).decode("ascii"),
-                        }}]}],
-                        "asr_options": {"language": config["language"] or "auto"},
-                        "stream": False,
-                    }
-                    response = await client.post(endpoint, headers=headers, json=payload)
-                else:
-                    with target.open("rb") as audio:
-                        response = await client.post(endpoint, headers=headers, data=fields, files={"file": (target.name, audio, "audio/mpeg")})
-            if not response.is_success:
-                # 避免第三方错误页回显请求密钥，仅保存状态码。
-                raise RuntimeError(f"外部 ASR 返回 HTTP {response.status_code}，请检查地址、Key、模型和服务音频限制")
-            result = response.json()
-            text = None
-            if isinstance(result, dict):
-                if protocol == "chat_audio":
-                    choices = result.get("choices")
-                    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-                        message = choices[0].get("message")
-                        text = message.get("content") if isinstance(message, dict) else None
-                else:
-                    text = result.get("text")
-            if not isinstance(text, str) or not text.strip():
-                raise RuntimeError("外部 ASR 未返回有效的转写文本")
+            result = await self.transcribe_external(target, recording_id, config)
+            text = result["text"].strip()
+            chunks = result.get("chunks")
+            detail = f"外部 ASR 完成，共转写 {chunks} 个片段" if isinstance(chunks, int) else "外部 ASR 转写完成"
             text_path = raw.with_name(f"{recording_id}.txt")
             text_path.write_text(text, encoding="utf-8")
-            self.update(recording_id, status="done", text=text, error="", progress=100, progress_detail="外部 ASR 转写完成")
+            self.update(recording_id, status="done", text=text, error="", progress=100, progress_detail=detail)
         except asyncio.CancelledError:
             self.update(recording_id, status="queued", error="服务重启后继续处理")
             raise

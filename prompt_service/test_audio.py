@@ -245,6 +245,41 @@ class AudioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["text"], "小米转写成功")
         self.assertEqual(Path(item["raw_path"]).read_bytes(), self.audio)
 
+    async def test_long_external_mimo_audio_is_chunked_within_base64_limit(self):
+        await self.upload()
+        before = await self.wait_status("waiting_config")
+        transcripts = iter(["第一段", "第二段"])
+        payloads = []
+
+        def handle(request):
+            self.assertEqual(str(request.url), "https://api.xiaomimimo.com/v1/chat/completions")
+            payload = json.loads(request.content)
+            audio = payload["messages"][0]["content"][0]["input_audio"]["data"]
+            encoded = audio.split(",", 1)[1]
+            self.assertLessEqual(len(encoded), 10 * 1024 * 1024)
+            payloads.append(encoded)
+            return httpx.Response(200, json={"choices": [{"message": {"content": next(transcripts)}}]})
+
+        original_client = httpx.AsyncClient
+        with patch("prompt_service.audio.probe_duration", return_value=1200), \
+                patch("prompt_service.audio.speech_intervals", return_value=[(0.0, 1200.0)]), \
+                patch(
+                    "prompt_service.audio.httpx.AsyncClient",
+                    side_effect=lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
+                ):
+            await self.client.put("/api/asr-settings", json={
+                "api_url": "https://api.xiaomimimo.com/v1",
+                "api_key": "test-key",
+                "model": "mimo-v2.5-asr",
+            })
+            item = await self.wait_status("done")
+
+        self.assertEqual(len(payloads), 2)
+        self.assertTrue(all(base64.b64decode(data) for data in payloads))
+        self.assertEqual(item["text"], "第一段\n\n第二段")
+        self.assertEqual(item["progress_detail"], "外部 ASR 完成，共转写 2 个片段")
+        self.assertFalse((Path(before["converted_path"]).parent / ".rec_test_001.archive.external-asr-work").exists())
+
     async def test_endpoint_resolution_keeps_full_endpoints_and_query(self):
         cases = [
             ({"api_url": "https://asr.example/v1/", "model": "whisper"}, ("openai", "https://asr.example/v1/audio/transcriptions")),
