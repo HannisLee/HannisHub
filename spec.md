@@ -766,3 +766,4 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 
 - 注册 OCR 命令 `scripts/start-xiaomi-ocr.sh --port 8787`，由受管进程同时启动本机 llama-server（127.0.0.1:8080）与官方 Demo（127.0.0.1:8787），停止时一并结束子进程；端口被占用时启动失败并记录日志。
 - 模型和视觉投影器存于 `/home/lihan/models/Xiaomi-OCR-0/`，官方仓库存于 `/home/lihan/run/Xiaomi-OCR-0/`。整页、公式和问答使用官方服务层；区域解析需要另装可选依赖。
+- 从 HannisHub 打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。

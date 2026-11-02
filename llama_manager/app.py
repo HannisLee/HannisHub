@@ -3422,6 +3422,9 @@ async def proxy_to_managed_llama(pid: int, request: Request, path: str = ""):
                     content = content.replace(root, prefix + root)
                 if "text/html" in content_type:
                     content = content.replace('href="/"', f'href="{prefix}/"')
+                    if item.get("service_id") == "xiaomi_ocr_0":
+                        # 调整小米工作台默认显示大小，保留浏览器自身缩放功能。
+                        content = content.replace("</head>", "<style>html { zoom: 1.25; }</style></head>", 1)
                 headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "content-encoding")}
                 response = Response(content=content, status_code=response.status_code, headers=headers)
         return response
