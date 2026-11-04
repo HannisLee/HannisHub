@@ -32,6 +32,8 @@ MAX_AVATAR_TEXT_CHARS = 16
 MAX_AVATAR_IMAGE_CHARS = 120_000
 AVATAR_IMAGE_PATTERN = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+# 客户端生成的消息编号，用于乐观发送的去重与幂等重试
+NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 # 超过该秒数未心跳即视为离线
 ONLINE_TIMEOUT_SECONDS = 15
 
@@ -158,15 +160,23 @@ def save_profile(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def post_message(payload: dict[str, Any]) -> dict[str, Any]:
-    """追加一条消息并返回该消息；昵称以已保存的资料为准。"""
+    """追加一条消息并返回该消息；昵称以已保存的资料为准，携带 nonce 时幂等。"""
     client_id = _validate_client_id(payload.get("client_id"))
     content = str(payload.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
     if len(content) > MAX_MESSAGE_CHARS:
         raise HTTPException(status_code=400, detail=f"消息长度不能超过 {MAX_MESSAGE_CHARS} 字")
+    nonce = str(payload.get("nonce") or "").strip()
+    if nonce and not NONCE_PATTERN.match(nonce):
+        raise HTTPException(status_code=400, detail="消息编号无效")
     with _LOCK:
         data = _read_store()
+        # 同一浏览器的同一消息编号只保存一次：超时重试时直接返回已有消息
+        if nonce:
+            for existing in reversed(data["messages"][-500:]):
+                if existing.get("nonce") == nonce and existing.get("client_id") == client_id:
+                    return existing
         profile = data["profiles"].get(client_id)
         nickname = profile["nickname"] if profile else _normalize_nickname(payload.get("nickname"))
         message = {
@@ -176,6 +186,8 @@ def post_message(payload: dict[str, Any]) -> dict[str, Any]:
             "content": content,
             "created_at": time.time(),
         }
+        if nonce:
+            message["nonce"] = nonce
         data["next_id"] += 1
         data["messages"].append(message)
         if len(data["messages"]) > MAX_STORED_MESSAGES:

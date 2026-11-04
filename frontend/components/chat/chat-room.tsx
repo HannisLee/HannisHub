@@ -2,19 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
+import {
+  CHAT_CLIENT_ID_KEY,
+  addChatUnread,
+  isFromOthers,
+  markChatRead,
+  playChatDing,
+  setChatSoundEnabled,
+} from "../../lib/chat-notify";
 import { errorMessage } from "../../lib/format";
 import type { AuthStatus, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button, ErrorState, LoadingState } from "../ui/primitives";
+import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
 const PROFILE = `${API_PATHS.chatRoom}/profile`;
-const CLIENT_ID_KEY = "hannishub_chat_client_id";
 const NICKNAME_KEY = "hannishub_chat_nickname";
 const POLL_MS = 2000;
+const SEND_TIMEOUT_MS = 15000;
 const AVATAR_SIZE = 96;
 const PRESET_AVATARS = ["🐱", "🐶", "🦊", "🐼", "🐸", "🐧", "🦄", "🐙", "🐳", "🌵", "🍀", "🌙"];
+
+/** 本地待发送消息：先显示在界面上，后台发送成功后替换为服务端消息 */
+interface PendingMessage {
+  nonce: string;
+  content: string;
+  created_at: number;
+  status: "sending" | "failed";
+}
 
 function storageGet(key: string): string {
   try {
@@ -32,14 +49,19 @@ function storageSet(key: string, value: string) {
   }
 }
 
-/** 读取或生成本浏览器的聊天室标识；使用 getRandomValues 以兼容 http 局域网访问 */
+/** 生成随机十六进制串；使用 getRandomValues 以兼容 http 局域网访问 */
+function randomHex(bytes: number): string {
+  const values = new Uint8Array(bytes);
+  window.crypto.getRandomValues(values);
+  return Array.from(values, value => value.toString(16).padStart(2, "0")).join("");
+}
+
+/** 读取或生成本浏览器的聊天室标识 */
 function ensureClientId(): string {
-  const saved = storageGet(CLIENT_ID_KEY);
+  const saved = storageGet(CHAT_CLIENT_ID_KEY);
   if (/^[A-Za-z0-9_-]{8,64}$/.test(saved)) return saved;
-  const bytes = new Uint8Array(12);
-  window.crypto.getRandomValues(bytes);
-  const id = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
-  storageSet(CLIENT_ID_KEY, id);
+  const id = randomHex(12);
+  storageSet(CHAT_CLIENT_ID_KEY, id);
   return id;
 }
 
@@ -87,15 +109,27 @@ function Avatar({ nickname, avatar, size = "md" }: { nickname: string; avatar?: 
   return <span className={className} aria-hidden="true">{avatar || (Array.from(nickname.trim())[0] ?? "?").toUpperCase()}</span>;
 }
 
+/** 一行可渲染的消息：服务端消息或本地待发送消息 */
+interface DisplayMessage {
+  key: string;
+  senderKey: string;
+  mine: boolean;
+  nickname: string;
+  avatar: string;
+  content: string;
+  created_at: number;
+  pending?: PendingMessage;
+}
+
 /** 公共聊天室：顶部为在线人数与个人设置，中部为共享消息流，底部为输入框与表情面板 */
 export function ChatRoom() {
   const [messages, setMessages] = useState<ChatRoomMessage[]>([]);
+  const [pending, setPending] = useState<PendingMessage[]>([]);
   const [profiles, setProfiles] = useState<Record<string, ChatRoomProfile>>({});
   const [online, setOnline] = useState<string[]>([]);
   const [clientId, setClientId] = useState("");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [panel, setPanel] = useState<"" | "settings" | "online">("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -103,6 +137,8 @@ export function ChatRoom() {
   const [avatarDraft, setAvatarDraft] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileNote, setProfileNote] = useState("");
+  const [newBelow, setNewBelow] = useState(0);
+  const { soundEnabled } = useChatNotify();
 
   const lastIdRef = useRef(0);
   const profilesVersionRef = useRef(-1);
@@ -111,18 +147,49 @@ export function ChatRoom() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const initializedRef = useRef(false);
+  const sendQueueRef = useRef<string[]>([]);
+  const sendingRef = useRef(false);
+  const pendingRef = useRef<PendingMessage[]>([]);
 
   const me = profiles[clientId];
 
-  const mergeMessages = useCallback((incoming: ChatRoomMessage[]) => {
+  /** 当前是否在看最新消息：页面可见且滚动在底部 */
+  const isWatching = useCallback(() => !document.hidden && stickToBottomRef.current, []);
+
+  const updatePending = useCallback((update: (current: PendingMessage[]) => PendingMessage[]) => {
+    pendingRef.current = update(pendingRef.current);
+    setPending(pendingRef.current);
+  }, []);
+
+  /** 合并服务端消息；移除已被确认的本地消息，并对别人发来的新消息做未读与提示音处理 */
+  const mergeMessages = useCallback((incoming: ChatRoomMessage[], notify: boolean) => {
     if (incoming.length === 0) return;
+    const confirmed = new Set(incoming.map(item => item.nonce).filter(Boolean));
+    if (confirmed.size) updatePending(current => current.filter(item => !confirmed.has(item.nonce)));
+    const known = lastIdRef.current;
+    const fresh = incoming.filter(item => item.id > known);
     setMessages(current => {
-      const known = new Set(current.map(item => item.id));
-      const next = [...current, ...incoming.filter(item => !known.has(item.id))];
-      lastIdRef.current = next.length ? next[next.length - 1].id : lastIdRef.current;
+      const ids = new Set(current.map(item => item.id));
+      const next = [...current, ...incoming.filter(item => !ids.has(item.id))].sort((a, b) => a.id - b.id);
       return next;
     });
-  }, []);
+    lastIdRef.current = Math.max(known, ...incoming.map(item => item.id));
+
+    const fromOthers = fresh.filter(item => isFromOthers(item, clientIdRef.current));
+    if (!notify || fromOthers.length === 0) {
+      if (isWatching()) markChatRead(lastIdRef.current);
+      return;
+    }
+    if (isWatching()) {
+      markChatRead(lastIdRef.current);
+      return;
+    }
+    // 不在看最新消息：计入未读、提示音，滚动在上方时显示「新消息」按钮
+    addChatUnread(fromOthers.length);
+    playChatDing();
+    if (!stickToBottomRef.current) setNewBelow(count => count + fromOthers.length);
+  }, [isWatching, updatePending]);
 
   const fetchMessages = useCallback(async () => {
     const query = new URLSearchParams({
@@ -136,7 +203,7 @@ export function ChatRoom() {
     profilesVersionRef.current = data.profiles_version;
     // 服务端记录被清空时同步清空本地
     if (data.total === 0) setMessages([]);
-    else mergeMessages(data.messages);
+    else mergeMessages(data.messages, initializedRef.current);
     return data;
   }, [mergeMessages]);
 
@@ -152,6 +219,38 @@ export function ChatRoom() {
     return saved;
   }, []);
 
+  /** 按顺序逐条发送队列中的消息，保证服务端顺序与输入顺序一致 */
+  const processQueue = useCallback(async () => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      while (sendQueueRef.current.length) {
+        const nonce = sendQueueRef.current[0];
+        const item = pendingRef.current.find(entry => entry.nonce === nonce);
+        if (item) {
+          const controller = new AbortController();
+          const timer = window.setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+          try {
+            const message = await apiFetch<ChatRoomMessage>(MESSAGES, {
+              method: "POST",
+              body: jsonBody({ client_id: clientIdRef.current, content: item.content, nonce }),
+              signal: controller.signal,
+            });
+            mergeMessages([message], false);
+            markChatRead(lastIdRef.current);
+          } catch {
+            updatePending(current => current.map(entry => (entry.nonce === nonce ? { ...entry, status: "failed" } : entry)));
+          } finally {
+            window.clearTimeout(timer);
+          }
+        }
+        sendQueueRef.current.shift();
+      }
+    } finally {
+      sendingRef.current = false;
+    }
+  }, [mergeMessages, updatePending]);
+
   useEffect(() => {
     void (async () => {
       const id = ensureClientId();
@@ -159,6 +258,8 @@ export function ChatRoom() {
       setClientId(id);
       try {
         const data = await fetchMessages();
+        initializedRef.current = true;
+        markChatRead(lastIdRef.current);
         // 首次进入时自动建立资料：优先沿用本地昵称，否则使用登录账号名
         if (!data.profiles?.[id]) {
           let nickname = storageGet(NICKNAME_KEY);
@@ -176,18 +277,25 @@ export function ChatRoom() {
       }
     })();
     const timer = window.setInterval(() => {
-      if (!document.hidden) {
-        fetchMessages().then(() => setError("")).catch(value => setError(errorMessage(value)));
-      }
+      // 页面隐藏时也继续轮询，以便计入未读并播放提示音
+      fetchMessages().then(() => setError("")).catch(value => setError(errorMessage(value)));
     }, POLL_MS);
-    return () => window.clearInterval(timer);
+    // 回到页面且停在底部时，视为已读
+    const onVisible = () => {
+      if (!document.hidden && stickToBottomRef.current) markChatRead(lastIdRef.current);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchMessages, saveProfile]);
 
-  // 用户停留在底部时，新消息自动滚动到底
+  // 停留在底部时，新消息（含本地待发送消息）自动滚动到底
   useEffect(() => {
     const box = listRef.current;
     if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
-  }, [messages]);
+  }, [messages, pending]);
 
   // 输入框随内容自动增高（上限由 CSS max-height 控制）
   useEffect(() => {
@@ -216,7 +324,20 @@ export function ChatRoom() {
 
   function onScroll() {
     const box = listRef.current;
-    if (box) stickToBottomRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    if (!box) return;
+    stickToBottomRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    if (stickToBottomRef.current) {
+      setNewBelow(0);
+      if (!document.hidden) markChatRead(lastIdRef.current);
+    }
+  }
+
+  function jumpToLatest() {
+    const box = listRef.current;
+    stickToBottomRef.current = true;
+    setNewBelow(0);
+    markChatRead(lastIdRef.current);
+    if (box) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
   }
 
   function togglePanel(next: "settings" | "online") {
@@ -268,42 +389,61 @@ export function ChatRoom() {
     });
   }
 
-  async function send() {
+  /** 乐观发送：立即显示在界面上并清空输入框，后台排队发送 */
+  function send() {
     const content = draft.trim();
-    if (!content || sending || !clientId) return;
-    setSending(true);
-    try {
-      const message = await apiFetch<ChatRoomMessage>(MESSAGES, {
-        method: "POST",
-        body: jsonBody({ client_id: clientId, nickname: me?.nickname ?? "", content }),
-      });
-      stickToBottomRef.current = true;
-      mergeMessages([message]);
-      setDraft("");
-      setEmojiOpen(false);
-      setError("");
-    } catch (value) {
-      setError(errorMessage(value));
-    } finally {
-      setSending(false);
-    }
+    if (!content || !clientId) return;
+    const nonce = randomHex(12);
+    updatePending(current => [...current, { nonce, content, created_at: Date.now() / 1000, status: "sending" }]);
+    setDraft("");
+    setEmojiOpen(false);
+    stickToBottomRef.current = true;
+    setNewBelow(0);
+    sendQueueRef.current.push(nonce);
+    void processQueue();
+  }
+
+  function retry(nonce: string) {
+    updatePending(current => current.map(entry => (entry.nonce === nonce ? { ...entry, status: "sending" } : entry)));
+    sendQueueRef.current.push(nonce);
+    void processQueue();
+  }
+
+  function discard(nonce: string) {
+    updatePending(current => current.filter(entry => entry.nonce !== nonce));
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      void send();
+      send();
     }
   }
 
-  function isMine(message: ChatRoomMessage) {
-    return message.client_id ? message.client_id === clientId : !!me && message.nickname === me.nickname;
-  }
-
-  function senderOf(message: ChatRoomMessage) {
-    const profile = message.client_id ? profiles[message.client_id] : undefined;
-    return { nickname: profile?.nickname ?? message.nickname, avatar: profile?.avatar ?? "" };
-  }
+  const display: DisplayMessage[] = [
+    ...messages.map(message => {
+      const profile = message.client_id ? profiles[message.client_id] : undefined;
+      return {
+        key: `m-${message.id}`,
+        senderKey: message.client_id ?? message.nickname,
+        mine: message.client_id ? message.client_id === clientId : !!me && message.nickname === me.nickname,
+        nickname: profile?.nickname ?? message.nickname,
+        avatar: profile?.avatar ?? "",
+        content: message.content,
+        created_at: message.created_at,
+      };
+    }),
+    ...pending.map(item => ({
+      key: `p-${item.nonce}`,
+      senderKey: clientId,
+      mine: true,
+      nickname: me?.nickname ?? "",
+      avatar: me?.avatar ?? "",
+      content: item.content,
+      created_at: item.created_at,
+      pending: item,
+    })),
+  ];
 
   return (
     <section className="chat-main">
@@ -363,6 +503,11 @@ export function ChatRoom() {
                 </label>
               </div>
             </div>
+            <label className="check-choice">
+              <input type="checkbox" checked={soundEnabled} onChange={event => setChatSoundEnabled(event.target.checked)} />
+              新消息提示音
+              <span className="muted-line">（仅对本浏览器生效，立即保存）</span>
+            </label>
             {profileNote ? <p className="error-text">{profileNote}</p> : null}
             <div className="form-actions">
               <Button size="sm" onClick={() => void submitProfile()} disabled={savingProfile}>保存</Button>
@@ -372,23 +517,34 @@ export function ChatRoom() {
         </div>
       ) : null}
 
-      <div className="chat-messages" ref={listRef} onScroll={onScroll}>
-        {loading ? <LoadingState label="正在读取聊天记录…" /> : null}
-        {messages.map((message, index) => {
-          const mine = isMine(message);
-          const sender = senderOf(message);
-          const previous = messages[index - 1];
-          const grouped = !!previous && (previous.client_id ?? previous.nickname) === (message.client_id ?? message.nickname) && message.created_at - previous.created_at < 300;
-          return (
-            <div key={message.id} className={`chat-row${mine ? " chat-row-mine" : ""}${grouped ? " chat-row-grouped" : ""}`}>
-              {grouped ? <span className="chat-avatar-spacer" /> : <Avatar nickname={sender.nickname} avatar={sender.avatar} />}
-              <div className="chat-message">
-                {grouped ? null : <span className="chat-message-meta"><strong>{sender.nickname}</strong> · {formatTime(message.created_at)}</span>}
-                <div className="chat-bubble">{message.content}</div>
+      <div className="chat-messages-wrap">
+        <div className="chat-messages" ref={listRef} onScroll={onScroll}>
+          {loading ? <LoadingState label="正在读取聊天记录…" /> : null}
+          {display.map((message, index) => {
+            const previous = display[index - 1];
+            const grouped = !!previous && previous.senderKey === message.senderKey && message.created_at - previous.created_at < 300;
+            const status = message.pending?.status;
+            return (
+              <div key={message.key} className={`chat-row${message.mine ? " chat-row-mine" : ""}${grouped ? " chat-row-grouped" : ""}`}>
+                {grouped ? <span className="chat-avatar-spacer" /> : <Avatar nickname={message.nickname} avatar={message.avatar} />}
+                <div className="chat-message">
+                  {grouped ? null : <span className="chat-message-meta"><strong>{message.nickname}</strong> · {formatTime(message.created_at)}</span>}
+                  <div className={`chat-bubble${status === "sending" ? " chat-bubble-sending" : ""}${status === "failed" ? " chat-bubble-failed" : ""}`}>{message.content}</div>
+                  {status === "failed" && message.pending ? (
+                    <span className="chat-send-failed">
+                      发送失败
+                      <button type="button" onClick={() => retry(message.pending!.nonce)}>重试</button>
+                      <button type="button" onClick={() => discard(message.pending!.nonce)}>删除</button>
+                    </span>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+        {newBelow > 0 ? (
+          <button type="button" className="chat-new-below" onClick={jumpToLatest}>↓ {newBelow} 条新消息</button>
+        ) : null}
       </div>
 
       {error ? <ErrorState message={error} /> : null}
@@ -408,7 +564,7 @@ export function ChatRoom() {
           </button>
           {emojiOpen ? <div className="chat-emoji-popover"><ChatEmojiPicker onSelect={insertEmoji} /></div> : null}
         </div>
-        <Button onClick={() => void send()} disabled={sending || !draft.trim() || !clientId}>发送</Button>
+        <Button onClick={send} disabled={!draft.trim() || !clientId}>发送</Button>
       </div>
     </section>
   );

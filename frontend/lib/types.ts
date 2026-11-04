@@ -457,6 +457,8 @@ export interface ChatRoomMessage {
   id: number;
   /** 发送者浏览器标识；早期消息可能缺失 */
   client_id?: string;
+  /** 客户端生成的消息编号，用于确认本地乐观发送的消息 */
+  nonce?: string;
   nickname: string;
   content: string;
   created_at: number;

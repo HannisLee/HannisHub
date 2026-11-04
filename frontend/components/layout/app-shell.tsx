@@ -8,6 +8,7 @@ import { isActivePath, navigation, navTitle } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
+import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } from "../chat/chat-watcher";
 import { DocumentTitle } from "./document-title";
 
 /** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */
@@ -75,6 +76,12 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
   }, [pathname]);
   const pageTitle = navTitle(current);
 
+  // 聊天室新消息提醒：聊天室页面由聊天组件自己处理，其他页面在后台检查
+  const onChatPage = pathname === "/chat" || pathname === "/chat/";
+  const { unread } = useChatNotify();
+  useChatWatcher(!!auth?.authenticated && !onChatPage);
+  useChatNotifyEffects(unread);
+
   useEffect(() => {
     let active = true;
     apiFetch<AuthStatus>("/api/auth/status")
@@ -124,7 +131,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
 
   return (
     <div className="app-shell">
-      <DocumentTitle title={pageTitle} />
+      <DocumentTitle title={pageTitle} unread={unread} />
       <div className={`shell-overlay${mobileDrawerOpen ? " is-visible" : ""}`} onClick={closeDrawer} />
       <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
         <div className="sidebar-head">
@@ -159,6 +166,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
                 >
                   <span className="nav-icon"><Icon name={item.icon} /></span>
                   <span className="nav-item-label">{item.label}</span>
+                  {item.href === "/chat" && unread > 0 ? <span className="nav-badge" aria-label={`${unread} 条未读`}>{unread > 99 ? "99+" : unread}</span> : null}
                 </Link>
               ))}
             </div>
@@ -180,6 +188,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
         </header>
         <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
       </div>
+      {onChatPage ? null : <ChatToastView />}
     </div>
   );
 }
