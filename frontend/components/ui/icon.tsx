@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "users" | "smile";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "users" | "smile" | "attach" | "download" | "file";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -20,6 +20,9 @@ const paths: Record<IconName, ReactNode> = {
   chat: <><path d="M3.5 4.5h12v9H8l-4.5 3.5v-12.5Z" /><path d="M15.5 8.5h5v11l-3-2.5H9.5v-3.5" /></>,
   users: <><circle cx="9" cy="8" r="3.25" /><path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" /><path d="M15.5 4.9a3.25 3.25 0 0 1 0 6.2M17.5 14.3c2 .7 3.5 2.6 3.5 5.2" /></>,
   smile: <><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" /><path d="M9 9.5v.5M15 9.5v.5" /></>,
+  attach: <><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></>,
+  download: <><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" /></>,
+  file: <><path d="M6.5 3.5h7l4 4v13h-11a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z" /><path d="M13.5 3.5v4h4" /></>,
   panelExpand: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m14 9.5 2.75 2.5L14 14.5" /></>,
 };
 

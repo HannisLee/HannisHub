@@ -453,12 +453,25 @@ export interface ApiErrorShape {
   message?: string;
 }
 
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+  /** image 在页面内显示，file 显示为文件卡片 */
+  kind: "image" | "file";
+  width?: number;
+  height?: number;
+}
+
 export interface ChatRoomMessage {
   id: number;
   /** 发送者浏览器标识；早期消息可能缺失 */
   client_id?: string;
   /** 客户端生成的消息编号，用于确认本地乐观发送的消息 */
   nonce?: string;
+  /** 图片或文件附件 */
+  attachment?: ChatAttachment;
   nickname: string;
   content: string;
   created_at: number;

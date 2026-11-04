@@ -2,6 +2,7 @@
 
 - 消息与用户资料（昵称、头像）以本地 JSON 文件持久保存
 - 每个浏览器生成一个 client_id 作为身份；在线状态只保存在内存中，按最近心跳判断
+- 图片与文件附件保存在 data/chat_room_files/，先上传取得文件编号，再随消息发送
 """
 
 from __future__ import annotations
@@ -12,13 +13,26 @@ import re
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 ROOT_DIR = Path(__file__).resolve().parent
 CHAT_ROOM_PATH = ROOT_DIR / "data" / "chat_room.json"
+FILES_DIR = ROOT_DIR / "data" / "chat_room_files"
+
+# 附件：单个文件上限 100 MB；只有常见位图会在页面内直接显示，
+# SVG、HTML 等可能携带脚本的类型一律按普通文件强制下载
+MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
+INLINE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+FILE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
+MAX_FILE_NAME_CHARS = 200
+MAX_IMAGE_SIDE = 20_000
+# 上传后超过该时间仍未被任何消息引用的附件会被清理
+ORPHAN_FILE_TTL_SECONDS = 24 * 60 * 60
 
 # 最多保留的消息条数，超出后丢弃最早的记录
 MAX_STORED_MESSAGES = 10_000
@@ -163,7 +177,9 @@ def post_message(payload: dict[str, Any]) -> dict[str, Any]:
     """追加一条消息并返回该消息；昵称以已保存的资料为准，携带 nonce 时幂等。"""
     client_id = _validate_client_id(payload.get("client_id"))
     content = str(payload.get("content") or "").strip()
-    if not content:
+    attachment_id = str(payload.get("attachment_id") or "").strip()
+    attachment = _public_attachment(_read_file_meta(attachment_id)) if attachment_id else None
+    if not content and not attachment:
         raise HTTPException(status_code=400, detail="消息不能为空")
     if len(content) > MAX_MESSAGE_CHARS:
         raise HTTPException(status_code=400, detail=f"消息长度不能超过 {MAX_MESSAGE_CHARS} 字")
@@ -188,6 +204,8 @@ def post_message(payload: dict[str, Any]) -> dict[str, Any]:
         }
         if nonce:
             message["nonce"] = nonce
+        if attachment:
+            message["attachment"] = attachment
         data["next_id"] += 1
         data["messages"].append(message)
         if len(data["messages"]) > MAX_STORED_MESSAGES:
@@ -204,3 +222,148 @@ def clear_messages() -> dict[str, Any]:
         data["messages"] = []
         _write_store(data)
     return {"ok": True}
+
+
+# ---------- 附件 ----------
+
+
+def _file_path(file_id: str) -> Path:
+    return FILES_DIR / file_id
+
+
+def _meta_path(file_id: str) -> Path:
+    return FILES_DIR / f"{file_id}.json"
+
+
+def _read_file_meta(file_id: str) -> dict[str, Any]:
+    """读取附件元信息；编号非法或文件缺失时返回 404。"""
+    if not FILE_ID_PATTERN.match(file_id):
+        raise HTTPException(status_code=404, detail="附件不存在")
+    try:
+        meta = json.loads(_meta_path(file_id).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="附件不存在") from exc
+    if not _file_path(file_id).is_file():
+        raise HTTPException(status_code=404, detail="附件不存在")
+    return meta
+
+
+def _public_attachment(meta: dict[str, Any]) -> dict[str, Any]:
+    """随消息保存与返回的附件信息。"""
+    result = {key: meta[key] for key in ("id", "name", "size", "mime", "kind") if key in meta}
+    if meta.get("width") and meta.get("height"):
+        result["width"] = meta["width"]
+        result["height"] = meta["height"]
+    return result
+
+
+def _safe_file_name(value: str) -> str:
+    """只保留文件名本身，去掉路径与控制字符。"""
+    name = unquote(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(char for char in name if ord(char) >= 32 and char != "\x7f").strip()
+    if len(name) > MAX_FILE_NAME_CHARS:
+        stem, dot, suffix = name.rpartition(".")
+        name = (stem[: MAX_FILE_NAME_CHARS - len(suffix) - 1] + dot + suffix) if dot and len(suffix) <= 16 else name[:MAX_FILE_NAME_CHARS]
+    return name or "未命名文件"
+
+
+def _image_side(value: str | None) -> int | None:
+    try:
+        side = int(value or "")
+    except ValueError:
+        return None
+    return side if 0 < side <= MAX_IMAGE_SIDE else None
+
+
+def cleanup_orphan_files() -> int:
+    """删除超过保留时间仍未被任何消息引用的附件与残留的上传临时文件。"""
+    if not FILES_DIR.is_dir():
+        return 0
+    with _LOCK:
+        referenced = {
+            message["attachment"]["id"]
+            for message in _read_store()["messages"]
+            if isinstance(message.get("attachment"), dict)
+        }
+    now = time.time()
+    removed = 0
+    for path in FILES_DIR.iterdir():
+        try:
+            age = now - path.stat().st_mtime
+        except OSError:
+            continue
+        if age < ORPHAN_FILE_TTL_SECONDS:
+            continue
+        if path.suffix == ".part":
+            path.unlink(missing_ok=True)
+            continue
+        if path.suffix == ".json" and path.stem not in referenced:
+            _file_path(path.stem).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+async def save_upload(request: Request) -> dict[str, Any]:
+    """以原始请求体流式保存一个附件，返回附件信息供随后发送消息。
+
+    文件名放在 x-file-name 头（URL 编码），图片尺寸放在 x-image-width / x-image-height 头。
+    """
+    try:
+        declared = int(request.headers.get("content-length", "0"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="上传长度格式无效") from exc
+    if declared > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="单个文件不能超过 100 MB")
+
+    name = _safe_file_name(request.headers.get("x-file-name", ""))
+    mime = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()[:100] or "application/octet-stream"
+    kind = "image" if mime in INLINE_IMAGE_TYPES else "file"
+    file_id = uuid.uuid4().hex
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
+    cleanup_orphan_files()
+
+    temp_path = FILES_DIR / f"{file_id}.part"
+    size = 0
+    try:
+        with temp_path.open("wb") as output:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > MAX_ATTACHMENT_BYTES:
+                    raise HTTPException(status_code=413, detail="单个文件不能超过 100 MB")
+                output.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail="不能发送空文件")
+        os.replace(temp_path, _file_path(file_id))
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    meta: dict[str, Any] = {
+        "id": file_id,
+        "name": name,
+        "size": size,
+        "mime": mime,
+        "kind": kind,
+        "uploaded_at": time.time(),
+    }
+    width = _image_side(request.headers.get("x-image-width"))
+    height = _image_side(request.headers.get("x-image-height"))
+    if kind == "image" and width and height:
+        meta["width"] = width
+        meta["height"] = height
+    _meta_path(file_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return _public_attachment(meta)
+
+
+def file_response_info(file_id: str, download: bool) -> tuple[Path, str, str, str]:
+    """返回 (路径, 媒体类型, 文件名, 展示方式)。
+
+    只有常见位图且未要求下载时才内联显示，其余一律以 application/octet-stream 强制下载。
+    """
+    meta = _read_file_meta(file_id)
+    inline = meta.get("kind") == "image" and meta.get("mime") in INLINE_IMAGE_TYPES and not download
+    media_type = str(meta["mime"]) if inline else "application/octet-stream"
+    return _file_path(file_id), media_type, str(meta.get("name") or "file"), "inline" if inline else "attachment"

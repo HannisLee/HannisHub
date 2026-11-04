@@ -98,8 +98,15 @@ export function isFromOthers(message: ChatRoomMessage, clientId: string): boolea
 
 let toastTimer: number | undefined;
 
+/** 提示条与预览使用的消息摘要：附件显示为「[图片]」或「[文件] 名称」 */
+export function messagePreview(message: ChatRoomMessage): string {
+  if (message.content) return message.content;
+  if (message.attachment) return message.attachment.kind === "image" ? "[图片]" : `[文件] ${message.attachment.name}`;
+  return "";
+}
+
 export function showChatToast(message: ChatRoomMessage) {
-  emit({ toast: { id: message.id, nickname: message.nickname, content: message.content } });
+  emit({ toast: { id: message.id, nickname: message.nickname, content: messagePreview(message) } });
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => emit({ toast: null }), 6000);
 }

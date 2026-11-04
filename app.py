@@ -349,6 +349,30 @@ async def chat_room_profile(payload: dict[str, Any] = Body(...)):
     return JSONResponse(await run_in_threadpool(chat_room.save_profile, payload))
 
 
+@app.post("/api/chat-room/files")
+async def chat_room_upload(request: Request):
+    """以原始请求体上传聊天室附件（不超过 100 MB），文件名放在 x-file-name 头。"""
+    return JSONResponse(await chat_room.save_upload(request))
+
+
+@app.get("/api/chat-room/files/{file_id}")
+async def chat_room_file(file_id: str, download: bool = Query(False)):
+    """读取聊天室附件：常见位图内联显示，其余类型或 download=true 时强制下载。"""
+    path, media_type, filename, disposition = chat_room.file_response_info(file_id, download)
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        content_disposition_type=disposition,
+        headers={
+            # 附件编号随机且内容不变，可长期缓存；禁止内容嗅探并以沙箱方式打开
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+        },
+    )
+
+
 @app.post("/api/chat-room/messages")
 async def chat_room_post(payload: dict[str, Any] = Body(...)):
     """以昵称发送一条聊天室消息。"""
