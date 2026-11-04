@@ -188,6 +188,14 @@ export function ChatRoom() {
     if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
   }, [messages]);
 
+  // 输入框随内容自动增高（上限由 CSS max-height 控制）
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight + 2}px`;
+  }, [draft]);
+
   // 点击表情面板外部或按 Esc 时关闭
   useEffect(() => {
     if (!emojiOpen) return;
@@ -391,7 +399,7 @@ export function ChatRoom() {
           onChange={event => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder="输入消息，Enter 发送，Shift + Enter 换行"
-          rows={2}
+          rows={1}
         />
         <div className="chat-emoji-anchor" ref={emojiRef}>
           <button type="button" className={`chat-emoji-toggle${emojiOpen ? " chat-toolbar-active" : ""}`} onClick={() => setEmojiOpen(open => !open)} aria-label="表情" aria-expanded={emojiOpen}>
