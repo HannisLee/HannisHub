@@ -3,7 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import unquote
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
@@ -341,9 +341,13 @@ async def chat_room_messages(
     limit: int = Query(200, ge=1, le=500),
     client_id: str = Query("", max_length=64),
     profiles_version: int = Query(-1),
+    read_up_to: int = Query(0, ge=0),
+    reads_version: Optional[int] = Query(None),
 ):
-    """拉取聊天室消息与在线列表；携带 client_id 时同时作为在线心跳。"""
-    return JSONResponse(await run_in_threadpool(chat_room.list_messages, after, limit, client_id, profiles_version))
+    """拉取聊天室消息与在线列表；携带 client_id 时同时作为在线心跳，并可上报已读位置、获取已读回执。"""
+    return JSONResponse(await run_in_threadpool(
+        chat_room.list_messages, after, limit, client_id, profiles_version, read_up_to, reads_version,
+    ))
 
 
 @app.put("/api/chat-room/profile")

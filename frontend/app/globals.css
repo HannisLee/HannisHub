@@ -939,6 +939,17 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-message-meta strong { color: var(--color-text-secondary); font-weight: 500; }
 .chat-bubble { padding: var(--space-3) var(--space-4); border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-bg); color: var(--color-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-row-mine .chat-bubble { border-color: var(--color-border); background: var(--color-surface-hover); }
+.chat-receipt { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 12px; line-height: 1; cursor: pointer; }
+.chat-receipt:hover { color: var(--color-text-secondary); }
+.chat-receipt-all { color: var(--color-success); }
+.chat-receipt-pie { width: 14px; height: 14px; flex: 0 0 auto; }
+.chat-receipt-ring { fill: none; stroke: var(--color-brand); stroke-width: 1.5; }
+.chat-receipt-fill { fill: var(--color-brand); }
+.chat-receipt-done circle { fill: var(--color-success); }
+.chat-receipt-done path { fill: none; stroke: var(--color-bg); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.chat-receipt-dialog { display: grid; gap: var(--space-4); width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 560px); overflow-y: auto; padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.chat-receipt-heading { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 500; }
+.chat-receipt-members { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
 .chat-composer { position: relative; display: flex; align-items: flex-end; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-divider); }
 .chat-composer textarea { flex: 1 1 auto; height: 42px; min-height: 42px; max-height: 200px; padding-block: 10px; line-height: 20px; resize: none; overflow-y: auto; }
 .chat-composer > .button { flex: 0 0 auto; white-space: nowrap; }

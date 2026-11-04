@@ -11,7 +11,7 @@ import {
   setChatSoundEnabled,
 } from "../../lib/chat-notify";
 import { errorMessage, formatBytes } from "../../lib/format";
-import type { AuthStatus, ChatAttachment, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../lib/types";
+import type { AuthStatus, ChatAttachment, ChatReceipt, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button, ErrorState, LoadingState } from "../ui/primitives";
 import { useChatNotify } from "./chat-watcher";
@@ -134,8 +134,32 @@ function Avatar({ nickname, avatar, size = "md" }: { nickname: string; avatar?: 
   return <span className={className} aria-hidden="true">{avatar || (Array.from(nickname.trim())[0] ?? "?").toUpperCase()}</span>;
 }
 
+/** 已读状态图标：全部已读为带勾的实心圆，否则为按已读比例填充的饼图 */
+function ReadPie({ read, total }: { read: number; total: number }) {
+  if (total > 0 && read >= total) {
+    return (
+      <svg className="chat-receipt-pie chat-receipt-done" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" />
+        <path d="M4.8 8.2 7 10.4 11.2 5.8" />
+      </svg>
+    );
+  }
+  const ratio = total > 0 ? read / total : 0;
+  const angle = ratio * Math.PI * 2;
+  const x = 8 + 4.5 * Math.sin(angle);
+  const y = 8 - 4.5 * Math.cos(angle);
+  return (
+    <svg className="chat-receipt-pie" viewBox="0 0 16 16" aria-hidden="true">
+      <circle className="chat-receipt-ring" cx="8" cy="8" r="6.5" />
+      {ratio > 0 ? <path className="chat-receipt-fill" d={`M8 8 L8 3.5 A4.5 4.5 0 ${ratio > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)} Z`} /> : null}
+    </svg>
+  );
+}
+
 /** 一行可渲染的消息：服务端消息或本地待发送消息 */
 interface DisplayMessage {
+  /** 服务端消息编号；本地待发送消息没有 */
+  id?: number;
   key: string;
   senderKey: string;
   mine: boolean;
@@ -174,10 +198,14 @@ export function ChatRoom() {
   const [newBelow, setNewBelow] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; name: string; download?: string } | null>(null);
+  const [receipts, setReceipts] = useState<Record<string, ChatReceipt>>({});
+  const [receiptOpen, setReceiptOpen] = useState<number | null>(null);
   const { soundEnabled } = useChatNotify();
 
   const lastIdRef = useRef(0);
   const profilesVersionRef = useRef(-1);
+  const readsVersionRef = useRef(-1);
+  const reportedReadRef = useRef(0);
   const clientIdRef = useRef("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -233,13 +261,32 @@ export function ChatRoom() {
     if (!stickToBottomRef.current) setNewBelow(count => count + fromOthers.length);
   }, [isWatching, updatePending]);
 
+  /** 当前真正看到的最后一条服务端消息编号：页面可见时，取列表可视区域内最靠下的那条；否则为 0 */
+  const visibleLastId = useCallback((): number => {
+    const box = listRef.current;
+    if (!box || document.visibilityState !== "visible") return 0;
+    const view = box.getBoundingClientRect();
+    const rows = box.querySelectorAll<HTMLElement>("[data-msg-id]");
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const rect = rows[index].getBoundingClientRect();
+      if (rect.top < view.bottom - 8 && rect.bottom > view.top) return Number(rows[index].dataset.msgId) || 0;
+    }
+    return 0;
+  }, []);
+
   const fetchMessages = useCallback(async () => {
+    const readUpTo = visibleLastId();
     const query = new URLSearchParams({
       after: String(lastIdRef.current),
       client_id: clientIdRef.current,
       profiles_version: String(profilesVersionRef.current),
+      reads_version: String(readsVersionRef.current),
     });
+    if (readUpTo > 0) query.set("read_up_to", String(readUpTo));
     const data = await apiFetch<ChatRoomMessages>(`${MESSAGES}?${query}`);
+    reportedReadRef.current = Math.max(reportedReadRef.current, readUpTo);
+    readsVersionRef.current = data.reads_version;
+    if (data.receipts) setReceipts(data.receipts);
     setOnline(data.online);
     if (data.profiles) setProfiles(data.profiles);
     profilesVersionRef.current = data.profiles_version;
@@ -247,7 +294,12 @@ export function ChatRoom() {
     if (data.total === 0) setMessages([]);
     else mergeMessages(data.messages, initializedRef.current);
     return data;
-  }, [mergeMessages]);
+  }, [mergeMessages, visibleLastId]);
+
+  /** 可见范围内出现了更新的消息时，立即上报已读而不必等下一次轮询 */
+  const syncRead = useCallback(() => {
+    if (visibleLastId() > reportedReadRef.current) fetchMessages().catch(() => undefined);
+  }, [fetchMessages, visibleLastId]);
 
   const saveProfile = useCallback(async (nickname: string, avatar: string) => {
     const saved = await apiFetch<ChatRoomProfile & { client_id: string }>(PROFILE, {
@@ -362,19 +414,35 @@ export function ChatRoom() {
     // 回到页面且停在底部时，视为已读
     const onVisible = () => {
       if (!document.hidden && stickToBottomRef.current) markChatRead(lastIdRef.current);
+      if (!document.hidden) syncRead();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [fetchMessages, saveProfile]);
+  }, [fetchMessages, saveProfile, syncRead]);
 
   // 停留在底部时，新消息（含本地待发送消息）自动滚动到底
   useEffect(() => {
     const box = listRef.current;
     if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
   }, [messages, pending]);
+
+  // 新消息渲染并滚动到位后，上报当前看到的位置作为已读
+  useEffect(() => {
+    syncRead();
+  }, [messages, loading, syncRead]);
+
+  // 已读详情按 Esc 关闭
+  useEffect(() => {
+    if (receiptOpen === null) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setReceiptOpen(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [receiptOpen]);
 
   // 输入框随内容自动增高（上限由 CSS max-height 控制）
   useEffect(() => {
@@ -419,6 +487,7 @@ export function ChatRoom() {
       setNewBelow(0);
       if (!document.hidden) markChatRead(lastIdRef.current);
     }
+    syncRead();
   }
 
   function jumpToLatest() {
@@ -585,6 +654,7 @@ export function ChatRoom() {
       const profile = message.client_id ? profiles[message.client_id] : undefined;
       const attachment = message.attachment;
       return {
+        id: message.id,
         key: `m-${message.id}`,
         senderKey: message.client_id ?? message.nickname,
         mine: message.client_id ? message.client_id === clientId : !!me && message.nickname === me.nickname,
@@ -651,6 +721,40 @@ export function ChatRoom() {
           {uploading ? <span className="chat-file-progress"><span style={{ width: `${progress}%` }} /></span> : null}
         </span>
         {download}
+      </div>
+    );
+  }
+
+  /** 自己消息下方的已读状态：饼图 + 文字，点击查看已读/未读名单 */
+  function renderReceipt(id: number) {
+    const receipt = receipts[String(id)];
+    const total = receipt.read.length + receipt.unread.length;
+    if (total === 0) return null;
+    const label = receipt.unread.length === 0 ? "全部已读" : `${receipt.unread.length} 人未读`;
+    return (
+      <button type="button" className={`chat-receipt${receipt.unread.length === 0 ? " chat-receipt-all" : ""}`} onClick={() => setReceiptOpen(id)} title={`${receipt.read.length}/${total} 人已读，点击查看详情`}>
+        <ReadPie read={receipt.read.length} total={total} />
+        {label}
+      </button>
+    );
+  }
+
+  const openReceipt = receiptOpen !== null ? receipts[String(receiptOpen)] : undefined;
+
+  function renderReceiptMembers(ids: string[]) {
+    if (ids.length === 0) return <p className="muted-line">无</p>;
+    return (
+      <div className="chat-receipt-members">
+        {ids.map(id => {
+          const profile = profiles[id];
+          const name = profile?.nickname ?? "未命名";
+          return (
+            <span key={id} className="chat-online-item">
+              <Avatar nickname={name} avatar={profile?.avatar} size="sm" />
+              {name}
+            </span>
+          );
+        })}
       </div>
     );
   }
@@ -741,12 +845,13 @@ export function ChatRoom() {
             const grouped = !!previous && previous.senderKey === message.senderKey && message.created_at - previous.created_at < 300;
             const status = message.pending?.status;
             return (
-              <div key={message.key} className={`chat-row${message.mine ? " chat-row-mine" : ""}${grouped ? " chat-row-grouped" : ""}`}>
+              <div key={message.key} data-msg-id={message.id} className={`chat-row${message.mine ? " chat-row-mine" : ""}${grouped ? " chat-row-grouped" : ""}`}>
                 {grouped ? <span className="chat-avatar-spacer" /> : <Avatar nickname={message.nickname} avatar={message.avatar} />}
                 <div className={`chat-message${status === "sending" ? " chat-message-sending" : ""}${status === "failed" ? " chat-message-failed" : ""}`}>
                   {grouped ? null : <span className="chat-message-meta"><strong>{message.nickname}</strong> · {formatTime(message.created_at)}</span>}
                   {renderAttachment(message)}
                   {message.content ? <div className="chat-bubble">{message.content}</div> : null}
+                  {message.mine && message.id !== undefined && receipts[String(message.id)] ? renderReceipt(message.id) : null}
                   {status === "failed" && message.pending ? (
                     <span className="chat-send-failed">
                       {message.pending.error ? `发送失败：${message.pending.error}` : "发送失败"}
@@ -789,6 +894,27 @@ export function ChatRoom() {
         </div>
         <Button onClick={send} disabled={!draft.trim() || !clientId}>发送</Button>
       </div>
+
+      {receiptOpen !== null ? (
+        <div className="chat-lightbox" role="dialog" aria-label="消息已读情况" onClick={() => setReceiptOpen(null)}>
+          <div className="chat-receipt-dialog" onClick={event => event.stopPropagation()}>
+            <p className="chat-panel-title">消息已读情况（按发送时最近 10 分钟内的最大在线人群统计）</p>
+            {openReceipt ? (
+              <>
+                <section>
+                  <h3 className="chat-receipt-heading">未读 · {openReceipt.unread.length}</h3>
+                  {renderReceiptMembers(openReceipt.unread)}
+                </section>
+                <section>
+                  <h3 className="chat-receipt-heading">已读 · {openReceipt.read.length}</h3>
+                  {renderReceiptMembers(openReceipt.read)}
+                </section>
+              </>
+            ) : <p className="muted-line">该消息的已读记录已不可用</p>}
+            <div className="form-actions"><Button size="sm" variant="quiet" onClick={() => setReceiptOpen(null)}>关闭</Button></div>
+          </div>
+        </div>
+      ) : null}
 
       {lightbox ? (
         <div className="chat-lightbox" role="dialog" aria-label={lightbox.name} onClick={() => setLightbox(null)}>

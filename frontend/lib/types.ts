@@ -484,6 +484,12 @@ export interface ChatRoomProfile {
   updated_at: number;
 }
 
+/** 一条自己发送的消息的已读回执：应读人群中已读与未读的 client_id */
+export interface ChatReceipt {
+  read: string[];
+  unread: string[];
+}
+
 export interface ChatRoomMessages {
   messages: ChatRoomMessage[];
   total: number;
@@ -492,6 +498,10 @@ export interface ChatRoomMessages {
   profiles_version: number;
   /** 仅在资料版本变化时返回 */
   profiles?: Record<string, ChatRoomProfile>;
+  /** 回执数据版本；请求携带的版本与之不同时才返回 receipts */
+  reads_version: number;
+  /** 自己最近发送的消息的已读回执，键为消息 id */
+  receipts?: Record<string, ChatReceipt>;
 }
 
 export interface AuthStatus {
