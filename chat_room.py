@@ -24,9 +24,9 @@ ROOT_DIR = Path(__file__).resolve().parent
 CHAT_ROOM_PATH = ROOT_DIR / "data" / "chat_room.json"
 FILES_DIR = ROOT_DIR / "data" / "chat_room_files"
 
-# 附件：单个文件上限 100 MB；只有常见位图会在页面内直接显示，
+# 附件：单个文件上限 50 MB；只有常见位图会在页面内直接显示，
 # SVG、HTML 等可能携带脚本的类型一律按普通文件强制下载
-MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
+MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 INLINE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 FILE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 MAX_FILE_NAME_CHARS = 200
@@ -314,7 +314,7 @@ async def save_upload(request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="上传长度格式无效") from exc
     if declared > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(status_code=413, detail="单个文件不能超过 100 MB")
+        raise HTTPException(status_code=413, detail=f"单个文件不能超过 {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB")
 
     name = _safe_file_name(request.headers.get("x-file-name", ""))
     mime = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()[:100] or "application/octet-stream"
@@ -332,7 +332,7 @@ async def save_upload(request: Request) -> dict[str, Any]:
                     continue
                 size += len(chunk)
                 if size > MAX_ATTACHMENT_BYTES:
-                    raise HTTPException(status_code=413, detail="单个文件不能超过 100 MB")
+                    raise HTTPException(status_code=413, detail=f"单个文件不能超过 {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB")
                 output.write(chunk)
         if size == 0:
             raise HTTPException(status_code=400, detail="不能发送空文件")

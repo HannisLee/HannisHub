@@ -24,7 +24,8 @@ const NICKNAME_KEY = "hannishub_chat_nickname";
 const POLL_MS = 2000;
 const SEND_TIMEOUT_MS = 15000;
 const AVATAR_SIZE = 96;
-const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_MB = 50;
+const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
 /** 与后端一致：只有这些位图在页面内显示，其余按文件发送 */
 const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const PRESET_AVATARS = ["🐱", "🐶", "🦊", "🐼", "🐸", "🐧", "🦄", "🐙", "🐳", "🌵", "🍀", "🌙"];
@@ -500,7 +501,7 @@ export function ChatRoom() {
         continue;
       }
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        problems.push(`「${file.name}」超过 100 MB`);
+        problems.push(`「${file.name}」超过 ${MAX_ATTACHMENT_MB} MB`);
         continue;
       }
       const nonce = randomHex(12);
@@ -761,7 +762,7 @@ export function ChatRoom() {
         {newBelow > 0 ? (
           <button type="button" className="chat-new-below" onClick={jumpToLatest}>↓ {newBelow} 条新消息</button>
         ) : null}
-        {dragging ? <div className="chat-drop-hint">松开即可发送图片或文件（单个不超过 100 MB）</div> : null}
+        {dragging ? <div className="chat-drop-hint">松开即可发送图片或文件（单个不超过 {MAX_ATTACHMENT_MB} MB）</div> : null}
       </div>
 
       {error ? <ErrorState message={error} /> : null}
@@ -777,7 +778,7 @@ export function ChatRoom() {
           rows={1}
         />
         <input ref={fileInputRef} type="file" multiple hidden onChange={onPickFiles} />
-        <button type="button" className="chat-emoji-toggle" onClick={() => fileInputRef.current?.click()} aria-label="发送图片或文件" title="发送图片或文件（不超过 100 MB）">
+        <button type="button" className="chat-emoji-toggle" onClick={() => fileInputRef.current?.click()} aria-label="发送图片或文件" title={`发送图片或文件（不超过 ${MAX_ATTACHMENT_MB} MB）`}>
           <Icon name="attach" />
         </button>
         <div className="chat-emoji-anchor" ref={emojiRef}>

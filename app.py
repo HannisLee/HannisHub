@@ -351,7 +351,7 @@ async def chat_room_profile(payload: dict[str, Any] = Body(...)):
 
 @app.post("/api/chat-room/files")
 async def chat_room_upload(request: Request):
-    """以原始请求体上传聊天室附件（不超过 100 MB），文件名放在 x-file-name 头。"""
+    """以原始请求体上传聊天室附件（不超过 50 MB），文件名放在 x-file-name 头。"""
     return JSONResponse(await chat_room.save_upload(request))
 
 

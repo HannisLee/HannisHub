@@ -81,7 +81,7 @@ HannisHub/
 - `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口，设置中可修改昵称和头像（昵称首字母、12 个预设 emoji 或上传图片，图片在浏览器内居中裁剪并压缩为 96×96 JPEG）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入时自动以本地昵称或登录账号名建立资料。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
   - 乐观发送：按回车后消息立即以半透明显示在本地并清空输入框，后台按输入顺序逐条发送；请求携带客户端生成的 `nonce`，成功或被轮询确认后替换为服务端消息；15 秒超时或失败时标红并提供“重试 / 删除”。服务端对同一浏览器的同一 `nonce` 只保存一次，重试不会产生重复消息
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
-  - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 100 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
+  - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 50 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -154,7 +154,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
 | GET | `/api/chat-room/messages?after=<id>&limit=<n>&client_id=<id>&profiles_version=<v>` | 拉取聊天室消息；`after` 为 0 时返回最近 `limit` 条（默认 200，最多 500），大于 0 时只返回更新的消息；携带 `client_id` 时记录在线心跳；返回 `total`、在线 `online` 列表与 `profiles_version`，版本与请求不同时附带完整 `profiles` 资料表 |
 | PUT | `/api/chat-room/profile` | 接收 `client_id`、`nickname`（最多 24 字）与 `avatar`（空、最多 16 字的 emoji 文本，或不超过 120,000 字符的 png/jpeg/webp base64 data URL）保存当前浏览器资料；最多 500 份 |
-| POST | `/api/chat-room/files` | 以原始请求体上传附件（不超过 100 MB），文件名放在 URL 编码的 `x-file-name` 头，图片可附带 `x-image-width` / `x-image-height`；返回附件信息 `{id, name, size, mime, kind, width?, height?}`。PNG / JPEG / GIF / WebP 记为 `image`，其余（含 SVG、HTML）记为 `file` |
+| POST | `/api/chat-room/files` | 以原始请求体上传附件（不超过 50 MB），文件名放在 URL 编码的 `x-file-name` 头，图片可附带 `x-image-width` / `x-image-height`；返回附件信息 `{id, name, size, mime, kind, width?, height?}`。PNG / JPEG / GIF / WebP 记为 `image`，其余（含 SVG、HTML）记为 `file` |
 | GET | `/api/chat-room/files/{id}?download=<bool>` | 读取附件：`image` 且未要求下载时以原类型内联显示，其余一律以 `application/octet-stream` 附件下载；带 `nosniff`、沙箱 CSP 与长期私有缓存头 |
 | POST | `/api/chat-room/messages` | 接收 `client_id`、`content`（最多 4,000 字）、可选 `nonce`（8-64 位字母数字）与可选 `attachment_id` 追加一条消息（有附件时文字可为空），同一浏览器重复的 `nonce` 直接返回已有消息，昵称取已保存的资料（无资料时使用请求中的 `nickname`）；最多保留最近 10,000 条 |
 | DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
