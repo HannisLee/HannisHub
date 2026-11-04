@@ -348,6 +348,7 @@ export interface AsrRecord {
 
 export interface AsrInfo {
   ok: boolean;
+  ready: boolean;
   pid: number;
   name: string;
   max_chunk_seconds: number;

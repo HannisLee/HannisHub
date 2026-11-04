@@ -124,6 +124,8 @@ ASR_DEFAULT_EXTRACTION_PROMPT = (
 _asr_history_lock = threading.RLock()
 ASR_JOB_DIR = APP_DIR / "data" / "asr_jobs"
 ASR_MAX_CONCURRENT_TASKS = 1
+ASR_READY_TIMEOUT_SECONDS = 15 * 60
+ASR_READY_POLL_SECONDS = 2
 _asr_task_semaphore = threading.Semaphore(ASR_MAX_CONCURRENT_TASKS)
 _asr_background_tasks: set[asyncio.Task] = set()
 
@@ -1805,8 +1807,29 @@ def _asr_upload_suffix(filename: str) -> str:
     return ".bin"
 
 
+def _wait_for_asr_ready(on_progress=None) -> dict:
+    """等待唯一受管 ASR 的健康接口就绪，避免模型初始化期间发起转写。"""
+    if on_progress:
+        on_progress("queued", 0, "正在等待 ASR 服务初始化完成")
+    deadline = time.monotonic() + ASR_READY_TIMEOUT_SECONDS
+    with httpx.Client(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
+        while True:
+            try:
+                item = _get_asr_service_item()
+                port = int(item.get("port") or 0)
+                if port and client.get(f"http://127.0.0.1:{port}/health").is_success:
+                    return item
+            except (HTTPException, httpx.HTTPError, ValueError, TypeError):
+                pass
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("等待 ASR 服务就绪超时，请检查服务进程和日志；原始音频已保留")
+            time.sleep(min(ASR_READY_POLL_SECONDS, remaining))
+
+
 def _transcribe_qwen3_asr(item: dict, input_path: Path, work_dir: Path, on_progress=None) -> dict:
-    """按时长和实际文件大小切片，再逐片请求本机 Qwen3-ASR 服务。"""
+    """等待服务就绪后，按时长和大小切片并逐片请求本机 ASR。"""
+    item = _wait_for_asr_ready(on_progress)
     if on_progress:
         on_progress("processing", 0, "正在读取音频信息")
     total_duration = _asr_probe_duration(input_path)
@@ -2112,7 +2135,6 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
         report_progress = _make_asr_progress_reporter(record_id)
         completed = False
         try:
-            report_progress("processing", 0, "任务已开始，正在等待 FFmpeg 处理")
             result = _transcribe_qwen3_asr(item, input_path, work_dir, report_progress)
             _complete_asr_history_record(record_id, result)
             completed = True
@@ -2138,30 +2160,8 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
                             pass
 
 
-async def _wait_for_running_asr_service():
-    """等待受管 ASR 进程出现，并确认其 HTTP 接口完成启动。"""
-    while True:
-        try:
-            item = _get_asr_service_item()
-        except HTTPException as exc:
-            if exc.status_code in (404, 409):
-                await asyncio.sleep(5 if exc.status_code == 404 else 15)
-                continue
-            raise
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
-                response = await client.get(f"http://127.0.0.1:{int(item['port'])}/health")
-            if response.is_success:
-                return item
-        except httpx.HTTPError:
-            pass
-        await asyncio.sleep(2)
-
-
 async def recover_interrupted_asr_tasks():
-    """等待本机 ASR 可用后，继续服务重启前未完成的转写任务。"""
-    item = await _wait_for_running_asr_service()
-
+    """扫描服务重启前未完成的任务，重新排队并等待 ASR 就绪。"""
     recoverable = []
     with _asr_history_lock:
         records = _load_asr_history()
@@ -2189,7 +2189,7 @@ async def recover_interrupted_asr_tasks():
         _write_asr_history(records)
 
     for record_id, input_path, work_dir in recoverable:
-        task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, record_id, item, input_path, work_dir))
+        task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, record_id, {}, input_path, work_dir))
         _asr_background_tasks.add(task)
         task.add_done_callback(_asr_background_tasks.discard)
     return len(recoverable)
@@ -2395,8 +2395,17 @@ async def update_asr_extraction_settings(body: dict = None):
 async def get_qwen3_asr_info():
     """获取固定 ASR 页面所需的唯一实例信息。"""
     item = _get_asr_service_item()
+    ready = False
+    try:
+        port = int(item.get("port") or 0)
+        if port:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=1.0)) as client:
+                ready = (await client.get(f"http://127.0.0.1:{port}/health")).is_success
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
     return JSONResponse({
         "ok": True,
+        "ready": ready,
         "pid": item["pid"],
         "name": item["display_name"],
         "max_chunk_seconds": ASR_MAX_CHUNK_SECONDS,
@@ -2406,7 +2415,6 @@ async def get_qwen3_asr_info():
 @app.post("/api/asr/transcriptions")
 async def transcribe_with_qwen3_asr(request: Request):
     """接收一个音频文件，创建历史记录并在后台队列转写。"""
-    item = _get_asr_service_item()
     filename = unquote(request.headers.get("x-audio-filename", "audio"))
     filename = Path(filename).name
     suffix = _asr_upload_suffix(filename)
@@ -2465,7 +2473,7 @@ async def transcribe_with_qwen3_asr(request: Request):
             shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"保存上传音频失败：{str(exc)[:500]}") from exc
 
-    task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, history_record["id"], item, input_path, work_dir))
+    task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, history_record["id"], {}, input_path, work_dir))
     _asr_background_tasks.add(task)
     task.add_done_callback(_asr_background_tasks.discard)
     return JSONResponse({"ok": True, "record": history_record}, status_code=202)

@@ -59,7 +59,14 @@ export function AsrPanel() {
       }
     } catch (value) { setError(errorMessage(value)); }
   }
-  useEffect(() => { void load(); const timer = window.setInterval(() => void apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`).then(data => setRecords(data.records || [])).catch(() => {}), 3000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => {
+      void apiFetch<{ records: AsrRecord[] }>(`${API_PATHS.llama}/asr/history`).then(data => setRecords(data.records || [])).catch(() => {});
+      void apiFetch<AsrInfo>(`${API_PATHS.llama}/asr`).then(setInfo).catch(() => setInfo(null));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
@@ -95,8 +102,10 @@ export function AsrPanel() {
         try {
           const nextInfo = await apiFetch<AsrInfo>(`${API_PATHS.llama}/asr`);
           setInfo(nextInfo);
-          setStatus(`${defaultService.name} 已启动（PID ${nextInfo.pid}）`);
-          return;
+          if (nextInfo.ready) {
+            setStatus(`${defaultService.name} 已就绪（PID ${nextInfo.pid}）`);
+            return;
+          }
         } catch {
           // ASR 服务加载模型需要时间，继续等待。
         }
@@ -192,7 +201,7 @@ export function AsrPanel() {
     <div className="stack-grid">
       <Card>
         <CardHeader title="ASR 服务" description={`当前由模型管理模块发现的唯一 ASR 实例；提炼模型：${aiModel || "未配置"}`} />
-        {info ? <div className="asr-service"><Badge tone="success">可用</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : defaultService ? (
+        {info ? <div className="asr-service"><Badge tone={info.ready ? "success" : "warning"}>{info.ready ? "可用" : "初始化中"}</Badge><strong>{info.name}</strong><span>PID {info.pid} · 单段最长 {info.max_chunk_seconds} 秒</span><Button variant="secondary" size="sm" onClick={() => window.open(`${API_PATHS.llama.replace("/api", "")}/asr`, "_blank")}>打开独立页面</Button></div> : defaultService ? (
           <div className="asr-service">
             <Badge tone="warning">未运行</Badge>
             <strong>{defaultService.name}</strong>
