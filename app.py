@@ -24,6 +24,7 @@ from auth import (
     record_login_failure,
 )
 import ai_settings
+import chat_room
 import llama_manager.app as llama_manager_app
 from file_manager import (
     add_favorite,
@@ -241,6 +242,12 @@ async def files_point_clouds_page():
     return await _new_frontend_route("files/point-clouds")
 
 
+@app.get("/chat", include_in_schema=False)
+@app.get("/chat/", include_in_schema=False)
+async def chat_page():
+    return await _new_frontend_route("chat")
+
+
 @app.get("/point-clouds", include_in_schema=False)
 @app.get("/point-clouds/", include_in_schema=False)
 async def point_clouds_page():
@@ -305,6 +312,42 @@ async def test_ai_model(payload: dict[str, Any] = Body(...)):
 async def read_ai_usage(config_id: str | None = None):
     """查询 AI 配置的剩余用量；无用量接口的服务返回不支持说明。"""
     return JSONResponse(await ai_settings.get_ai_usage_summaries(config_id))
+
+
+@app.get("/api/chat-room/conversations")
+async def chat_room_conversations():
+    """列出聊天室会话摘要，按更新时间倒序。"""
+    return JSONResponse(await run_in_threadpool(chat_room.list_conversations))
+
+
+@app.post("/api/chat-room/conversations")
+async def chat_room_create(payload: dict[str, Any] = Body(default_factory=dict)):
+    """新建聊天室会话，可指定标题与 AI 配置。"""
+    return JSONResponse(await run_in_threadpool(chat_room.create_conversation, payload))
+
+
+@app.get("/api/chat-room/conversations/{conversation_id}")
+async def chat_room_detail(conversation_id: str):
+    """读取单个会话的完整消息。"""
+    return JSONResponse(await run_in_threadpool(chat_room.get_conversation, conversation_id))
+
+
+@app.patch("/api/chat-room/conversations/{conversation_id}")
+async def chat_room_update(conversation_id: str, payload: dict[str, Any] = Body(...)):
+    """修改会话标题或绑定的 AI 配置。"""
+    return JSONResponse(await run_in_threadpool(chat_room.update_conversation, conversation_id, payload))
+
+
+@app.delete("/api/chat-room/conversations/{conversation_id}")
+async def chat_room_delete(conversation_id: str):
+    """删除会话。"""
+    return JSONResponse(await run_in_threadpool(chat_room.delete_conversation, conversation_id))
+
+
+@app.post("/api/chat-room/conversations/{conversation_id}/messages")
+async def chat_room_send(conversation_id: str, payload: dict[str, Any] = Body(...)):
+    """发送消息并返回包含 AI 回复的完整会话。"""
+    return JSONResponse(await chat_room.send_message(conversation_id, payload))
 
 
 @app.get("/api/file-manager/settings")

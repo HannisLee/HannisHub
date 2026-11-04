@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -17,6 +17,7 @@ const paths: Record<IconName, ReactNode> = {
   documents: <><path d="M6 3.5h8l4 4v13H6a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z" /><path d="M14 3.5v4h4M8 12h8M8 16h6" /></>,
   pointcloud: <><circle cx="6" cy="8" r="1.5" /><circle cx="12" cy="5" r="1.5" /><circle cx="18" cy="9" r="1.5" /><circle cx="9" cy="16" r="1.5" /><circle cx="16" cy="18" r="1.5" /><path d="m7.25 8.75 3.5-2.5m2.5.25 3.5 1.75m-8.5 6.5 1.5-5m2.5 7 3.5-6" /></>,
   panelCollapse: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m16.5 9.5-2.75 2.5 2.75 2.5" /></>,
+  chat: <><path d="M4 5.5h11v8H8.5L5 16.5v-3H4z" /><path d="M15 9h5v8h-1v3l-3.5-3H10v-3.5" /></>,
   panelExpand: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m14 9.5 2.75 2.5L14 14.5" /></>,
 };
 

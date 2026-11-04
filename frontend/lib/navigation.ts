@@ -15,6 +15,7 @@ export interface NavGroup {
 
 export const navigation: NavGroup[] = [
   { label: "总览", items: [{ href: "/", label: "Overview", title: "总览", icon: "overview" }] },
+  { label: "聊天室", items: [{ href: "/chat", label: "聊天室", icon: "chat" }] },
   {
     label: "模型管理",
     items: [

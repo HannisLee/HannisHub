@@ -24,6 +24,7 @@ HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
+├── chat_room.py              # 聊天室组件：多会话 AI 对话，存储于 data/chat_room.json（不入库）
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
 ├── point_cloud.py            # 旧版点云文件读取接口兼容层
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
@@ -75,6 +76,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
+- `/chat`：聊天室，左侧会话列表、右侧消息流；使用「AI 能力」中的 OpenAI 兼容配置回复，会话可单独绑定配置，默认跟随当前启用配置
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -104,6 +106,7 @@ HannisHub/
 | `frontend/components/llama/` | 推理服务、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件 |
+| `frontend/components/chat/` | 聊天室会话列表、消息流与输入框组件 |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
@@ -140,6 +143,12 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/ai-settings/models` | 接收 `config_id`，探查指定 OpenAI 兼容接口的模型，并与手工维护列表合并持久保存 |
 | POST | `/api/ai-settings/model-test` | 接收 `config_id` 与 `model`，使用指定配置发送一次最小对话请求验证模型可用性 |
 | GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
+| GET | `/api/chat-room/conversations` | 列出聊天室会话摘要（标题、绑定配置、消息数、末条预览），按更新时间倒序 |
+| POST | `/api/chat-room/conversations` | 新建会话，可选 `title`、`config_id`；最多 200 个会话 |
+| GET | `/api/chat-room/conversations/{id}` | 读取单个会话的完整消息 |
+| PATCH | `/api/chat-room/conversations/{id}` | 修改会话 `title` 或绑定的 `config_id`（空字符串表示跟随当前启用配置） |
+| DELETE | `/api/chat-room/conversations/{id}` | 删除会话 |
+| POST | `/api/chat-room/conversations/{id}/messages` | 接收 `content`，保存用户消息后携带最近 40 条上下文请求 AI，保存并返回含回复的完整会话；AI 失败时用户消息保留 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |

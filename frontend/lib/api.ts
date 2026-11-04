@@ -4,6 +4,7 @@ export const API_PATHS = {
   hub: "/api",
   fileManager: "/api/file-manager",
   aiSettings: "/api/ai-settings",
+  chatRoom: "/api/chat-room",
   llama: "/llama-manager/api",
   server: "/server/api",
   prompts: "/prompt/api",

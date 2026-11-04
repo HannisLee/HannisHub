@@ -18,3 +18,4 @@ frontend/.next/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 frontend/.eslintcache
+data/
