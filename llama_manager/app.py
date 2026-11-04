@@ -38,6 +38,7 @@ import psutil
 import tqdm as _tqdm_module
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 # ── 路径常量 ──────────────────────────────────────────────
 APP_DIR = Path(__file__).resolve().parent
@@ -2169,6 +2170,13 @@ async def recover_interrupted_asr_tasks():
             if record.get("status") not in ("uploading", "queued", "processing", "transcribing"):
                 continue
             record_id = str(record.get("id") or "")
+            if record.get("status") == "uploading":
+                record.update({
+                    "status": "error",
+                    "progress_detail": "上传中断",
+                    "error": "上传未完成，服务已重启；请重新上传原始文件",
+                })
+                continue
             work_dir = ASR_JOB_DIR / record_id
             suffix = _asr_upload_suffix(str(record.get("original_filename") or "audio"))
             input_path = work_dir / f"audio{suffix}"
@@ -2287,6 +2295,9 @@ def _delete_asr_history_record(record_id: str) -> dict:
                     pass
                 except OSError as exc:
                     raise HTTPException(status_code=500, detail="历史记录已删除，但清理转写文本失败") from exc
+            # 删除历史时同步清理中断上传或失败任务保留的文件。
+            if re.fullmatch(r"asr_[0-9a-f]{32}", record_id):
+                shutil.rmtree(ASR_JOB_DIR / record_id, ignore_errors=True)
             return _asr_history_snapshot(deleted_record)
     raise HTTPException(status_code=404, detail="转写历史不存在")
 
@@ -2450,12 +2461,24 @@ async def transcribe_with_qwen3_asr(request: Request):
                         last_upload_progress = progress
         if received == 0:
             raise HTTPException(status_code=400, detail="请选择要上传的音频文件")
+        if content_length > 0 and received != content_length:
+            raise HTTPException(status_code=400, detail="上传未完成，请重新上传原始文件")
         history_record = _update_asr_history_record(history_record["id"], {
             "status": "queued",
             "progress": 0,
             "progress_detail": "上传完成，正在等待转写队列",
             "error": None,
         })
+    except (ClientDisconnect, asyncio.CancelledError) as exc:
+        if "history_record" in locals():
+            _update_asr_history_record(history_record["id"], {
+                "status": "error",
+                "progress_detail": "上传中断",
+                "error": "上传连接已中断，请重新上传原始文件",
+            })
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        return JSONResponse({"ok": False, "detail": "上传连接已中断，请重新上传原始文件"}, status_code=400)
     except HTTPException:
         if "history_record" in locals():
             _update_asr_history_record(history_record["id"], {

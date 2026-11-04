@@ -8,6 +8,7 @@ import threading
 from types import SimpleNamespace
 
 import httpx
+from starlette.requests import Request
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,6 +84,46 @@ class AsrReadinessTests(unittest.TestCase):
 
 
 class AsrUploadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_disconnected_upload_is_marked_as_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            messages = iter([
+                {"type": "http.request", "body": b"part", "more_body": True},
+                {"type": "http.disconnect"},
+            ])
+            async def receive():
+                return next(messages)
+            request = Request({"type": "http", "method": "POST", "path": "/", "headers": [
+                (b"content-length", b"10"), (b"x-audio-filename", b"test.m4a"),
+            ]}, receive)
+            with patch.object(app, "ASR_HISTORY_DIR", root / "history"), \
+                    patch.object(app, "ASR_HISTORY_INDEX_PATH", root / "history" / "records.json"), \
+                    patch.object(app, "ASR_JOB_DIR", root / "jobs"):
+                response = await app.transcribe_with_qwen3_asr(request)
+                record = app._asr_history_snapshots()[0]
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(record["status"], "error")
+                self.assertIn("重新上传", record["error"])
+                partial = root / "jobs" / record["id"] / "audio.m4a"
+                self.assertEqual(partial.read_bytes(), b"part")
+                app._delete_asr_history_record(record["id"])
+                self.assertFalse(partial.exists())
+
+    async def test_cancelled_upload_is_marked_as_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            async def receive():
+                raise asyncio.CancelledError()
+            request = Request({"type": "http", "method": "POST", "path": "/", "headers": []}, receive)
+            with patch.object(app, "ASR_HISTORY_DIR", root / "history"), \
+                    patch.object(app, "ASR_HISTORY_INDEX_PATH", root / "history" / "records.json"), \
+                    patch.object(app, "ASR_JOB_DIR", root / "jobs"):
+                with self.assertRaises(asyncio.CancelledError):
+                    await app.transcribe_with_qwen3_asr(request)
+                record = app._asr_history_snapshots()[0]
+                self.assertEqual(record["status"], "error")
+                self.assertIn("重新上传", record["error"])
+
     async def test_upload_before_start_is_queued_until_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -157,6 +198,28 @@ class AsrRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(records[1]["status"], "error")
             self.assertEqual(records[2]["status"], "completed")
             self.assertEqual(processed[0][0], "asr_active")
+
+    async def test_interrupted_upload_is_not_recovered_as_complete_audio(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = root / "history"
+            history.mkdir()
+            job = root / "jobs" / "asr_upload"
+            job.mkdir(parents=True)
+            (job / "audio.m4a").write_bytes(b"partial")
+            (history / "records.json").write_text(json.dumps({"records": [
+                {"id": "asr_upload", "status": "uploading", "original_filename": "test.m4a"},
+            ]}), encoding="utf-8")
+            with patch.object(app, "ASR_HISTORY_DIR", history), \
+                    patch.object(app, "ASR_HISTORY_INDEX_PATH", history / "records.json"), \
+                    patch.object(app, "ASR_JOB_DIR", root / "jobs"), \
+                    patch.object(app, "_run_asr_history_task") as run:
+                self.assertEqual(await app.recover_interrupted_asr_tasks(), 0)
+                record = app._asr_history_snapshots()[0]
+                self.assertEqual(record["status"], "error")
+                self.assertIn("重新上传", record["error"])
+                run.assert_not_called()
+                self.assertEqual((job / "audio.m4a").read_bytes(), b"partial")
 
     def test_failed_task_keeps_original_audio_for_retry(self):
         with tempfile.TemporaryDirectory() as directory:

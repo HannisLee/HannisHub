@@ -68,6 +68,17 @@ export function AsrPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const uploading = uploads.some(item => item.status === "准备上传" || item.status === "正在上传");
+    if (!uploading) return;
+    const warnBeforeClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeClose);
+    return () => window.removeEventListener("beforeunload", warnBeforeClose);
+  }, [uploads]);
+
   async function upload(files: FileList | null) {
     if (!files?.length) return;
     const selected = Array.from(files);
@@ -217,7 +228,7 @@ export function AsrPanel() {
           onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); inputRef.current?.click(); } }}
           onDragOver={event => event.preventDefault()}
           onDrop={event => { event.preventDefault(); void upload(event.dataTransfer.files); }}
-        ><span className="upload-mark">↑</span><strong>拖入音频，或点击选择文件</strong><small>支持 FFmpeg 可以解码的常见音视频格式，单文件最大 4 GB。</small></div>
+        ><span className="upload-mark">↑</span><strong>拖入音频，或点击选择文件</strong><small>支持 FFmpeg 可以解码的常见音视频格式，单文件最大 4 GB。上传完成前请勿关闭页面。</small></div>
         {uploads.length ? <div className="upload-list">{uploads.map(item => <div className="upload-row" key={item.id}><div><strong>{item.name}</strong><span>{item.status} · {item.detail}</span></div><ProgressBar value={item.progress} /></div>)}</div> : null}
       </Card>
 
