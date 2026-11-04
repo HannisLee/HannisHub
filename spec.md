@@ -426,6 +426,16 @@ _download_lock   # 下载任务状态读写锁
 6. 「已注册服务」列表按 service_id 匹配受管进程：未运行显示「启动」，运行中提供停止/重启；只有命令识别到端口时才显示 Open
 
 **后台重启后的受管进程恢复：**
+### 常驻服务自动拉起
+
+- 已注册服务可带 `auto_start: true`（`custom_services.<id>.auto_start`，当前 ASR 与 OCR 已开启）。Hub 启动时随 lifespan 开启后台巡检，每 30 秒执行一次：
+  1. 该服务已有受管进程 → 无动作
+  2. 否则查找端口监听进程，若其自身或祖先命令行包含注册命令中的绝对路径（模型目录/启动脚本），视为非网页按钮启动（终端、systemd 等），自动纳入受管进程，网页可见、可停止
+  3. 否则若端口空闲 → 复用 `/api/start` 自动拉起；端口被其他进程占用则跳过，避免与同端口的其他服务冲突
+- 在网页点击「停止」的常驻服务，在本次后端运行期间不再自动拉起，网页点击启动/重启会解除；后端重启（含每日 05:00 系统重启）后恢复自动拉起
+- `llamamanager.service` 设置 `KillMode=process`，后端重启只终止自身，不再带走 ASR/OCR 等子进程；重启后由受管进程记录（PID + 创建时间）恢复
+- ASR 命令使用 `--gpu-memory-utilization 0.3 --max-model-len 16384`：16384 需覆盖单段最长 600 秒音频（约 7.5k 提示 + 最多 7.2k 补全）
+
 - 每次启动、停止、状态同步时，后端将受管进程元数据写入 `settings.json.managed_processes`
 - 后台服务器重启后首次读取状态/GPU/日志/代理时，加载 `settings.json.managed_processes`
 - 仅当记录中的 PID 仍存在且 `process_create_time` 与当前进程匹配时恢复为受管进程，避免 PID 复用导致误识别

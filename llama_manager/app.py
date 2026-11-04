@@ -4,6 +4,7 @@ HannisHub 模型管理子服务：本机模型与受管进程管理。
 """
 
 import asyncio
+import logging
 import csv
 import json
 import math
@@ -95,6 +96,7 @@ ASR_TARGET_CHUNK_BYTES = 16 * 1024 * 1024
 ASR_COMPLETION_TOKENS_PER_SECOND = 12
 ASR_MIN_COMPLETION_TOKENS = 256
 ASR_MAX_COMPLETION_TOKENS = 8192
+logger = logging.getLogger("uvicorn.error")
 SERVICE_CATEGORIES = {"asr", "llm", "ocr"}
 GPU_PROTECTED_PROCESS_NAMES = {
     "xorg",
@@ -764,6 +766,7 @@ def _normalize_custom_service(raw: dict) -> dict:
         "port": port,
         "gpu_indexes": _parse_gpu_indexes(raw.get("gpu_indexes", [])),
         "command": command,
+        "auto_start": bool(raw.get("auto_start", False)),
         "created_at": created_at,
     }
 
@@ -1693,6 +1696,132 @@ def _stop_process_internal(pid: Optional[int] = None, clear_log: bool = True) ->
         _clear_service_log()
 
     return ", ".join(stopped) if stopped else None
+
+
+# ── 常驻服务自动拉起 ──────────────────────────────────────
+AUTO_START_INTERVAL_SECONDS = 30
+# 用户在网页上手动停止的常驻服务，本次后端运行期间不再自动拉起；后端重启后恢复。
+_auto_start_paused: set[str] = set()
+
+
+def _adopt_external_service(service: dict) -> Optional[int]:
+    """识别不是由网页按钮启动的同一服务（如终端或 systemd 拉起），纳入受管进程。
+
+    判定依据：服务端口的监听进程，其自身或祖先进程的命令行包含注册命令里的绝对路径参数
+    （模型目录或启动脚本）。纳入时以满足条件的最上层祖先作为受管根进程。
+    """
+    port = service.get("port")
+    if not port:
+        return None
+    try:
+        tokens = shlex.split(service.get("command") or "")
+    except ValueError:
+        return None
+    markers = [t for t in tokens if t.startswith("/") and len(t) > 8]
+    if not markers:
+        return None
+    try:
+        conns = psutil.net_connections(kind="tcp")
+    except (psutil.AccessDenied, OSError):
+        return None
+    listeners = {c.pid for c in conns if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port and c.pid}
+    for lpid in listeners:
+        try:
+            chain = [psutil.Process(lpid)]
+            while len(chain) < 8:
+                parent = chain[-1].parent()
+                if parent is None or parent.pid <= 1:
+                    break
+                chain.append(parent)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        matched = []
+        for proc in chain:
+            try:
+                cmdline = " ".join(proc.cmdline())
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                break
+            if any(m in cmdline for m in markers):
+                matched.append(proc)
+            elif matched:
+                break
+        if not matched:
+            continue
+        root = matched[-1]
+        if root.pid in _managed_processes:
+            return root.pid
+        gpu_indexes = _parse_gpu_indexes(service.get("gpu_indexes") or [])
+        _managed_processes[root.pid] = {
+            "process": root,
+            "command": tokens,
+            "model": f"command:{service['id']}",
+            "display_name": service["name"],
+            "service_kind": "command",
+            "service_type": "command",
+            "service_category": service.get("service_category", "llm"),
+            "service_id": service["id"],
+            "host": "127.0.0.1",
+            "port": port,
+            "gpu_indexes": gpu_indexes,
+            "log_file": None,
+            "started_at": root.create_time(),
+            "process_create_time": root.create_time(),
+        }
+        _managed_process_records[root.pid] = _record_from_item(root.pid, _managed_processes[root.pid], running=True)
+        _save_managed_process_records_file()
+        logger.info("已识别外部启动的服务 %s（PID %s）", service["name"], root.pid)
+        return root.pid
+    return None
+
+
+async def ensure_auto_start_services():
+    """对标记 auto_start 的服务：已在运行则识别纳管，未运行则拉起。"""
+    for service in list(_load_custom_services().values()):
+        service_id = service.get("id")
+        if not service.get("auto_start") or service_id in _auto_start_paused:
+            continue
+        with _process_lock:
+            _sync_current_from_managed()
+            running = any(
+                item.get("service_id") == service_id and _is_process_running(item.get("process"))
+                for item in _managed_processes.values()
+            )
+            if not running:
+                running = await asyncio.to_thread(_adopt_external_service, service) is not None
+        if running:
+            continue
+        # 端口被其他进程占用时不强行启动，避免与别的服务（如 8085 上的 LLM）冲突
+        port = service.get("port")
+        if port and await asyncio.to_thread(_port_in_use, int(port)):
+            continue
+        try:
+            await start_server({"service_id": service_id})
+            logger.info("已自动拉起常驻服务 %s", service.get("name"))
+        except Exception as exc:
+            logger.warning("自动拉起 %s 失败: %s", service.get("name"), exc)
+
+
+def _port_in_use(port: int) -> bool:
+    """判断本机端口是否已有监听进程。"""
+    try:
+        return any(
+            c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port
+            for c in psutil.net_connections(kind="tcp")
+        )
+    except (psutil.AccessDenied, OSError):
+        return False
+
+
+async def auto_start_watchdog():
+    """后台循环：保证常驻服务持续运行。"""
+    while True:
+        try:
+            await ensure_auto_start_services()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("常驻服务巡检异常: %s", exc)
+        await asyncio.sleep(AUTO_START_INTERVAL_SECONDS)
 
 
 # ── Qwen3 ASR 音频转写 ────────────────────────────────────
@@ -2742,6 +2871,7 @@ async def start_server(body: dict = None):
     custom_service = _load_custom_services().get(service_id)
     if custom_service is None:
         raise HTTPException(status_code=400, detail=f"注册服务不存在: {service_id}")
+    _auto_start_paused.discard(service_id)
     command = str(custom_service.get("command") or "").strip()
     _command_tokens(command)
     port = custom_service.get("port")
@@ -2834,6 +2964,10 @@ async def stop_server(body: dict = None):
     pid = int(pid) if pid not in (None, "") else None
 
     with _process_lock:
+        # 网页手动停止的常驻服务本次运行期间不再自动拉起
+        for item in list(_managed_processes.values()):
+            if (pid is None or item["process"].pid == pid) and item.get("service_id"):
+                _auto_start_paused.add(item["service_id"])
         info = _stop_process_internal(pid=pid, clear_log=(pid is None))
         if info is None:
             return JSONResponse({"ok": True, "status": "already_stopped"})

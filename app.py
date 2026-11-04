@@ -1,5 +1,6 @@
 """HannisHub：综合管理站入口与登录网关。"""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -111,9 +112,11 @@ async def lifespan(_: FastAPI):
     await server_manager_app.start_scheduler()
     await prompt_service_app.audio_service.start()
     await llama_manager_app.recover_interrupted_asr_tasks()
+    auto_start_task = asyncio.create_task(llama_manager_app.auto_start_watchdog())
     try:
         yield
     finally:
+        auto_start_task.cancel()
         await prompt_service_app.audio_service.stop()
         await server_manager_app.stop_scheduler()
 
