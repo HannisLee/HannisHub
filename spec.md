@@ -76,7 +76,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
-- `/chat`：公共聊天室，单一共享消息窗口；发言前填写昵称（保存在浏览器 `localStorage` 键 `hannishub_chat_nickname`），与本机昵称相同的消息显示在右侧；每 2 秒按最后消息 id 增量拉取，用户停留在底部时自动滚动；支持二次确认后清空记录
+- `/chat`：公共聊天室，单一共享消息窗口，标题旁只显示记录条数；昵称默认取当前登录账号名，可修改并保存在浏览器 `localStorage` 键 `hannishub_chat_nickname`；与本机昵称相同的消息显示在右侧；每 2 秒按最后消息 id 增量拉取，用户停留在底部时自动滚动；页面不提供清空入口
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -145,7 +145,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
 | GET | `/api/chat-room/messages?after=<id>&limit=<n>` | 拉取聊天室消息；`after` 为 0 时返回最近 `limit` 条（默认 200，最多 500），大于 0 时只返回更新的消息；同时返回当前记录总数 `total` |
 | POST | `/api/chat-room/messages` | 接收 `nickname`（最多 24 字）与 `content`（最多 4,000 字）追加一条消息；最多保留最近 10,000 条 |
-| DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增 |
+| DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |

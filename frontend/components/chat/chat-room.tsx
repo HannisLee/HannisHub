@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage } from "../../lib/format";
-import type { ChatRoomMessage, ChatRoomMessages } from "../../lib/types";
-import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
+import type { AuthStatus, ChatRoomMessage, ChatRoomMessages } from "../../lib/types";
+import { Button, ErrorState, LoadingState } from "../ui/primitives";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
 const NICKNAME_KEY = "hannishub_chat_nickname";
@@ -41,7 +41,6 @@ export function ChatRoom() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
   const [error, setError] = useState("");
   const lastIdRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -77,6 +76,11 @@ export function ChatRoom() {
       // 在异步回调内读取本地昵称，避免静态导出时与服务端渲染不一致
       setNickname(readNickname());
       try {
+        // 未手动设置过昵称时，默认使用当前登录账号名
+        if (!readNickname()) {
+          const auth = await apiFetch<AuthStatus>("/api/auth/status").catch(() => null);
+          if (auth?.username) setNickname(current => current || auth.username || "");
+        }
         const data = await apiFetch<ChatRoomMessages>(MESSAGES);
         merge(data.messages);
       } catch (value) {
@@ -121,16 +125,6 @@ export function ChatRoom() {
     }
   }
 
-  async function clearAll() {
-    try {
-      await apiFetch(MESSAGES, { method: "DELETE" });
-      setMessages([]);
-      setConfirmClear(false);
-    } catch (value) {
-      setError(errorMessage(value));
-    }
-  }
-
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -145,24 +139,12 @@ export function ChatRoom() {
       <header className="chat-main-head">
         <div className="chat-main-heading">
           <h2 className="chat-main-title">聊天室</h2>
-          <span className="chat-main-meta">{messages.length} 条记录 · 每 2 秒刷新</span>
-        </div>
-        <div className="row-actions">
-          {confirmClear ? (
-            <>
-              <span className="muted-line">确认清空全部记录？</span>
-              <Button size="sm" variant="danger" onClick={() => void clearAll()}>清空</Button>
-              <Button size="sm" variant="quiet" onClick={() => setConfirmClear(false)}>取消</Button>
-            </>
-          ) : (
-            <Button size="sm" variant="quiet" onClick={() => setConfirmClear(true)} disabled={messages.length === 0}>清空记录</Button>
-          )}
+          <span className="chat-main-meta">{messages.length} 条记录</span>
         </div>
       </header>
 
       <div className="chat-messages" ref={listRef} onScroll={onScroll}>
         {loading ? <LoadingState label="正在读取聊天记录…" /> : null}
-        {!loading && messages.length === 0 ? <EmptyState title="还没有消息" detail="填写昵称后发出第一条消息。" /> : null}
         {messages.map((message, index) => {
           const mine = me !== "" && message.nickname === me;
           const grouped = index > 0 && messages[index - 1].nickname === message.nickname && message.created_at - messages[index - 1].created_at < 300;

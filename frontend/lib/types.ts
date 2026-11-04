@@ -464,3 +464,9 @@ export interface ChatRoomMessages {
   messages: ChatRoomMessage[];
   total: number;
 }
+
+export interface AuthStatus {
+  authenticated: boolean;
+  configured: boolean;
+  username?: string | null;
+}
