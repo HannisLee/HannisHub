@@ -34,6 +34,7 @@ _SETTINGS_LOCK = threading.RLock()
 _PASSWORD_HASHER = PasswordHash.recommended()
 _LOGIN_FAILURES: dict[str, deque[float]] = defaultdict(deque)
 _LOGIN_FAILURES_LOCK = threading.Lock()
+_DUMMY_HASH = _PASSWORD_HASHER.hash(secrets.token_urlsafe(16))
 MAX_LOGIN_FAILURES = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 5 * 60
 
@@ -93,43 +94,189 @@ def get_auth_config() -> dict[str, Any]:
     return ensure_auth_settings().get("auth", {})
 
 
+# ---------- 多用户 ----------
+# auth.users 为用户列表：{username, password_hash, created_at, session_version}。
+# 所有用户权限相同；session_version 在重置密码时递增，使该用户已有会话失效。
+
+USERNAME_MIN_CHARS = 3
+USERNAME_MAX_CHARS = 64
+PASSWORD_MIN_CHARS = 8
+MAX_USERS = 100
+
+# 中间件每个请求都要校验会话，按 settings.json 修改时间缓存用户表
+_users_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+
+
+def _users_unlocked(auth: dict[str, Any]) -> list[dict[str, Any]]:
+    """返回 auth.users，并把旧版单管理员字段迁移为第一个用户。"""
+    users = auth.get("users")
+    if not isinstance(users, list):
+        users = []
+        auth["users"] = users
+    legacy_name = str(auth.get("username") or "")
+    legacy_hash = str(auth.get("password_hash") or "")
+    if legacy_name and legacy_hash:
+        if not any(user.get("username") == legacy_name for user in users):
+            users.insert(0, {
+                "username": legacy_name,
+                "password_hash": legacy_hash,
+                "created_at": time.time(),
+                "session_version": 1,
+            })
+        auth.pop("username", None)
+        auth.pop("password_hash", None)
+    return users
+
+
+def migrate_legacy_admin() -> None:
+    """启动时把旧版单管理员配置迁移到用户列表。"""
+    with _SETTINGS_LOCK:
+        data = ensure_auth_settings()
+        auth = data["auth"]
+        if auth.get("username") or not isinstance(auth.get("users"), list):
+            _users_unlocked(auth)
+            _write_settings_unlocked(data)
+
+
+def _user_map() -> dict[str, dict[str, Any]]:
+    """读取用户名到用户记录的映射（带修改时间缓存）。"""
+    global _users_cache
+    try:
+        mtime = SETTINGS_PATH.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    if _users_cache and _users_cache[0] == mtime:
+        return _users_cache[1]
+    with _SETTINGS_LOCK:
+        auth = dict(get_auth_config())
+        users = _users_unlocked(auth)
+    mapping = {str(user.get("username")): user for user in users if user.get("username") and user.get("password_hash")}
+    _users_cache = (mtime, mapping)
+    return mapping
+
+
+def validate_username(username: str) -> str:
+    username = username.strip()
+    if not (USERNAME_MIN_CHARS <= len(username) <= USERNAME_MAX_CHARS) or any(char.isspace() for char in username):
+        raise ValueError(f"用户名需为 {USERNAME_MIN_CHARS}-{USERNAME_MAX_CHARS} 位，且不能包含空白字符")
+    return username
+
+
+def validate_password(password: str) -> str:
+    if len(password) < PASSWORD_MIN_CHARS:
+        raise ValueError(f"密码至少需要 {PASSWORD_MIN_CHARS} 位")
+    return password
+
+
 def is_configured() -> bool:
-    """判断是否已经完成管理员初始化。"""
-    auth = get_auth_config()
-    return bool(auth.get("username") and auth.get("password_hash"))
+    """判断是否已经创建至少一个用户。"""
+    return bool(_user_map())
 
 
 def configure_admin(username: str, password: str) -> None:
-    """初始化管理员账号，只允许在未配置时调用。"""
+    """首次启动时创建第一个用户，只允许在没有任何用户时调用。"""
     with _SETTINGS_LOCK:
         data = ensure_auth_settings()
-        auth = data.setdefault("auth", {})
-        if auth.get("username") and auth.get("password_hash"):
+        users = _users_unlocked(data["auth"])
+        if users:
             raise RuntimeError("管理员已经初始化")
-        auth["username"] = username
-        auth["password_hash"] = _PASSWORD_HASHER.hash(password)
+        users.append({
+            "username": username,
+            "password_hash": _PASSWORD_HASHER.hash(password),
+            "created_at": time.time(),
+            "session_version": 1,
+        })
         _write_settings_unlocked(data)
 
 
 def authenticate(username: str, password: str) -> bool:
-    """校验管理员账号密码。"""
-    auth = get_auth_config()
-    stored_hash = str(auth.get("password_hash") or "")
-    if not username or not stored_hash or username != str(auth.get("username") or ""):
+    """校验用户名与密码。"""
+    user = _user_map().get(username)
+    if not user:
+        # 对不存在的用户也做一次哈希计算，避免通过响应时间探测用户名
+        _PASSWORD_HASHER.verify(password, _DUMMY_HASH)
         return False
-    return _PASSWORD_HASHER.verify(password, stored_hash)
+    return _PASSWORD_HASHER.verify(password, str(user["password_hash"]))
 
 
-def change_password(current_password: str, new_password: str) -> None:
-    """修改管理员密码。"""
+def session_version(username: str) -> int | None:
+    """返回用户当前会话版本；用户不存在时返回 None。"""
+    user = _user_map().get(username)
+    return int(user.get("session_version") or 1) if user else None
+
+
+def list_users() -> list[dict[str, Any]]:
+    """返回用户公开信息，不含密码哈希。"""
+    return [
+        {"username": name, "created_at": user.get("created_at", 0)}
+        for name, user in _user_map().items()
+    ]
+
+
+def create_user(username: str, password: str) -> dict[str, Any]:
+    """新增用户。"""
+    username = validate_username(username)
+    validate_password(password)
     with _SETTINGS_LOCK:
         data = ensure_auth_settings()
-        auth = data.setdefault("auth", {})
-        stored_hash = str(auth.get("password_hash") or "")
-        if not stored_hash or not _PASSWORD_HASHER.verify(current_password, stored_hash):
-            raise ValueError("当前密码不正确")
-        auth["password_hash"] = _PASSWORD_HASHER.hash(new_password)
+        users = _users_unlocked(data["auth"])
+        if any(user.get("username") == username for user in users):
+            raise ValueError("用户名已存在")
+        if len(users) >= MAX_USERS:
+            raise ValueError(f"用户数量已达上限 {MAX_USERS}")
+        user = {
+            "username": username,
+            "password_hash": _PASSWORD_HASHER.hash(password),
+            "created_at": time.time(),
+            "session_version": 1,
+        }
+        users.append(user)
         _write_settings_unlocked(data)
+    return {"username": username, "created_at": user["created_at"]}
+
+
+def set_user_password(username: str, new_password: str) -> None:
+    """重置指定用户密码，并使其已有会话失效。"""
+    validate_password(new_password)
+    with _SETTINGS_LOCK:
+        data = ensure_auth_settings()
+        for user in _users_unlocked(data["auth"]):
+            if user.get("username") == username:
+                user["password_hash"] = _PASSWORD_HASHER.hash(new_password)
+                user["session_version"] = int(user.get("session_version") or 1) + 1
+                _write_settings_unlocked(data)
+                return
+    raise LookupError("用户不存在")
+
+
+def delete_user(username: str, operator: str) -> None:
+    """删除用户；不能删除自己，也不能删除最后一个用户。"""
+    if username == operator:
+        raise ValueError("不能删除当前登录的账号")
+    with _SETTINGS_LOCK:
+        data = ensure_auth_settings()
+        users = _users_unlocked(data["auth"])
+        remaining = [user for user in users if user.get("username") != username]
+        if len(remaining) == len(users):
+            raise LookupError("用户不存在")
+        if not remaining:
+            raise ValueError("至少需要保留一个用户")
+        data["auth"]["users"] = remaining
+        _write_settings_unlocked(data)
+
+
+def change_password(username: str, current_password: str, new_password: str) -> None:
+    """当前用户修改自己的密码。"""
+    if not authenticate(username, current_password):
+        raise ValueError("当前密码不正确")
+    set_user_password(username, new_password)
+
+
+def login_session(session: dict[str, Any], username: str) -> None:
+    """写入登录会话，记录用户名与会话版本。"""
+    session.clear()
+    session["user"] = username
+    session["ver"] = session_version(username) or 1
 
 
 def get_settings_section(name: str) -> Any:
@@ -152,9 +299,14 @@ def update_settings_section(name: str, value: Any) -> None:
 
 
 def current_username(session: dict[str, Any]) -> str | None:
-    """从会话中读取当前用户名。"""
+    """从会话中读取当前用户名；用户已删除或密码已重置时会话失效。"""
     value = session.get("user")
-    return str(value) if value else None
+    if not value:
+        return None
+    version = session_version(str(value))
+    if version is None or int(session.get("ver") or 1) != version:
+        return None
+    return str(value)
 
 
 def is_login_allowed(identifier: str) -> bool:

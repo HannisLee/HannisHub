@@ -484,3 +484,10 @@ export interface AuthStatus {
   configured: boolean;
   username?: string | null;
 }
+
+export interface HubUser {
+  username: string;
+  created_at: number;
+  /** 是否为当前登录账号 */
+  is_self: boolean;
+}

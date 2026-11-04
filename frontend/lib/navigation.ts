@@ -44,7 +44,13 @@ export const navigation: NavGroup[] = [
     ],
   },
   { label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
-  { label: "设置", items: [{ href: "/settings", label: "AI 能力", icon: "settings" }] },
+  {
+    label: "设置",
+    items: [
+      { href: "/settings", label: "AI 能力", icon: "settings" },
+      { href: "/settings/users", label: "用户管理", icon: "users" },
+    ],
+  },
 ];
 
 /** 取导航项对应的浏览器标签标题，未显式设置时使用导航标签 */
@@ -55,6 +61,7 @@ export function navTitle(item: NavItem): string {
 export function isActivePath(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   if (href === "/files") return pathname === "/files";
+  if (href === "/settings") return pathname === "/settings" || pathname === "/settings/";
   if (href === "/files/point-clouds" && pathname === "/point-clouds") return true;
   return pathname === href || pathname.startsWith(`${href}/`);
 }

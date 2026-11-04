@@ -17,11 +17,19 @@ from auth import (
     change_password,
     clear_login_failures,
     configure_admin,
+    create_user,
     current_username,
+    delete_user,
     ensure_auth_settings,
     is_configured,
     is_login_allowed,
+    list_users,
+    login_session,
+    migrate_legacy_admin,
     record_login_failure,
+    set_user_password,
+    validate_password,
+    validate_username,
 )
 import ai_settings
 import chat_room
@@ -115,6 +123,7 @@ app = FastAPI(title="HannisHub", lifespan=lifespan)
 # Starlette 会把最后添加的中间件放在最外层，因此 AuthMiddleware 可以读取已解析的会话。
 app.add_middleware(AuthMiddleware)
 _auth_settings = ensure_auth_settings().get("auth", {})
+migrate_legacy_admin()
 app.add_middleware(
     SessionMiddleware,
     secret_key=str(_auth_settings.get("session_secret")),
@@ -240,6 +249,12 @@ async def files_server_page():
 @app.get("/files/point-clouds/", include_in_schema=False)
 async def files_point_clouds_page():
     return await _new_frontend_route("files/point-clouds")
+
+
+@app.get("/settings/users", include_in_schema=False)
+@app.get("/settings/users/", include_in_schema=False)
+async def users_page():
+    return await _new_frontend_route("settings/users")
 
 
 @app.get("/chat", include_in_schema=False)
@@ -523,8 +538,7 @@ async def login(request: Request):
         record_login_failure(client_ip)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     clear_login_failures(client_ip)
-    request.session.clear()
-    request.session["user"] = username
+    login_session(request.session, username)
     return JSONResponse({"ok": True, "username": username})
 
 
@@ -536,13 +550,13 @@ async def setup(request: Request):
     body = await request.json()
     username = str(body.get("username") or "").strip()
     password = str(body.get("password") or "")
-    if not (3 <= len(username) <= 64) or any(char.isspace() for char in username):
-        raise HTTPException(status_code=400, detail="用户名需为 3-64 位，且不能包含空白字符")
-    if len(password) < 8:
-        raise HTTPException(status_code=400, detail="密码至少需要 8 位")
+    try:
+        username = validate_username(username)
+        validate_password(password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     configure_admin(username, password)
-    request.session.clear()
-    request.session["user"] = username
+    login_session(request.session, username)
     return JSONResponse({"ok": True, "username": username})
 
 
@@ -555,19 +569,62 @@ async def logout(request: Request):
 
 @app.post("/api/auth/password")
 async def update_password(request: Request):
-    """修改管理员密码。"""
+    """当前用户修改自己的密码；成功后刷新本会话，其他设备上的会话失效。"""
     username = current_username(request.session)
     if not username:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
     body = await request.json()
     current_password = str(body.get("current_password") or "")
     new_password = str(body.get("new_password") or "")
-    if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="新密码至少需要 8 位")
     try:
-        change_password(current_password, new_password)
+        change_password(username, current_password, new_password)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    login_session(request.session, username)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/users")
+async def users_list(request: Request):
+    """列出全部用户（不含密码哈希）。"""
+    username = current_username(request.session)
+    users = [{**user, "is_self": user["username"] == username} for user in list_users()]
+    return JSONResponse({"users": users})
+
+
+@app.post("/api/users")
+async def users_create(payload: dict[str, Any] = Body(...)):
+    """新增用户；所有用户权限相同。"""
+    try:
+        user = create_user(str(payload.get("username") or ""), str(payload.get("password") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(user)
+
+
+@app.post("/api/users/{username}/password")
+async def users_reset_password(username: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """重置指定用户密码，该用户已有会话全部失效；重置自己时保持本会话登录。"""
+    try:
+        set_user_password(username, str(payload.get("password") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if username == request.session.get("user"):
+        login_session(request.session, username)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/users/{username}")
+async def users_delete(username: str, request: Request):
+    """删除用户；不能删除自己或最后一个用户，被删用户的会话立即失效。"""
+    try:
+        delete_user(username, current_username(request.session) or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JSONResponse({"ok": True})
 
 

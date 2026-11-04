@@ -22,7 +22,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 ```
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
-├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
+├── auth.py                   # 多用户登录配置、Argon2 密码哈希、会话中间件
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
 ├── chat_room.py              # 聊天室组件：公共聊天室消息、用户资料与在线状态，存储于 data/chat_room.json（不入库）
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
@@ -75,7 +75,8 @@ HannisHub/
 ### Hub 页面
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
-- `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
+- `/login`：用户登录页；首次启动且没有任何用户时切换为管理员初始化表单
+- `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；所有用户权限相同
 - `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口，设置中可修改昵称和头像（昵称首字母、12 个预设 emoji 或上传图片，图片在浏览器内居中裁剪并压缩为 96×96 JPEG）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入时自动以本地昵称或登录账号名建立资料。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
@@ -132,11 +133,15 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 |------|------|------|
 | GET | `/api/health` | Hub 健康检查 |
 | GET | `/api/services` | 返回当前可用子服务列表 |
-| GET | `/api/auth/status` | 查询登录状态与管理员初始化状态 |
-| POST | `/api/auth/setup` | 首次启动时初始化管理员账号 |
-| POST | `/api/auth/login` | 管理员登录并写入签名 Cookie 会话 |
+| GET | `/api/auth/status` | 查询登录状态、当前用户名与是否已有用户 |
+| POST | `/api/auth/setup` | 首次启动且没有任何用户时创建第一个账号 |
+| POST | `/api/auth/login` | 任一用户登录，会话写入用户名与该用户的会话版本 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
-| POST | `/api/auth/password` | 修改管理员密码 |
+| POST | `/api/auth/password` | 当前用户校验旧密码后修改自己的密码；本会话保持登录，其他设备上的会话失效 |
+| GET | `/api/users` | 列出全部用户（用户名、创建时间、是否为当前账号），不返回密码哈希 |
+| POST | `/api/users` | 新增用户：`username` 3-64 位且不含空白，`password` 至少 8 位；最多 100 个用户 |
+| POST | `/api/users/{username}/password` | 重置指定用户密码，该用户已有会话全部失效 |
+| DELETE | `/api/users/{username}` | 删除用户；不能删除当前登录账号或最后一个用户，被删用户的会话立即失效 |
 | GET | `/api/ai-settings` | 读取多条 AI 配置与当前启用配置 ID；密钥只返回是否已配置，不回显明文 |
 | PUT | `/api/ai-settings` | 保存多条 AI 配置、各自模型列表、密钥状态与当前启用配置到本地 `ai_settings.json` |
 | POST | `/api/ai-settings/test` | 接收 `config_id`，请求指定配置的 `/models` 测试连接并返回合并后的可选模型列表 |
@@ -180,7 +185,9 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 登录与会话
 
-- 管理员用户名与密码哈希保存在根目录 `settings.json.auth`
+- 支持多用户，所有用户权限相同；用户列表保存在根目录 `settings.json` 的 `auth.users`
+- 旧版单管理员字段 `auth.username` / `auth.password_hash` 在启动时自动迁移为第一个用户
+- 每个用户有 `session_version`，会话中同时记录用户名与版本；重置密码时版本递增，删除用户或版本不一致时会话立即失效。中间件按 `settings.json` 修改时间缓存用户表，避免每个请求重复解析
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
 - 会话使用 Starlette `SessionMiddleware` 与 `itsdangerous` 签名 Cookie
 - Cookie 名称为 `hannishub_session`，默认有效期 12 小时
@@ -554,8 +561,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `auth.username` | string | `""` | 管理员用户名；为空表示尚未初始化 |
-| `auth.password_hash` | string | `""` | Argon2id 密码哈希；永不通过 API 返回 |
+| `auth.users` | array | `[]` | 用户列表，每项含 `username`、`password_hash`（Argon2id，永不通过 API 返回）、`created_at`、`session_version`；为空表示尚未初始化 |
 | `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
 | `auth.session_max_age_seconds` | number | `604800` | 会话有效期，默认 7 天 |
 | `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
@@ -686,7 +692,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 - protected_ports 防止误杀 SSH（端口 22）
 - PID 1 永远不会被 kill
 - 子服务与 Hub 的 settings.json 均使用原子写入防止损坏
-- Hub 使用 Argon2id 保存管理员密码，不保存明文
+- Hub 使用 Argon2id 保存全部用户密码，不保存明文；登录时对不存在的用户名同样执行一次哈希校验，避免通过响应时间探测用户名
 - Hub 使用 HttpOnly 签名 Cookie 保存会话，`AuthMiddleware` 统一保护页面和 API
 - 管理后台绑定 `0.0.0.0:8081`，README 中提醒公网暴露风险
 
