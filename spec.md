@@ -22,6 +22,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 ```
 HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
+├── compression.py            # 选择性 gzip 中间件：只压缩长度已知的文本类响应
 ├── auth.py                   # 多用户登录配置、Argon2 密码哈希、会话中间件
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
 ├── chat_room.py              # 聊天室组件：公共聊天室消息、用户资料与在线状态，存储于 data/chat_room.json（不入库）
@@ -184,6 +185,13 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 首次读取时会把既有单 API、主/备用 API 或旧版 `llama_manager/settings.json` 的 AI 配置迁移为一条或多条新配置；迁移完成后旧扁平字段会从 JSON 中移除，保持单一存储结构。
 - `/settings` 对每条配置提供“测试链接”“探查模型列表”“添加模型”和“测试模型”操作；测试与探查会先自动保存当前配置列表，避免新增配置必须手动保存后才能测试。ASR 提炼与提示词润色均复用当前启用配置。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。
 - API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
+
+### 响应压缩
+
+- `compression.py` 的 `SelectiveGZipMiddleware` 位于中间件最外层，覆盖 Hub 与全部挂载的子服务
+- 仅在以下条件同时满足时以 gzip（级别 6）压缩：请求声明支持 gzip、不是 HEAD 或 Range 请求、状态码不是 206、响应未自带 `Content-Encoding`、内容类型为 `text/*`（`text/event-stream` 除外）或 JSON / JavaScript / XML / SVG / Web Manifest，且带有不小于 1 KB 的 `Content-Length`
+- 没有 `Content-Length` 的流式响应（推理服务代理、SSE 等）原样透传，避免 gzip 缓冲造成卡顿；图片、点云、音频、远端下载等二进制文件不压缩
+- 典型效果：表情数据 `zh/data.json` 745 KB → 102 KB，最大 JS chunk 614 KB → 154 KB
 
 ### 登录与会话
 

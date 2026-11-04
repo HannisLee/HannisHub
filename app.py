@@ -33,6 +33,7 @@ from auth import (
 )
 import ai_settings
 import chat_room
+from compression import SelectiveGZipMiddleware
 import llama_manager.app as llama_manager_app
 from file_manager import (
     add_favorite,
@@ -132,6 +133,8 @@ app.add_middleware(
     same_site="strict",
     https_only=False,
 )
+# 最后添加的中间件位于最外层：压缩在认证之后作用于最终响应，覆盖所有挂载的子服务
+app.add_middleware(SelectiveGZipMiddleware)
 
 def _frontend_page(route: str) -> FileResponse | None:
     """返回静态导出的统一前端页面；尚未构建时交由旧页面兼容。"""
