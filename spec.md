@@ -24,7 +24,7 @@ HannisHub/
 ├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
 ├── auth.py                   # 登录配置、Argon2 密码哈希、会话中间件
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
-├── chat_room.py              # 聊天室组件：公共聊天室消息，存储于 data/chat_room.json（不入库）
+├── chat_room.py              # 聊天室组件：公共聊天室消息、用户资料与在线状态，存储于 data/chat_room.json（不入库）
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
 ├── point_cloud.py            # 旧版点云文件读取接口兼容层
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
@@ -76,7 +76,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：管理员登录页；首次启动且未初始化时切换为管理员初始化表单
-- `/chat`：公共聊天室，单一共享消息窗口，标题旁只显示记录条数；昵称默认取当前登录账号名，可修改并保存在浏览器 `localStorage` 键 `hannishub_chat_nickname`；与本机昵称相同的消息显示在右侧；每 2 秒按最后消息 id 增量拉取，用户停留在底部时自动滚动；页面不提供清空入口
+- `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口，设置中可修改昵称和头像（昵称首字母、12 个预设 emoji 或上传图片，图片在浏览器内居中裁剪并压缩为 96×96 JPEG）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入时自动以本地昵称或登录账号名建立资料。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -106,7 +106,7 @@ HannisHub/
 | `frontend/components/llama/` | 推理服务、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件 |
-| `frontend/components/chat/` | 公共聊天室消息窗口、昵称与输入框组件 |
+| `frontend/components/chat/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
@@ -143,8 +143,9 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/ai-settings/models` | 接收 `config_id`，探查指定 OpenAI 兼容接口的模型，并与手工维护列表合并持久保存 |
 | POST | `/api/ai-settings/model-test` | 接收 `config_id` 与 `model`，使用指定配置发送一次最小对话请求验证模型可用性 |
 | GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
-| GET | `/api/chat-room/messages?after=<id>&limit=<n>` | 拉取聊天室消息；`after` 为 0 时返回最近 `limit` 条（默认 200，最多 500），大于 0 时只返回更新的消息；同时返回当前记录总数 `total` |
-| POST | `/api/chat-room/messages` | 接收 `nickname`（最多 24 字）与 `content`（最多 4,000 字）追加一条消息；最多保留最近 10,000 条 |
+| GET | `/api/chat-room/messages?after=<id>&limit=<n>&client_id=<id>&profiles_version=<v>` | 拉取聊天室消息；`after` 为 0 时返回最近 `limit` 条（默认 200，最多 500），大于 0 时只返回更新的消息；携带 `client_id` 时记录在线心跳；返回 `total`、在线 `online` 列表与 `profiles_version`，版本与请求不同时附带完整 `profiles` 资料表 |
+| PUT | `/api/chat-room/profile` | 接收 `client_id`、`nickname`（最多 24 字）与 `avatar`（空、最多 16 字的 emoji 文本，或不超过 120,000 字符的 png/jpeg/webp base64 data URL）保存当前浏览器资料；最多 500 份 |
+| POST | `/api/chat-room/messages` | 接收 `client_id` 与 `content`（最多 4,000 字）追加一条消息，昵称取已保存的资料（无资料时使用请求中的 `nickname`）；最多保留最近 10,000 条 |
 | DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |

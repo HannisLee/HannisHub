@@ -455,14 +455,28 @@ export interface ApiErrorShape {
 
 export interface ChatRoomMessage {
   id: number;
+  /** 发送者浏览器标识；早期消息可能缺失 */
+  client_id?: string;
   nickname: string;
   content: string;
   created_at: number;
 }
 
+export interface ChatRoomProfile {
+  nickname: string;
+  /** 空字符串、emoji 文本或图片 data URL */
+  avatar: string;
+  updated_at: number;
+}
+
 export interface ChatRoomMessages {
   messages: ChatRoomMessage[];
   total: number;
+  /** 在线的 client_id 列表 */
+  online: string[];
+  profiles_version: number;
+  /** 仅在资料版本变化时返回 */
+  profiles?: Record<string, ChatRoomProfile>;
 }
 
 export interface AuthStatus {

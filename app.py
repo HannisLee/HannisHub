@@ -315,9 +315,20 @@ async def read_ai_usage(config_id: str | None = None):
 
 
 @app.get("/api/chat-room/messages")
-async def chat_room_messages(after: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=500)):
-    """拉取聊天室消息；after 大于 0 时只返回更新的消息，供轮询增量刷新。"""
-    return JSONResponse(await run_in_threadpool(chat_room.list_messages, after, limit))
+async def chat_room_messages(
+    after: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    client_id: str = Query("", max_length=64),
+    profiles_version: int = Query(-1),
+):
+    """拉取聊天室消息与在线列表；携带 client_id 时同时作为在线心跳。"""
+    return JSONResponse(await run_in_threadpool(chat_room.list_messages, after, limit, client_id, profiles_version))
+
+
+@app.put("/api/chat-room/profile")
+async def chat_room_profile(payload: dict[str, Any] = Body(...)):
+    """保存当前浏览器在聊天室中的昵称与头像。"""
+    return JSONResponse(await run_in_threadpool(chat_room.save_profile, payload))
 
 
 @app.post("/api/chat-room/messages")
