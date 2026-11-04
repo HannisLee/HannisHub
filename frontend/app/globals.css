@@ -897,6 +897,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-composer > .button { flex: 0 0 auto; white-space: nowrap; }
 .chat-emoji-anchor { position: relative; flex: 0 0 auto; }
 .chat-emoji-toggle { display: inline-flex; width: 42px; height: 42px; align-items: center; justify-content: center; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: transparent; color: var(--color-text-secondary); font-size: 20px; cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.chat-emoji-toggle { padding: 0; }
+.chat-emoji-toggle svg { display: block; width: 24px; height: 24px; }
 .chat-emoji-toggle:hover { border-color: var(--color-control-border); color: var(--color-text-primary); }
 .chat-emoji-popover { position: absolute; right: 0; bottom: calc(100% + var(--space-2)); z-index: 20; }
 .chat-emoji-picker { display: flex; width: 352px; height: 380px; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }

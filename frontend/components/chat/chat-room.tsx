@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Keyboa
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage } from "../../lib/format";
 import type { AuthStatus, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../lib/types";
+import { Icon } from "../ui/icon";
 import { Button, ErrorState, LoadingState } from "../ui/primitives";
 import { ChatEmojiPicker } from "./emoji-picker";
 
@@ -403,7 +404,7 @@ export function ChatRoom() {
         />
         <div className="chat-emoji-anchor" ref={emojiRef}>
           <button type="button" className={`chat-emoji-toggle${emojiOpen ? " chat-toolbar-active" : ""}`} onClick={() => setEmojiOpen(open => !open)} aria-label="表情" aria-expanded={emojiOpen}>
-            ☺
+            <Icon name="smile" />
           </button>
           {emojiOpen ? <div className="chat-emoji-popover"><ChatEmojiPicker onSelect={insertEmoji} /></div> : null}
         </div>
