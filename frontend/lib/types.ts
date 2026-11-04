@@ -453,29 +453,14 @@ export interface ApiErrorShape {
   message?: string;
 }
 
-export interface ChatMessage {
-  role: "user" | "assistant";
+export interface ChatRoomMessage {
+  id: number;
+  nickname: string;
   content: string;
   created_at: number;
-  model?: string;
-  config_name?: string;
 }
 
-export interface ChatConversationSummary {
-  id: string;
-  title: string;
-  config_id: string;
-  created_at: number;
-  updated_at: number;
-  message_count: number;
-  preview: string;
-}
-
-export interface ChatConversation {
-  id: string;
-  title: string;
-  config_id: string;
-  created_at: number;
-  updated_at: number;
-  messages: ChatMessage[];
+export interface ChatRoomMessages {
+  messages: ChatRoomMessage[];
+  total: number;
 }

@@ -1,121 +1,133 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
-import { errorMessage, formatShortDate } from "../../lib/format";
-import type { AiSettings, ChatConversation, ChatConversationSummary } from "../../lib/types";
+import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
+import { errorMessage } from "../../lib/format";
+import type { ChatRoomMessage, ChatRoomMessages } from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 
-const CONVERSATIONS = `${API_PATHS.chatRoom}/conversations`;
+const MESSAGES = `${API_PATHS.chatRoom}/messages`;
+const NICKNAME_KEY = "hannishub_chat_nickname";
+const POLL_MS = 2000;
 
-function conversationPath(id: string) {
-  return `${CONVERSATIONS}/${encodePath(id)}`;
+function readNickname(): string {
+  try {
+    return window.localStorage.getItem(NICKNAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
 }
 
-/** 聊天室：左侧会话列表，右侧消息流与输入框，使用统一 AI 配置回复 */
+function saveNickname(value: string) {
+  try {
+    window.localStorage.setItem(NICKNAME_KEY, value);
+  } catch {
+    // 浏览器禁用存储时仅在本次页面内生效
+  }
+}
+
+function formatTime(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return date.toLocaleString("zh-CN", sameDay
+    ? { hour: "2-digit", minute: "2-digit", hour12: false }
+    : { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** 公共聊天室：一个共享消息窗口，按昵称区分发言人，每 2 秒增量拉取新消息 */
 export function ChatRoom() {
-  const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
-  const [active, setActive] = useState<ChatConversation | null>(null);
-  const [aiSettings, setAiSettings] = useState<AiSettings | null>(null);
+  const [messages, setMessages] = useState<ChatRoomMessage[]>([]);
+  const [nickname, setNickname] = useState("");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [error, setError] = useState("");
-  const messagesRef = useRef<HTMLDivElement>(null);
+  const lastIdRef = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
-  const loadList = useCallback(async () => {
-    const data = await apiFetch<{ conversations: ChatConversationSummary[] }>(CONVERSATIONS);
-    setConversations(data.conversations);
-    return data.conversations;
+  const merge = useCallback((incoming: ChatRoomMessage[]) => {
+    if (incoming.length === 0) return;
+    setMessages(current => {
+      const known = new Set(current.map(item => item.id));
+      const next = [...current, ...incoming.filter(item => !known.has(item.id))];
+      lastIdRef.current = next.length ? next[next.length - 1].id : lastIdRef.current;
+      return next;
+    });
   }, []);
 
-  const openConversation = useCallback(async (id: string) => {
+  const poll = useCallback(async () => {
     try {
-      setActive(await apiFetch<ChatConversation>(conversationPath(id)));
+      const data = await apiFetch<ChatRoomMessages>(`${MESSAGES}?after=${lastIdRef.current}`);
+      // 记录被清空时（服务端为空而本地有消息）同步清空
+      if (data.total === 0) {
+        setMessages([]);
+      } else {
+        merge(data.messages);
+      }
       setError("");
     } catch (value) {
       setError(errorMessage(value));
     }
-  }, []);
+  }, [merge]);
 
   useEffect(() => {
     void (async () => {
+      // 在异步回调内读取本地昵称，避免静态导出时与服务端渲染不一致
+      setNickname(readNickname());
       try {
-        const [list, settings] = await Promise.all([loadList(), apiFetch<AiSettings>(API_PATHS.aiSettings)]);
-        setAiSettings(settings);
-        if (list[0]) await openConversation(list[0].id);
+        const data = await apiFetch<ChatRoomMessages>(MESSAGES);
+        merge(data.messages);
       } catch (value) {
         setError(errorMessage(value));
       } finally {
         setLoading(false);
       }
     })();
-  }, [loadList, openConversation]);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void poll();
+    }, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [merge, poll]);
 
-  // 新消息到达后滚动到底部
+  // 用户停留在底部时，新消息自动滚动到底
   useEffect(() => {
-    const box = messagesRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [active?.messages.length, sending]);
+    const box = listRef.current;
+    if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
+  }, [messages]);
 
-  async function createConversation() {
-    try {
-      const created = await apiFetch<ChatConversation>(CONVERSATIONS, { method: "POST", body: jsonBody({}) });
-      setActive(created);
-      await loadList();
-      setError("");
-    } catch (value) {
-      setError(errorMessage(value));
-    }
-  }
-
-  async function removeConversation(id: string) {
-    try {
-      await apiFetch(conversationPath(id), { method: "DELETE" });
-      const list = await loadList();
-      if (active?.id === id) {
-        if (list[0]) await openConversation(list[0].id);
-        else setActive(null);
-      }
-    } catch (value) {
-      setError(errorMessage(value));
-    }
-  }
-
-  async function changeConfig(configId: string) {
-    if (!active) return;
-    try {
-      setActive(await apiFetch<ChatConversation>(conversationPath(active.id), { method: "PATCH", body: jsonBody({ config_id: configId }) }));
-    } catch (value) {
-      setError(errorMessage(value));
-    }
+  function onScroll() {
+    const box = listRef.current;
+    if (box) stickToBottomRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   }
 
   async function send() {
     const content = draft.trim();
-    if (!content || sending) return;
-    let target = active;
+    const name = nickname.trim();
+    if (!content || !name || sending) return;
     setSending(true);
-    setError("");
     try {
-      if (!target) {
-        target = await apiFetch<ChatConversation>(CONVERSATIONS, { method: "POST", body: jsonBody({}) });
-      }
-      // 先乐观展示用户消息，等待 AI 回复
-      setActive({ ...target, messages: [...target.messages, { role: "user", content, created_at: Date.now() / 1000 }] });
+      saveNickname(name);
+      const message = await apiFetch<ChatRoomMessage>(MESSAGES, { method: "POST", body: jsonBody({ nickname: name, content }) });
+      stickToBottomRef.current = true;
+      merge([message]);
       setDraft("");
-      const updated = await apiFetch<ChatConversation>(`${conversationPath(target.id)}/messages`, {
-        method: "POST",
-        body: jsonBody({ content }),
-      });
-      setActive(updated);
+      setError("");
     } catch (value) {
       setError(errorMessage(value));
-      // 失败时以服务端为准重新读取（用户消息已保存）
-      if (target) await openConversation(target.id);
     } finally {
       setSending(false);
-      void loadList().catch(() => undefined);
+    }
+  }
+
+  async function clearAll() {
+    try {
+      await apiFetch(MESSAGES, { method: "DELETE" });
+      setMessages([]);
+      setConfirmClear(false);
+    } catch (value) {
+      setError(errorMessage(value));
     }
   }
 
@@ -126,70 +138,64 @@ export function ChatRoom() {
     }
   }
 
-  if (loading) return <LoadingState label="正在读取会话…" />;
-
-  const configs = aiSettings?.ai_configs ?? [];
+  const me = nickname.trim();
 
   return (
-    <div className="chat-layout">
-      <aside className="chat-sidebar">
-        <Button size="sm" variant="secondary" onClick={() => void createConversation()}>新建对话</Button>
-        <div className="chat-conversation-list">
-          {conversations.length === 0 ? <p className="muted-line">还没有会话</p> : null}
-          {conversations.map(item => (
-            <div key={item.id} className={`chat-conversation${active?.id === item.id ? " chat-conversation-active" : ""}`}>
-              <button type="button" className="chat-conversation-open" onClick={() => void openConversation(item.id)}>
-                <span className="chat-conversation-title">{item.title}</span>
-                <span className="chat-conversation-meta">{formatShortDate(item.updated_at)} · {item.message_count} 条</span>
-              </button>
-              <button type="button" className="chat-conversation-delete" aria-label={`删除 ${item.title}`} onClick={() => void removeConversation(item.id)}>×</button>
-            </div>
-          ))}
+    <section className="chat-main">
+      <header className="chat-main-head">
+        <div className="chat-main-heading">
+          <h2 className="chat-main-title">聊天室</h2>
+          <span className="chat-main-meta">{messages.length} 条记录 · 每 2 秒刷新</span>
         </div>
-      </aside>
-
-      <section className="chat-main">
-        <header className="chat-main-head">
-          <h2 className="chat-main-title">{active?.title ?? "新对话"}</h2>
-          <select
-            className="select-compact"
-            value={active?.config_id ?? ""}
-            disabled={!active}
-            onChange={event => void changeConfig(event.target.value)}
-            aria-label="AI 配置"
-          >
-            <option value="">跟随当前启用配置</option>
-            {configs.map(config => <option key={config.id} value={config.id}>{config.name} · {config.model || "未选模型"}</option>)}
-          </select>
-        </header>
-
-        <div className="chat-messages" ref={messagesRef}>
-          {!active || active.messages.length === 0 ? (
-            <EmptyState title="开始一段对话" detail="消息将使用「AI 能力」中配置的 OpenAI 兼容接口回复。" />
+        <div className="row-actions">
+          {confirmClear ? (
+            <>
+              <span className="muted-line">确认清空全部记录？</span>
+              <Button size="sm" variant="danger" onClick={() => void clearAll()}>清空</Button>
+              <Button size="sm" variant="quiet" onClick={() => setConfirmClear(false)}>取消</Button>
+            </>
           ) : (
-            active.messages.map((message, index) => (
-              <div key={`${message.created_at}-${index}`} className={`chat-message chat-message-${message.role}`}>
-                <div className="chat-bubble">{message.content}</div>
-                {message.role === "assistant" && message.model ? <span className="chat-message-meta">{message.config_name} · {message.model}</span> : null}
-              </div>
-            ))
+            <Button size="sm" variant="quiet" onClick={() => setConfirmClear(true)} disabled={messages.length === 0}>清空记录</Button>
           )}
-          {sending ? <div className="chat-message chat-message-assistant"><div className="chat-bubble chat-bubble-pending"><span className="loading-line" />正在回复…</div></div> : null}
         </div>
+      </header>
 
-        {error ? <ErrorState message={error} /> : null}
+      <div className="chat-messages" ref={listRef} onScroll={onScroll}>
+        {loading ? <LoadingState label="正在读取聊天记录…" /> : null}
+        {!loading && messages.length === 0 ? <EmptyState title="还没有消息" detail="填写昵称后发出第一条消息。" /> : null}
+        {messages.map((message, index) => {
+          const mine = me !== "" && message.nickname === me;
+          const grouped = index > 0 && messages[index - 1].nickname === message.nickname && message.created_at - messages[index - 1].created_at < 300;
+          return (
+            <div key={message.id} className={`chat-message ${mine ? "chat-message-user" : "chat-message-assistant"}${grouped ? " chat-message-grouped" : ""}`}>
+              {grouped ? null : <span className="chat-message-meta"><strong>{message.nickname}</strong> · {formatTime(message.created_at)}</span>}
+              <div className="chat-bubble">{message.content}</div>
+            </div>
+          );
+        })}
+      </div>
 
-        <div className="chat-composer">
-          <textarea
-            value={draft}
-            onChange={event => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="输入消息，Enter 发送，Shift + Enter 换行"
-            rows={3}
-          />
-          <Button onClick={() => void send()} disabled={sending || !draft.trim()}>发送</Button>
-        </div>
-      </section>
-    </div>
+      {error ? <ErrorState message={error} /> : null}
+
+      <div className="chat-composer">
+        <input
+          className="chat-nickname"
+          value={nickname}
+          onChange={event => setNickname(event.target.value)}
+          onBlur={() => saveNickname(nickname.trim())}
+          placeholder="昵称"
+          maxLength={24}
+          aria-label="昵称"
+        />
+        <textarea
+          value={draft}
+          onChange={event => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={me ? "输入消息，Enter 发送，Shift + Enter 换行" : "先在左侧填写昵称"}
+          rows={2}
+        />
+        <Button onClick={() => void send()} disabled={sending || !draft.trim() || !me}>发送</Button>
+      </div>
+    </section>
   );
 }

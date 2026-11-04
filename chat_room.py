@@ -1,4 +1,4 @@
-"""聊天室组件：基于统一 AI 配置的多会话对话，会话以本地 JSON 文件存储。"""
+"""聊天室组件：单一公共聊天室，消息带昵称，记录以本地 JSON 文件持久保存。"""
 
 from __future__ import annotations
 
@@ -7,40 +7,38 @@ import os
 import tempfile
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
-import ai_settings
-
 ROOT_DIR = Path(__file__).resolve().parent
 CHAT_ROOM_PATH = ROOT_DIR / "data" / "chat_room.json"
 
-MAX_CONVERSATIONS = 200
-MAX_MESSAGE_CHARS = 32_000
-MAX_TITLE_CHARS = 80
-# 发送给模型的上下文条数上限，避免长会话无限增长
-MAX_CONTEXT_MESSAGES = 40
-DEFAULT_TITLE = "新对话"
+# 最多保留的消息条数，超出后丢弃最早的记录
+MAX_STORED_MESSAGES = 10_000
+MAX_MESSAGE_CHARS = 4_000
+MAX_NICKNAME_CHARS = 24
+# 单次请求最多返回的消息条数
+MAX_FETCH_MESSAGES = 500
 
 _LOCK = threading.RLock()
 
 
 def _read_store() -> dict[str, Any]:
-    """读取会话存储；文件缺失或损坏时返回空结构。"""
+    """读取聊天记录；文件缺失或损坏时返回空结构。"""
     try:
         data = json.loads(CHAT_ROOM_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"conversations": []}
-    if not isinstance(data, dict) or not isinstance(data.get("conversations"), list):
-        return {"conversations": []}
+        return {"next_id": 1, "messages": []}
+    if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+        return {"next_id": 1, "messages": []}
+    data.setdefault("next_id", (data["messages"][-1]["id"] + 1) if data["messages"] else 1)
     return data
 
 
 def _write_store(data: dict[str, Any]) -> None:
-    """原子写入会话存储。"""
+    """原子写入聊天记录。"""
     CHAT_ROOM_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=str(CHAT_ROOM_PATH.parent), suffix=".json.tmp")
     try:
@@ -55,121 +53,43 @@ def _write_store(data: dict[str, Any]) -> None:
         raise
 
 
-def _summary(conversation: dict[str, Any]) -> dict[str, Any]:
-    """会话列表只返回摘要，不携带完整消息。"""
-    messages = conversation.get("messages", [])
-    last = messages[-1]["content"] if messages else ""
-    return {
-        "id": conversation["id"],
-        "title": conversation.get("title") or DEFAULT_TITLE,
-        "config_id": conversation.get("config_id", ""),
-        "created_at": conversation.get("created_at", 0),
-        "updated_at": conversation.get("updated_at", 0),
-        "message_count": len(messages),
-        "preview": last[:120],
-    }
-
-
-def _find(data: dict[str, Any], conversation_id: str) -> dict[str, Any]:
-    for conversation in data["conversations"]:
-        if conversation.get("id") == conversation_id:
-            return conversation
-    raise HTTPException(status_code=404, detail="会话不存在")
-
-
-def _normalize_title(value: object) -> str:
-    title = " ".join(str(value or "").split())[:MAX_TITLE_CHARS]
-    return title or DEFAULT_TITLE
-
-
-def list_conversations() -> dict[str, Any]:
+def list_messages(after: int = 0, limit: int = 200) -> dict[str, Any]:
+    """返回 id 大于 after 的消息；after 为 0 时返回最近 limit 条，用于首次加载。"""
+    limit = max(1, min(int(limit), MAX_FETCH_MESSAGES))
     with _LOCK:
-        data = _read_store()
-    items = sorted(data["conversations"], key=lambda item: item.get("updated_at", 0), reverse=True)
-    return {"conversations": [_summary(item) for item in items]}
+        messages = _read_store()["messages"]
+    if after > 0:
+        result = [item for item in messages if item["id"] > after][:limit]
+    else:
+        result = messages[-limit:]
+    return {"messages": result, "total": len(messages)}
 
 
-def get_conversation(conversation_id: str) -> dict[str, Any]:
-    with _LOCK:
-        return _find(_read_store(), conversation_id)
-
-
-def create_conversation(payload: dict[str, Any]) -> dict[str, Any]:
-    now = time.time()
-    conversation = {
-        "id": uuid.uuid4().hex[:12],
-        "title": _normalize_title(payload.get("title")),
-        "config_id": str(payload.get("config_id") or ""),
-        "created_at": now,
-        "updated_at": now,
-        "messages": [],
-    }
-    with _LOCK:
-        data = _read_store()
-        if len(data["conversations"]) >= MAX_CONVERSATIONS:
-            raise HTTPException(status_code=400, detail=f"会话数量已达上限 {MAX_CONVERSATIONS}，请先删除旧会话")
-        data["conversations"].append(conversation)
-        _write_store(data)
-    return conversation
-
-
-def update_conversation(conversation_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    with _LOCK:
-        data = _read_store()
-        conversation = _find(data, conversation_id)
-        if "title" in payload:
-            conversation["title"] = _normalize_title(payload.get("title"))
-        if "config_id" in payload:
-            conversation["config_id"] = str(payload.get("config_id") or "")
-        conversation["updated_at"] = time.time()
-        _write_store(data)
-        return conversation
-
-
-def delete_conversation(conversation_id: str) -> dict[str, Any]:
-    with _LOCK:
-        data = _read_store()
-        conversation = _find(data, conversation_id)
-        data["conversations"].remove(conversation)
-        _write_store(data)
-    return {"ok": True}
-
-
-async def send_message(conversation_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """追加用户消息，调用 AI 生成回复并保存；AI 失败时保留用户消息并返回错误。"""
+def post_message(payload: dict[str, Any]) -> dict[str, Any]:
+    """追加一条消息并返回该消息。"""
+    nickname = " ".join(str(payload.get("nickname") or "").split())[:MAX_NICKNAME_CHARS]
     content = str(payload.get("content") or "").strip()
+    if not nickname:
+        raise HTTPException(status_code=400, detail="请先填写昵称")
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
     if len(content) > MAX_MESSAGE_CHARS:
         raise HTTPException(status_code=400, detail=f"消息长度不能超过 {MAX_MESSAGE_CHARS} 字")
-
     with _LOCK:
         data = _read_store()
-        conversation = _find(data, conversation_id)
-        conversation["messages"].append({"role": "user", "content": content, "created_at": time.time()})
-        # 首条消息自动作为标题
-        if conversation.get("title") in ("", DEFAULT_TITLE) and len(conversation["messages"]) == 1:
-            conversation["title"] = _normalize_title(content[:30])
-        conversation["updated_at"] = time.time()
-        history = [
-            {"role": item["role"], "content": item["content"]}
-            for item in conversation["messages"][-MAX_CONTEXT_MESSAGES:]
-        ]
-        config_id = conversation.get("config_id") or None
+        message = {"id": data["next_id"], "nickname": nickname, "content": content, "created_at": time.time()}
+        data["next_id"] += 1
+        data["messages"].append(message)
+        if len(data["messages"]) > MAX_STORED_MESSAGES:
+            data["messages"] = data["messages"][-MAX_STORED_MESSAGES:]
         _write_store(data)
+    return message
 
-    result = await ai_settings.chat_completion(history, temperature=0.7, config_id=config_id)
 
+def clear_messages() -> dict[str, Any]:
+    """清空聊天记录；消息 id 继续递增，避免客户端增量拉取错乱。"""
     with _LOCK:
         data = _read_store()
-        conversation = _find(data, conversation_id)
-        conversation["messages"].append({
-            "role": "assistant",
-            "content": result["content"],
-            "created_at": time.time(),
-            "model": result.get("model", ""),
-            "config_name": result.get("config_name", ""),
-        })
-        conversation["updated_at"] = time.time()
+        data["messages"] = []
         _write_store(data)
-        return conversation
+    return {"ok": True}

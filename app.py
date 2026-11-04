@@ -314,40 +314,22 @@ async def read_ai_usage(config_id: str | None = None):
     return JSONResponse(await ai_settings.get_ai_usage_summaries(config_id))
 
 
-@app.get("/api/chat-room/conversations")
-async def chat_room_conversations():
-    """列出聊天室会话摘要，按更新时间倒序。"""
-    return JSONResponse(await run_in_threadpool(chat_room.list_conversations))
+@app.get("/api/chat-room/messages")
+async def chat_room_messages(after: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=500)):
+    """拉取聊天室消息；after 大于 0 时只返回更新的消息，供轮询增量刷新。"""
+    return JSONResponse(await run_in_threadpool(chat_room.list_messages, after, limit))
 
 
-@app.post("/api/chat-room/conversations")
-async def chat_room_create(payload: dict[str, Any] = Body(default_factory=dict)):
-    """新建聊天室会话，可指定标题与 AI 配置。"""
-    return JSONResponse(await run_in_threadpool(chat_room.create_conversation, payload))
+@app.post("/api/chat-room/messages")
+async def chat_room_post(payload: dict[str, Any] = Body(...)):
+    """以昵称发送一条聊天室消息。"""
+    return JSONResponse(await run_in_threadpool(chat_room.post_message, payload))
 
 
-@app.get("/api/chat-room/conversations/{conversation_id}")
-async def chat_room_detail(conversation_id: str):
-    """读取单个会话的完整消息。"""
-    return JSONResponse(await run_in_threadpool(chat_room.get_conversation, conversation_id))
-
-
-@app.patch("/api/chat-room/conversations/{conversation_id}")
-async def chat_room_update(conversation_id: str, payload: dict[str, Any] = Body(...)):
-    """修改会话标题或绑定的 AI 配置。"""
-    return JSONResponse(await run_in_threadpool(chat_room.update_conversation, conversation_id, payload))
-
-
-@app.delete("/api/chat-room/conversations/{conversation_id}")
-async def chat_room_delete(conversation_id: str):
-    """删除会话。"""
-    return JSONResponse(await run_in_threadpool(chat_room.delete_conversation, conversation_id))
-
-
-@app.post("/api/chat-room/conversations/{conversation_id}/messages")
-async def chat_room_send(conversation_id: str, payload: dict[str, Any] = Body(...)):
-    """发送消息并返回包含 AI 回复的完整会话。"""
-    return JSONResponse(await chat_room.send_message(conversation_id, payload))
+@app.delete("/api/chat-room/messages")
+async def chat_room_clear():
+    """清空聊天室记录。"""
+    return JSONResponse(await run_in_threadpool(chat_room.clear_messages))
 
 
 @app.get("/api/file-manager/settings")
