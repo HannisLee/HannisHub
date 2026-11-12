@@ -269,6 +269,12 @@ async def chat_page():
     return await _new_frontend_route("chat")
 
 
+@app.get("/chat-lobby", include_in_schema=False)
+@app.get("/chat-lobby/", include_in_schema=False)
+async def chat_lobby_page():
+    return await _new_frontend_route("chat-lobby")
+
+
 @app.get("/point-clouds", include_in_schema=False)
 @app.get("/point-clouds/", include_in_schema=False)
 async def point_clouds_page():

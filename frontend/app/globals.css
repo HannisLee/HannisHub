@@ -969,6 +969,32 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-emoji-button { display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; font-size: 20px; cursor: pointer; }
 .chat-emoji-button[data-active] { background: var(--color-surface-hover); }
 
+/* 聊天大厅：像素办公室场景，现代 UI 外壳 + 复古像素画布 */
+.content-container.chat-lobby-page { width: min(100% - 64px, 1700px); padding-top: var(--space-5); }
+.lobby { display: flex; flex-direction: column; gap: var(--space-4); }
+.lobby-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }
+.lobby-title { margin: 0; color: var(--color-text-primary); font: 400 28px/1.2 var(--font-display); letter-spacing: -0.01em; }
+.lobby-subtitle { margin: var(--space-1) 0 0; color: var(--color-text-muted); font-size: 13px; }
+.lobby-hint { display: flex; align-items: center; gap: var(--space-3); padding-bottom: var(--space-1); }
+.lobby-hint-keys { display: inline-flex; gap: var(--space-1); }
+.lobby-key { display: inline-grid; min-width: 26px; height: 26px; place-items: center; padding: 0 var(--space-1); border: 1px solid var(--color-control-border); border-bottom-width: 2px; border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-secondary); font: 500 12px/1 var(--font-mono); }
+.lobby-hint-text { color: var(--color-text-muted); font-size: 13px; }
+.lobby-stage { position: relative; height: calc(100vh - 232px); min-height: 420px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-surface-soft); }
+.lobby-canvas-host { position: absolute; inset: 0; }
+.lobby-canvas-host canvas { display: block; image-rendering: pixelated; }
+.lobby-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); background: color-mix(in srgb, var(--color-bg) 72%, transparent); color: var(--color-text-secondary); font-size: 14px; }
+.lobby-overlay p { margin: 0; }
+.lobby-error-text { color: var(--color-error); }
+.lobby-retry { min-height: 34px; padding: 0 var(--space-5); border: 1px solid var(--color-brand); border-radius: var(--radius-pill); background: transparent; color: var(--color-brand); font-size: 13px; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
+.lobby-retry:hover { background: var(--color-brand); color: var(--color-on-light); }
+.lobby-dpad { position: absolute; right: var(--space-4); bottom: var(--space-4); z-index: 6; display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 6px; }
+.lobby-dpad-btn { display: grid; place-items: center; border: 1px solid var(--color-control-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-surface) 82%, transparent); color: var(--color-text-primary); font-size: 15px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.lobby-dpad-btn:active { background: var(--color-brand); color: var(--color-on-light); }
+.lobby-dpad-up { grid-column: 2; grid-row: 1; }
+.lobby-dpad-left { grid-column: 1; grid-row: 2; }
+.lobby-dpad-right { grid-column: 3; grid-row: 2; }
+.lobby-dpad-down { grid-column: 2; grid-row: 3; }
+
 @media (max-width: 1279px) {
   .topbar { padding-inline: var(--space-8); }
   .content-container { width: min(100% - 64px, 1100px); }
@@ -984,6 +1010,10 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 
 @media (max-width: 767px) {
   .chat-main { height: calc(100vh - 120px); padding: var(--space-4); }
+  .content-container.chat-lobby-page { width: min(100% - 40px, 640px); }
+  .lobby-title { font-size: 24px; }
+  .lobby-hint-text { display: none; }
+  .lobby-stage { height: calc(100vh - 200px); min-height: 360px; }
   .chat-message { max-width: 82%; }
   .chat-settings { grid-template-columns: minmax(0, 1fr); }
   .chat-toolbar-button span:last-child { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
