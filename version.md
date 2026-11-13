@@ -1082,3 +1082,8 @@
 - 游戏逻辑与 UI 解耦：`frontend/game/lobby/`（地图数据、玩家、场景、游戏工厂），`frontend/components/chat-lobby/`（页面外壳、加载/错误态、方向垫，`next/dynamic` `ssr:false` 加载画布并在卸载时销毁游戏）；后端 `app.py` 注册 `/chat-lobby` 路由。
 - 素材统一存放 `frontend/public/chat-lobby/` 并保留来源与许可证（`CREDITS.md`）：办公室用 Rubber Studio Modern Office Tileset 免费样本（免费商用、不可单独再分发），人物用 5yvalia 12x16 Top Down NPCs（CC0，重上色为暖色匹配品牌色）；均从 itch.io 官方下载。新增依赖 `phaser@^3.90`。
 - 已验证：桌面与移动端浏览器实测渲染、四向移动与 WASD（像素质心定量）、撞墙停止、桌前/桌后遮挡、窗口缩放、离开卸载与重入仅单实例、触屏方向垫移动，无运行时错误与横向溢出；`lint`/`typecheck`/`build` 通过。同步更新架构文档。
+
+### v0.2.80 — 2026-11-13
+- 侧栏「文件管理」分组隐藏「点云预览」入口：`frontend/lib/navigation.ts` 中该导航项改为注释保留，取消注释即可恢复。
+- 页面、组件与后端接口全部保留，`/files/point-clouds` 与兼容入口 `/point-clouds` 仍可直接访问；文件游览页的预览跳转不受影响。
+- 已重新执行 `lint`/`typecheck`/`build`，确认导出产物的导航中不再包含该项，点云页仍正常导出。同步更新架构文档。

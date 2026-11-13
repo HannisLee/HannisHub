@@ -41,7 +41,8 @@ export const navigation: NavGroup[] = [
       { href: "/files", label: "文件游览", icon: "files" },
       { href: "/files/server", label: "服务器文件", title: "服务器文件", icon: "downloads" },
       { href: "/files/documents", label: "文档查看", icon: "documents" },
-      { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
+      // 点云预览暂时从侧栏隐藏，页面与组件代码保留，取消注释即可恢复
+      // { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
     ],
   },
   { label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
