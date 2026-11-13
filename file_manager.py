@@ -19,7 +19,7 @@ from fastapi import HTTPException, Request
 from auth import get_settings_section, update_settings_section
 
 
-DEFAULT_ROOT = "~/reproduce"
+DEFAULT_ROOT = "~"
 MAX_ROOTS = 24
 MAX_DIRECTORY_ENTRIES = 1_000
 MAX_FAVORITES = 100
@@ -65,7 +65,7 @@ _DATE_SEARCH_DEFAULTS = (
 
 
 def _default_roots() -> list[str]:
-    """首次使用时只暴露当前用户的 reproduce 目录。"""
+    """首次使用时暴露当前用户的家目录。"""
     return [DEFAULT_ROOT] if Path(DEFAULT_ROOT).expanduser().is_dir() else []
 
 
@@ -98,12 +98,12 @@ def resolve_root(root_text: str) -> Path:
 
 
 def configured_roots() -> list[str]:
-    """读取文件管理组件暴露的顶层目录；未配置时默认仅暴露 ~/reproduce。"""
+    """读取文件管理组件暴露的顶层目录；未配置时默认暴露 ~（家目录）。"""
     value = get_settings_section("file_manager")
     if isinstance(value, dict) and isinstance(value.get("roots"), list):
         return [item for item in value["roots"] if isinstance(item, str)]
 
-    # 兼容早期点云查看器单独保存的 roots；空列表不再阻止默认 reproduce 暴露。
+    # 兼容早期点云查看器单独保存的 roots；空列表不再阻止默认家目录暴露。
     legacy = get_settings_section("point_cloud")
     if isinstance(legacy, dict) and isinstance(legacy.get("roots"), list) and legacy["roots"]:
         return [item for item in legacy["roots"] if isinstance(item, str)]

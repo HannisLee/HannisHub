@@ -173,10 +173,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
             setPreviewFiles([selectedFile(requestedRoot, requestedFile), null]);
             setActivePreview(1);
           } else {
-            const defaultRoot = nextRoots.findIndex(root => root === "~/reproduce" || root.endsWith("/reproduce"));
+            const defaultRoot = nextRoots.findIndex(root => root === "~" || root === "~/reproduce" || root.endsWith("/reproduce"));
             if (defaultRoot >= 0) {
               setSelectedRootIndex(defaultRoot);
-              setPath(DEFAULT_DIRECTORY);
+              const root = nextRoots[defaultRoot];
+              const prefix = root === "~/reproduce" || root.endsWith("/reproduce") ? "" : "reproduce/";
+              setPath(`${prefix}${DEFAULT_DIRECTORY}`);
             }
           }
         }

@@ -88,7 +88,7 @@ HannisHub/
 - `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
-- `/server/connections`、`/server/tasks`：远程服务器模块页面
+- `/server/connections`、`/server/tasks`：远程服务器模块页面。该分组当前从侧栏隐藏，页面、组件与接口全部保留，直接访问 URL 仍可使用；“服务器文件”页仍依赖已保存的 SSH 连接
 - `/prompts`：提示词
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
 - `/files`：文件游览页，浏览已开放目录；点击可预览的点云文件会打开点云预览页
@@ -163,7 +163,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/chat-room/files/{id}?download=<bool>` | 读取附件：`image` 且未要求下载时以原类型内联显示，其余一律以 `application/octet-stream` 附件下载；带 `nosniff`、沙箱 CSP 与长期私有缓存头 |
 | POST | `/api/chat-room/messages` | 接收 `client_id`、`content`（最多 4,000 字）、可选 `nonce`（8-64 位字母数字）与可选 `attachment_id` 追加一条消息（有附件时文字可为空），同一浏览器重复的 `nonce` 直接返回已有消息，昵称取已保存的资料（无资料时使用请求中的 `nickname`）；最多保留最近 10,000 条 |
 | DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
-| GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认仅返回 `~/reproduce` |
+| GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认返回 `~` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |
 | GET | `/api/file-manager/ply-files?root=<index>&path=<relative_path>&refresh=<bool>` | 递归列出当前目录及子目录的所有 PLY 文件，包含相对当前目录的 `relative_path`；复用同步生成的 1 小时缓存，并跟随顶层目录内出现的符号链接 |
@@ -215,7 +215,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 文件管理组件
 
-- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认仅暴露 `~/reproduce`，保存空数组会暂停文件暴露。顶层目录里的软链接（例如 `RadioGS-perlight/data -> /home/lihan/data`）会作为可进入的文件夹正常显示，并支持在其内部上传与下载。
+- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认暴露 `~`（家目录），保存空数组会暂停文件暴露。顶层目录里的软链接（例如 `RadioGS-perlight/data -> /home/lihan/data`）会作为可进入的文件夹正常显示，并支持在其内部上传与下载。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 文件游览在浏览器 `localStorage.hannishub_file_browser_location` 保存最后成功访问的顶层目录真实路径和相对路径；刷新及再次打开时恢复，顶层目录配置重排时按路径匹配。记录损坏、目录被删除或链接失效时回退到当前开放的顶层目录，不影响点云页的独立默认位置。
 - 拖拽文件夹使用同一个目录读取器逐批读取，并在准备阶段显示“正在读取文件夹”。文件选择、文件夹选择和拖拽共用上传队列，保留相对结构；显示总体传输进度、逐文件进度、等待服务器写入、成功及失败原因，完成后汇总数量并刷新目录。扫描阶段即锁定目标目录与覆盖选项，切换浏览目录不会改变上传目标或清空未完成的队列。
@@ -592,7 +592,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `auth.users` | array | `[]` | 用户列表，每项含 `username`、`password_hash`（Argon2id，永不通过 API 返回）、`created_at`、`session_version`；为空表示尚未初始化 |
 | `auth.session_secret` | string | 自动生成 | Cookie 会话签名密钥；永不通过 API 返回 |
 | `auth.session_max_age_seconds` | number | `604800` | 会话有效期，默认 7 天 |
-| `file_manager.roots` | array | `["~/reproduce"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
+| `file_manager.roots` | array | `["~"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
 | `file_favorites` | array | `[]` | 目录收藏，包含 `id`、`name`、`root_path` 和相对目录 `path` |
 
 ### 根目录 ai_settings.json（不入 Git）

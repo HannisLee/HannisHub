@@ -1087,3 +1087,14 @@
 - 侧栏「文件管理」分组隐藏「点云预览」入口：`frontend/lib/navigation.ts` 中该导航项改为注释保留，取消注释即可恢复。
 - 页面、组件与后端接口全部保留，`/files/point-clouds` 与兼容入口 `/point-clouds` 仍可直接访问；文件游览页的预览跳转不受影响。
 - 已重新执行 `lint`/`typecheck`/`build`，确认导出产物的导航中不再包含该项，点云页仍正常导出。同步更新架构文档。
+
+### v0.2.81 — 2026-11-13
+- 侧栏隐藏「远程服务器」整个分组（「服务器连接」「远程任务」）：`frontend/lib/navigation.ts` 中该分组改为注释保留，取消注释即可恢复。
+- 页面、组件与后端接口全部保留，`/server/connections`、`/server/tasks` 仍可直接访问；「服务器文件」页继续复用已保存的 SSH 连接，不受影响。
+- 总览页的「服务器连接」指标卡与「服务入口」中的 Server 卡片仍指向上述页面，本次未改动。
+- 已重新执行 `lint`/`typecheck`/`build`，确认导出产物的导航中不再包含该分组，两个页面仍正常导出。同步更新架构文档。
+
+### v0.2.82 — 2026-11-13
+- 文件游览默认顶层目录由 `~/reproduce` 放开为 `~`（家目录）：`file_manager.py` 的 `DEFAULT_ROOT` 改为 `~`，未显式配置 `settings.json.file_manager.roots` 时即暴露整个家目录（该页仅管理员可访问）。已验证 `configured_roots()` 返回 `['~']`、展开为 `/home/lihan`，家目录可正常浏览（82 个直接子项）。
+- 点云页默认位置兼容家目录根：`file-manager-panel.tsx` 默认根匹配新增 `~`，当根为家目录时默认路径加 `reproduce/` 前缀，仍定位 `reproduce/RadioGS-stage1/output`，避免共享顶层目录变更导致点云页默认位置回归。
+- 同步更新 `app.py` 文件管理描述与 `spec.md` 默认根目录说明（settings 接口、模块说明、配置表默认值）。已重新执行 `lint`/`typecheck`/`build` 通过。

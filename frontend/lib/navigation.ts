@@ -28,13 +28,14 @@ export const navigation: NavGroup[] = [
       { href: "/llama/settings", label: "模型设置", icon: "settings" },
     ],
   },
-  {
-    label: "远程服务器",
-    items: [
-      { href: "/server/connections", label: "服务器连接", icon: "connections" },
-      { href: "/server/tasks", label: "远程任务", icon: "tasks" },
-    ],
-  },
+  // 远程服务器分组暂时从侧栏隐藏，页面与组件代码保留，取消注释即可恢复
+  // {
+  //   label: "远程服务器",
+  //   items: [
+  //     { href: "/server/connections", label: "服务器连接", icon: "connections" },
+  //     { href: "/server/tasks", label: "远程任务", icon: "tasks" },
+  //   ],
+  // },
   {
     label: "文件管理",
     items: [

@@ -99,7 +99,7 @@ SERVICES: list[dict[str, str]] = [
     {
         "id": "file-manager",
         "name": "文件管理",
-        "description": "浏览并下载本机 reproduce 目录，同时提供点云预览",
+        "description": "浏览并下载本机家目录，同时提供点云预览",
         "path": "/files/",
         "icon": "🗂",
     },
