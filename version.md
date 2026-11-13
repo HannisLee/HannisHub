@@ -1115,3 +1115,4 @@
 - 新增按账号独立的 OCR 识别记录：后端 `ocr_records.py` 接收上传后在后台调用受管 OCR 服务（图片走 `/api/ocr`，PDF 走 `/api/book` 并轮询页进度），原始文件与结果保存在 `data/ocr_records/<用户哈希>/`；新增 `GET/POST /api/ocr/records`、`GET .../{id}/text`、`GET .../{id}/source`、`PATCH`/`DELETE .../{id}` 接口，`llama_manager` 新增 `get_running_ocr_service()`。页面下方新增「识别记录」列表，可查看、打开原文件、重命名、删除，进行中的记录实时显示进度；Hub 重启时未完成记录标记为中断。
 - 新增 `frontend/components/llama/ocr-result.tsx` 安全渲染识别结果（标题、列表、表格、公式、分页标记；HTML 表格经 DOMParser 提取文本后渲染，不注入原始 HTML）。同步更新 `spec.md`。已用模拟 OCR 服务验证图片、PDF 轮询、格式与参数校验、账号隔离、重命名、删除与重启恢复，并用真实服务核对输出格式；`typecheck`/`lint`/`build` 通过。
 - 修复 PDF 识别全部页面报「Context size has been exceeded」：OCR llama-server 4 个并发槽共享 16384 上下文，PDF 4 页并发时每页约 4.1k 图像 token 即超限；`scripts/start-xiaomi-ocr.sh` 将 `-c` 提升至 65536（显存增量很小）。`ocr_records.py` 对 PDF 结果区分处理：全部页面失败时记录标记为失败并显示首个原因，部分失败时警告列出失败页码。
+- OCR 页「01 原始文档」右侧新增「清除」按钮，清除已选文件与当前查看的记录、回到拖入上传状态。选中 PDF 时字段提取与图像问答会被禁用（官方 PDF 接口仅支持文档解析），原先只有悬停提示，现在在任务切换旁直接显示原因。删除已合并的 `ocr-refactor` 工作树与分支。

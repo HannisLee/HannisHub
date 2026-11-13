@@ -166,6 +166,14 @@ export function OcrPanel() {
     window.requestAnimationFrame(() => document.querySelector(".ocr-stage")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
+  /** 清除左栏文件与当前查看的记录，回到拖入上传状态。 */
+  function clearSource() {
+    setPendingFile(null);
+    setPendingUrl("");
+    setSelectedId("");
+    setNotice("");
+  }
+
   async function startService() {
     if (!service) return;
     setStarting(true);
@@ -246,6 +254,7 @@ export function OcrPanel() {
           <div className="segmented" role="tablist" aria-label="选择任务">
             {TASKS.map(item => <button key={item.id} type="button" role="tab" aria-selected={task === item.id} disabled={isPdfSelected && item.id !== "document"} title={isPdfSelected && item.id !== "document" ? "PDF 仅支持文档解析" : undefined} onClick={() => setTask(item.id)}><span aria-hidden="true">{item.mark}</span> {item.label}</button>)}
           </div>
+          {isPdfSelected ? <span className="ocr-task-hint">PDF 仅支持文档解析，字段提取与图像问答请上传图片，或点「清除」后重新选择</span> : null}
           <div className="ocr-run-actions">
             <Button variant="secondary" onClick={() => inputRef.current?.click()}>↑ 上传文件</Button>
             <Button onClick={() => void startParse()} disabled={!pendingFile || uploadProgress !== null || !ready} title={!ready ? "OCR 服务未就绪" : undefined}>{uploadProgress !== null ? `上传中 ${uploadProgress}%` : "开始解析 ↗"}</Button>
@@ -258,7 +267,10 @@ export function OcrPanel() {
           <div className="ocr-pane">
             <div className="ocr-pane-head">
               <span className="ocr-pane-title"><span className="ocr-step">01</span> 原始文档{sourceName ? <Badge>{sourceIsPdf ? "PDF" : "IMAGE"}</Badge> : null}</span>
-              {sourceUrl ? <Button size="sm" variant="quiet" onClick={() => inputRef.current?.click()}>更换文件</Button> : null}
+              {sourceUrl ? <div className="row-actions">
+                <Button size="sm" variant="quiet" onClick={() => inputRef.current?.click()} disabled={uploadProgress !== null}>更换文件</Button>
+                <Button size="sm" variant="secondary" onClick={clearSource} disabled={uploadProgress !== null}>清除</Button>
+              </div> : null}
             </div>
             <div
               className={`ocr-source${sourceUrl ? " has-file" : ""}${dragging ? " is-dragover" : ""}`}
