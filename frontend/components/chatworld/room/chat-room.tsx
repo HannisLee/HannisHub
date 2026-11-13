@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
-import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../lib/api";
+import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../../lib/api";
 import {
   CHAT_CLIENT_ID_KEY,
   addChatUnread,
@@ -9,11 +9,11 @@ import {
   markChatRead,
   playChatDing,
   setChatSoundEnabled,
-} from "../../lib/chat-notify";
-import { errorMessage, formatBytes } from "../../lib/format";
-import type { AuthStatus, ChatAttachment, ChatReceipt, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../lib/types";
-import { Icon } from "../ui/icon";
-import { Button, ErrorState, LoadingState } from "../ui/primitives";
+} from "../../../lib/chat-notify";
+import { errorMessage, formatBytes } from "../../../lib/format";
+import type { AuthStatus, ChatAttachment, ChatReceipt, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../../lib/types";
+import { Icon } from "../../ui/icon";
+import { Button, ErrorState, LoadingState } from "../../ui/primitives";
 import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
 

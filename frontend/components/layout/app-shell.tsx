@@ -8,7 +8,7 @@ import { isActivePath, navigation, navTitle } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
-import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } from "../chat/chat-watcher";
+import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } from "../chatworld/room/chat-watcher";
 import { DocumentTitle } from "./document-title";
 
 /** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */

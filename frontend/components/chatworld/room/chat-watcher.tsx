@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useSyncExternalStore } from "react";
-import { API_PATHS, apiFetch } from "../../lib/api";
+import { API_PATHS, apiFetch } from "../../../lib/api";
 import {
   addChatUnread,
   dismissChatToast,
@@ -18,8 +18,8 @@ import {
   subscribeChatNotify,
   unlockChatAudio,
   updateFaviconBadge,
-} from "../../lib/chat-notify";
-import type { ChatRoomMessages } from "../../lib/types";
+} from "../../../lib/chat-notify";
+import type { ChatRoomMessages } from "../../../lib/types";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
 const WATCH_MS = 4000;

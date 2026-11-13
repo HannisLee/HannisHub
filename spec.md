@@ -23,44 +23,57 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 
 ```
 HannisHub/
-├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期
-├── compression.py            # 选择性 gzip 中间件：只压缩长度已知的文本类响应
-├── auth.py                   # 多用户登录配置、Argon2 密码哈希、会话中间件
-├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
-├── chat_room.py              # 聊天室组件：公共聊天室消息、用户资料、在线状态与附件，存储于 data/（不入库）
-├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
-├── terminal_manager.py       # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像与空闲回收（仅内存）
-├── point_cloud.py            # 旧版点云文件读取接口兼容层
-├── index.html                # Hub 旧版服务列表页，迁移验证期保留
-├── login.html                # Hub 旧版登录页，迁移验证期保留
-├── frontend/                 # 统一 Next.js Dashboard
-│   ├── app/                  # 总览、登录、模型、Server、提示词 App Router 页面
-│   ├── components/           # layout、ui 与各业务模块组件
-│   ├── lib/                  # API 请求、显式类型、格式化与导航
-│   ├── public/               # 前端静态资源
-│   └── out/                  # npm run build 生成的静态导出（不入库）
-├── settings.json             # Hub 登录与会话配置
-├── requirements.txt          # Python 依赖
+├── app.py                    # Hub 入口：登录、会话、服务挂载与生命周期（根目录只保留入口与配置）
 ├── run.sh                    # 启动脚本
-├── llama_manager/            # 模型管理子服务
+├── requirements.txt          # Python 依赖
+├── settings.json             # Hub 登录、会话、文件管理与终端配置（不入库）
+├── ai_settings.json          # AI 连接与提示词配置（不入库）
+├── core/                     # Hub 基础设施
+│   ├── auth.py               # 多用户登录配置、Argon2 密码哈希、会话中间件
+│   └── compression.py        # 选择性 gzip 中间件：只压缩长度已知的文本类响应
+├── chatworld/                # 聊天世界后端（聊天室与聊天大厅）
+│   ├── chat_room.py          # 聊天室组件：公共聊天室消息、用户资料、在线状态与附件，存储于根目录 data/（不入库）
+│   └── asset/                # 聊天大厅素材原件 Modern Interiors 整包（不入库）；asset_index.md 为入库的速查索引
+├── model_manager/            # 模型管理子服务（原 model_manager/），含 AI、ASR、OCR 相关模块
 │   ├── app.py                # 子服务 FastAPI 后端
+│   ├── ai_settings.py        # AI 能力设置：API、密钥与提示词的本地 JSON 配置（读写根目录 ai_settings.json）
+│   ├── asr_audio.py          # ASR 音频工具：时长探测、静音检测、切片与导出
+│   ├── ocr_records.py        # OCR 识别记录：后台任务、字段提取与问答，存储于根目录 data/ocr_records/
+│   ├── test_asr.py           # ASR 单元测试
 │   ├── index.html            # 子服务旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # 子服务配置与运行状态
 │   ├── data/                 # ASR 历史与任务数据
 │   └── logs/                 # 子服务运行日志
-├── server/                   # Server 子服务
+├── server/                   # Server 子服务与服务器侧组件
 │   ├── app.py                # SSH 与定时任务后端
+│   ├── file_manager.py       # 文件管理组件：受限目录、缓存、浏览与下载
+│   ├── terminal_manager.py   # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像与空闲回收（仅内存，读取根目录 settings.json）
+│   ├── point_cloud.py        # 旧版点云文件读取接口兼容层
 │   ├── index.html            # Server 旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # Server 子服务配置
 │   └── data/ssh/             # 项目生成的 SSH 私钥
 ├── prompt_service/           # 在线提示词输入子服务
 │   ├── app.py                # 提示词复制与归档后端
+│   ├── audio.py              # 提示词语音录入与转写（复用 model_manager/asr_audio.py）
 │   ├── index.html            # 提示词旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # 提示词归档数据（不入库 git）
 │   └── run.sh                # 独立启动脚本（默认 8084）
+├── legacy/                   # Hub 旧版页面，迁移验证期保留
+│   ├── index.html            # Hub 旧版服务列表页
+│   └── login.html            # Hub 旧版登录页
+├── frontend/                 # 统一 Next.js Dashboard
+│   ├── app/                  # App Router 页面；(chatworld)/ 为路由分组，收纳 /chat 与 /chat-lobby，不影响 URL
+│   ├── components/           # layout、ui 与各业务模块组件；chatworld/ 收纳聊天室（room/）与聊天大厅（lobby/）
+│   ├── lib/                  # API 请求、显式类型、格式化与导航
+│   ├── public/               # 前端静态资源
+│   └── out/                  # npm run build 生成的静态导出（不入库）
+├── scripts/                  # 外部服务启动脚本
+├── data/                     # 聊天室、OCR 等运行数据（不入库）
+├── docs/
+│   └── MEMORY.md             # 项目长期运行与兼容性记忆
 ├── spec.md                   # 本文件，架构文档
 ├── version.md                # 版本变更记录
-├── MEMORY.md                 # 项目长期运行与兼容性记忆
+├── design.md                 # 强制前端设计规范
 ├── AGENTS.md / CLAUDE.md     # 项目指令
 └── README.md                 # 使用说明
 ```
@@ -86,8 +99,8 @@ HannisHub/
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
   - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 50 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
-- `/chat-lobby`：聊天大厅，内置 2D 像素风客厅单人场景（Phaser 3），房间与角色全部使用付费素材 Limezu Modern Interiors 的 16×16 原生规格。3/4 俯视视角，32×22 格、16px Tile，整数倍缩放（按宽度适配 2×～3×）保持像素清晰。墙壳为上墙 2 行（容纳 32px 高的门与挂钟）+ 侧墙顶部 3 行透视斜肩 + 底部 1 行收边，砖块裁剪自包内官方预拼房间的同套素材以保证透视连贯。场景含左下休息区（沙发、单人椅、茶几、落地灯与桌上小绿植）、中央 48×32 暖陶土色区域毯（猫睡在其上）、右下影音角（电视柜 + 播放中的动画电视、绿植）、右侧工作角（两张电脑桌与朝北椅子、饮水机）、靠上墙的两组书柜与储物柜、门、墙面挂画与角落大绿植。动画物件：电视（32×32、6 帧 / 8fps）、布谷鸟挂钟（16×32、10 帧 / 2fps）、猫（48×16、12 帧 / 6fps）。角色贴图重排为 6 列 × 8 行、每帧 16×32（静止四方向各 6 帧 + 行走四方向各 6 帧），行走 10fps、静止 4fps。WASD/方向键四方向行走（斜向归一化，朝向优先水平），墙壁与家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡（墙面挂件与地毯使用固定低深度）；触屏设备显示方向垫。相机在视野装得下整个房间时居中静止，否则平滑跟随角色。本轮仅单人场景与走动，不含多人同步、聊天、坐下等交互。游戏逻辑独立于 UI 组件，位于 `frontend/game/lobby/`（`room-map.ts` 地图与碰撞、`player.ts` 角色、`lobby-scene.ts` 场景），素材统一存放在 `frontend/public/chat-lobby/modern/`（付费包原件不入库；派生文件清单、来源与署名见该目录上级 `CREDITS.md`，许可证副本 `modern/LICENSE.txt`）
-- `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」
+- `/chat-lobby`：聊天大厅，内置 2D 像素风客厅单人场景（Phaser 3），房间与角色全部使用付费素材 Limezu Modern Interiors 的 16×16 原生规格。3/4 俯视视角，32×22 格、16px Tile，整数倍缩放（按宽度适配 2×～3×）保持像素清晰。墙壳为上墙 2 行（容纳 32px 高的门与挂钟）+ 侧墙顶部 3 行透视斜肩 + 底部 1 行收边，砖块裁剪自包内官方预拼房间的同套素材以保证透视连贯。场景含左下休息区（沙发、单人椅、茶几、落地灯与桌上小绿植）、中央 48×32 暖陶土色区域毯（猫睡在其上）、右下影音角（电视柜 + 播放中的动画电视、绿植）、右侧工作角（两张电脑桌与朝北椅子、饮水机）、靠上墙的两组书柜与储物柜、门、墙面挂画与角落大绿植。动画物件：电视（32×32、6 帧 / 8fps）、布谷鸟挂钟（16×32、10 帧 / 2fps）、猫（48×16、12 帧 / 6fps）。角色贴图重排为 6 列 × 8 行、每帧 16×32（静止四方向各 6 帧 + 行走四方向各 6 帧），行走 10fps、静止 4fps。WASD/方向键四方向行走（斜向归一化，朝向优先水平），墙壁与家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡（墙面挂件与地毯使用固定低深度）；触屏设备显示方向垫。相机在视野装得下整个房间时居中静止，否则平滑跟随角色。本轮仅单人场景与走动，不含多人同步、聊天、坐下等交互。游戏逻辑独立于 UI 组件，位于 `frontend/components/chatworld/lobby/game/`（`room-map.ts` 地图与碰撞、`player.ts` 角色、`lobby-scene.ts` 场景），运行时素材统一存放在 `frontend/public/chat-lobby/modern/`（付费包原件解压在 `chatworld/asset/modern_interiors/`，不入库，速查索引见 `chatworld/asset/asset_index.md`；派生文件清单、来源与署名见该目录上级 `CREDITS.md`，许可证副本 `modern/LICENSE.txt`）
+- `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」。页面右下角另有可拖动的浮动提示词按钮（位置记忆在 `hannishub_prompt_float_position`），点击展开仅含输入框、复制、归档的面板，不提供润色；草稿暂存在 `hannishub_prompt_float_draft`（与提示词页草稿互不覆盖），归档调用提示词模块既有的 `POST /prompt/api/prompts`，写入 `prompt_service/settings.json`，与提示词页归档列表共用同一份数据
 - `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -116,15 +129,15 @@ HannisHub/
 | `frontend/components/ui/` | 按钮、卡片、表单、状态、进度条与细线 SVG 图标 |
 | `frontend/components/llama/` | 推理服务、GPU、下载、ASR、设置页面业务组件 |
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
-| `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件 |
-| `frontend/components/chat/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
-| `frontend/components/chat-lobby/` | 聊天大厅页面外壳：标题与操作提示、加载/错误态、触屏方向垫，动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏 |
-| `frontend/game/lobby/` | 聊天大厅 Phaser 3 游戏逻辑：地图与家具数据、玩家移动与动画、场景与相机、游戏工厂，与普通 UI 组件解耦 |
+| `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件；`prompt-float.tsx` 为终端页使用的可拖动浮动提示词（仅输入、复制、归档） |
+| `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
+| `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与操作提示、加载/错误态、触屏方向垫，动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏 |
+| `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：地图与家具数据、玩家移动与动画、场景与相机、游戏工厂，与普通 UI 组件解耦 |
 | `frontend/components/terminal/` | 网页终端：横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
-| `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化与导航 |
+| `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化、导航与剪贴板工具（`clipboard.ts`） |
 
 API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
 
@@ -142,7 +155,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 网页终端
 
-- 后端 `terminal_manager.py` 在 Hub 进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
+- 后端 `server/terminal_manager.py` 在 Hub 进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
 - WebSocket 协议：服务端→客户端二进制帧为终端原始输出（连接后先发送回滚缓冲），文本帧为 JSON 控制消息 `{"type":"exit"|"released"|"closed"}`；客户端→服务端为 JSON `{"type":"input","data"}` 与 `{"type":"resize","cols","rows"}`。多端连接时 PTY 尺寸取最近一次调整的客户端。关闭码：4000 已释放、4401 未登录、4403 无权限或 Origin 不符、4404 终端不存在。
 - 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 6 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在内存，Hub 停止时全部结束；同时最多 10 个。
 - 权限：仅管理员可用——根 `settings.json` 的 `terminal.admins` 用户名列表，未配置时为最早创建的用户。`/api/auth/status` 返回 `terminal` 布尔值，侧栏据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
@@ -213,18 +226,18 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### AI 能力设置
 
-- AI 能力集中在根目录 `ai_settings.py` 与本地 `ai_settings.json` 中管理；页面支持添加任意多个命名配置，每条配置独立保存 OpenAI 兼容地址、当前模型、API 密钥和可选模型列表，并通过“设为当前使用”随时切换。
+- AI 能力集中在`model_manager/ai_settings.py` 与根目录本地 `ai_settings.json` 中管理；页面支持添加任意多个命名配置，每条配置独立保存 OpenAI 兼容地址、当前模型、API 密钥和可选模型列表，并通过“设为当前使用”随时切换。
 - AI 任务只使用 `active_ai_config_id` 指向的配置，不做主备自动回退；配置删除或切换后，后续任务立即按新的当前配置执行。
 - 模型探查结果会与用户手工添加的未知模型名合并并持久保存；点击可选模型会填入当前模型，当前模型输入框也允许直接填写不在列表中的名称。
 - 每条配置提供“剩余用量”自适应区域：GLM 读取 5 小时限额的剩余值、已用占比、重置时间与 Token 限额占比；暂无用量接口的服务仅提示不支持，不影响其他配置编辑。
 - `ai_settings.json` 和写入用的 `ai_settings.json.tmp` 已加入 `.gitignore`，不会进入 GitHub；读取接口永不返回密钥明文，只返回每条配置的 `api_key_configured`。
-- 首次读取时会把既有单 API、主/备用 API 或旧版 `llama_manager/settings.json` 的 AI 配置迁移为一条或多条新配置；迁移完成后旧扁平字段会从 JSON 中移除，保持单一存储结构。
+- 首次读取时会把既有单 API、主/备用 API 或旧版 `model_manager/settings.json`（原 `model_manager/settings.json`） 的 AI 配置迁移为一条或多条新配置；迁移完成后旧扁平字段会从 JSON 中移除，保持单一存储结构。
 - `/settings` 对每条配置提供“测试链接”“探查模型列表”“添加模型”和“测试模型”操作；测试与探查会先自动保存当前配置列表，避免新增配置必须手动保存后才能测试。ASR 提炼与提示词润色均复用当前启用配置。ASR 提炼提示词的编辑入口位于 `/llama/asr`，但实际仍保存在本地 `ai_settings.json`。
 - API 地址支持 http/https，模型名与提示词长度有限制；JSON 采用临时文件加原子替换写入，避免半写入损坏。
 
 ### 响应压缩
 
-- `compression.py` 的 `SelectiveGZipMiddleware` 位于中间件最外层，覆盖 Hub 与全部挂载的子服务
+- `core/compression.py` 的 `SelectiveGZipMiddleware` 位于中间件最外层，覆盖 Hub 与全部挂载的子服务
 - 仅在以下条件同时满足时以 gzip（级别 6）压缩：请求声明支持 gzip、不是 HEAD 或 Range 请求、状态码不是 206、响应未自带 `Content-Encoding`、内容类型为 `text/*`（`text/event-stream` 除外）或 JSON / JavaScript / XML / SVG / Web Manifest，且带有不小于 1 KB 的 `Content-Length`
 - 没有 `Content-Length` 的流式响应（推理服务代理、SSE 等）原样透传，避免 gzip 缓冲造成卡顿；图片、点云、音频、远端下载等二进制文件不压缩
 - 典型效果：表情数据 `zh/data.json` 745 KB → 102 KB，最大 JS chunk 614 KB → 154 KB
@@ -243,7 +256,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 文件管理组件
 
-- `file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认暴露 `~`（家目录），保存空数组会暂停文件暴露。顶层目录里的软链接（例如 `RadioGS-perlight/data -> /home/lihan/data`）会作为可进入的文件夹正常显示，并支持在其内部上传与下载。
+- `server/file_manager.py` 是文件浏览、下载和目录复用的基础模块；顶层目录保存在根目录 `settings.json.file_manager.roots`，未显式配置时默认暴露 `~`（家目录），保存空数组会暂停文件暴露。顶层目录里的软链接（例如 `RadioGS-perlight/data -> /home/lihan/data`）会作为可进入的文件夹正常显示，并支持在其内部上传与下载。
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 文件游览在浏览器 `localStorage.hannishub_file_browser_location` 保存最后成功访问的顶层目录真实路径和相对路径；刷新及再次打开时恢复，顶层目录配置重排时按路径匹配。记录损坏、目录被删除或链接失效时回退到当前开放的顶层目录，不影响点云页的独立默认位置。
 - 拖拽文件夹使用同一个目录读取器逐批读取，并在准备阶段显示“正在读取文件夹”。文件选择、文件夹选择和拖拽共用上传队列，保留相对结构；显示总体传输进度、逐文件进度、等待服务器写入、成功及失败原因，完成后汇总数量并刷新目录。扫描阶段即锁定目标目录与覆盖选项，切换浏览目录不会改变上传目标或清空未完成的队列。
@@ -268,7 +281,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 点云页保留当前文件夹的递归 PLY 探查作为末尾的备用入口，并在双栏预览下方提供跨项目目录的日期范围查找。默认自动查找近 7 天；可一键切到今天，或手动调整开始与结束日期。项目路径每行一个，首次使用时从开放范围内预填 RadioGS 与 LumiMotion 目录，手动查找时保存到 `settings.json` 并刷新磁盘扫描。按实验目录名开头的 `MMDD-...`、`YYYYMMDD-...` 或 `YYYY-MM-DD-...` 匹配日期，不按文件修改时间匹配；四位月日目录缺少年份时按查询范围推断年份。迭代过滤默认选每个点云输出组中数值最大的 `iteration_*` 或 `iter*`；也可指定迭代次数，或列出全部 PLY（包括没有迭代目录的文件）。结果按实验日期倒序显示完整路径、迭代数，提供预览和下载；所有目录仍受已开放顶层目录限制。
 - Gaussian PLY 会读取颜色系数、透明度与尺度；预览默认使用二维画布按点中心绘制小方点，避免大面积涂抹。普通点云使用 WebGL，浏览器不支持 WebGL 或上下文丢失时自动用二维画布显示。
 
-## 模型管理子服务后端架构（llama_manager/app.py）
+## 模型管理子服务后端架构（model_manager/app.py）
 
 ### 全局状态
 
@@ -333,7 +346,7 @@ _download_lock   # 下载任务状态读写锁
 
 ### API 端点
 
-以下路径为 `llama_manager/app.py` 子应用内部路径；通过 Hub 访问时需要在路径前加上 `/llama-manager` 前缀，例如 `/api/settings` 对应 `/llama-manager/api/settings`。
+以下路径为 `model_manager/app.py` 子应用内部路径；通过 Hub 访问时需要在路径前加上 `/llama-manager` 前缀，例如 `/api/settings` 对应 `/llama-manager/api/settings`。
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -532,7 +545,7 @@ _download_lock   # 下载任务状态读写锁
 - PID 1（init）不会被 kill
 - terminate → 等待 3 秒 → kill
 
-## 模型管理子服务旧版前端架构（llama_manager/index.html）
+## 模型管理子服务旧版前端架构（model_manager/index.html）
 
 以下内容记录迁移前页面的行为。旧文件仍被保留用于兼容与功能对照，不再作为日常入口或新增功能承载位置。
 
@@ -648,7 +661,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `models` | string[] | 探查结果与手工添加模型合并后的可选列表，每条最多 240 个字符、总共最多 200 个 |
 | `created_at` | number | 配置创建时间的 Unix 时间戳 |
 
-### llama_manager/settings.json
+### model_manager/settings.json
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -661,7 +674,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 ### 内部状态结构
 
-`llama_manager/settings.json.model_params`（已废弃，启动时自动迁移为 llama 注册项后清空）曾按模型路径独立存储启动参数：
+`model_manager/settings.json.model_params`（已废弃，启动时自动迁移为 llama 注册项后清空）曾按模型路径独立存储启动参数：
 
 ```json
 {
@@ -672,7 +685,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 }
 ```
 
-`llama_manager/settings.json.custom_services` 保存用户注册的服务，按 `service_type` 区分 llama.cpp 与 vLLM（字段为两类超集，无关项为 null）：
+`model_manager/settings.json.custom_services` 保存用户注册的服务，按 `service_type` 区分 llama.cpp 与 vLLM（字段为两类超集，无关项为 null）：
 
 ```json
 {
@@ -703,7 +716,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 }
 ```
 
-`llama_manager/settings.json.managed_processes` 保存模型管理模块启动过的受管进程记录：
+`model_manager/settings.json.managed_processes` 保存模型管理模块启动过的受管进程记录：
 
 ```json
 {
@@ -716,7 +729,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
       "port": 8083,
       "command": "llama-server -m /home/lihan/models/model.gguf --host 0.0.0.0 --port 8083",
       "command_tokens": ["llama-server", "-m", "/home/lihan/models/model.gguf", "--host", "0.0.0.0", "--port", "8083"],
-      "log_file": "/home/lihan/run/HannisHub/llama_manager/logs/services/llama-model.gguf-8083-20260615-120000.log",
+      "log_file": "/home/lihan/run/HannisHub/model_manager/logs/services/llama-model.gguf-8083-20260615-120000.log",
       "process_create_time": 1781496000.0,
       "running": true
     }
@@ -724,7 +737,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 }
 ```
 
-`llama_manager/settings.json.gpu_history` 保存 GPU util 采样：
+`model_manager/settings.json.gpu_history` 保存 GPU util 采样：
 
 ```json
 {
@@ -741,7 +754,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 旧版 `model_params.json`、`last_launch.json`、`custom_services.json`、`managed_processes.json`、`gpu_history.json` 会在应用启动时自动迁移到 `settings.json` 并删除。
 
-此外，旧版按模型路径记忆的 `llama_manager/settings.json.model_params` 会在应用启动时自动迁移为 `custom_services` 中的 llama.cpp 注册项（name 取模型文件名；幂等：同 model 路径已存在则跳过），迁移完成后清空 `model_params`。
+此外，旧版按模型路径记忆的 `model_manager/settings.json.model_params` 会在应用启动时自动迁移为 `custom_services` 中的 llama.cpp 注册项（name 取模型文件名；幂等：同 model 路径已存在则跳过），迁移完成后清空 `model_params`。
 
 ## 安全设计
 
@@ -827,7 +840,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 
 语音归档作为独立卡片放在提示词归档列表下方、润色提示词设置上方；录音按钮仍位于编辑器，不影响正在录制的状态和自动上传。无录音时展示空状态，有录音时按时间倒序在固定高度内滚动显示全部历史。列表沿用文字归档的紧凑折叠样式，默认仅显示日期、单行转写摘要与白色描边的“下载音频”“恢复”“删除”操作，不展示单独的本地音频下载、转码下载或替换提示词按钮；下载统一获取服务器原音频，服务器尚未归档时按钮禁用。恢复会把转写文本放回当前提示词、切换到原文、保存草稿并滚动回编辑器，与文字归档的恢复交互一致。删除成功后清理 IndexedDB 录音元数据与全部分片、服务器原音频、转码和转写文件，不改变编辑器现有内容；服务端与浏览器同步删除标记，避免正在上传的请求、自动重试或其他标签页让录音重新出现。录音正在采集或服务器正在处理时删除按钮禁用，处理完成后可删除。展开后查看全文、错误和文件信息；失败重试与中断上传也收在详情内。播放器只在展开时加载，采用网页同色的深色控制条与播放、暂停、进度拖动，不使用浏览器默认浅色播放条。当前提示词标题下移除统一模型说明。
 
-ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和语言四项外部输入，并在只读状态中显示本机 ASR 是否运行。服务器自动管理归档目录，实际归档位置、优先接口和外部接口通过只读详情查看；超时不出现在界面，后端沿用已有值或默认值。外部配置保存到 `prompt_service/settings.json` 的 `external_asr` 字段；录音索引保存在同文件的 `recordings` 字段，提示词写入保留这些字段。默认归档目录为 `prompt_service/data/recordings/`，自定义路径以 `Path.expanduser()` 展开；历史记录保存原归档路径，修改设置不会移动或丢失历史文件。上传先写临时文件，检查完整性后原子落盘，只有完成原音频归档才返回成功；异常上传移除临时文件。服务端先使用系统 ffmpeg 转为 16 kHz 单声道 64 kbps MP3 并保留原音频；本机与外部转写共用根目录 `asr_audio.py` 的时长探测、静音检测、最长 10 分钟切片和超限二次切分工具。Hub 进程会向提示词模块注入模型管理的本机 ASR 探测与转写函数，检测到唯一运行中的受管 ASR 时优先本机转写，并复用 ASR 页面的 FLAC 转码、输出 token 上限和噪声重复输出过滤流程逐段提交，长录音不会把整文件直接交给本机服务。本机不可用或独立启动提示词子服务时使用外部配置，同样先按静音边界规划片段，再把每段导出为 16 kHz 单声道 64 kbps MP3 并逐段请求，最后合并转写文本与片段进度：标准转写服务使用 Bearer Key 和 multipart `file`、可选 `model`/`language`、`response_format=json`，读取 JSON `text`；MiMo ASR 自动适配 `/v1/chat/completions`，使用 JSON `messages[].content[].input_audio.data` 传入 MP3 的 Base64 data URL，语言通过 `asr_options.language` 传入，读取 `choices[0].message.content`。外部单片原始 MP3 超过 7 MB 时会按实际大小继续切分并保留最短 15 秒保护，确保 MiMo Base64 字符串低于官方 10 MB 上限。基础地址会补全对应端点，其他完整端点保留原路径与查询参数。转写内容归档为 UTF-8 文本。第三方服务自己的其他请求限制仍适用。MiMo 请求格式依据[小米官方文档](https://mimo.mi.com/docs/en-US/api/audio/Speech-Recognition)。
+ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和语言四项外部输入，并在只读状态中显示本机 ASR 是否运行。服务器自动管理归档目录，实际归档位置、优先接口和外部接口通过只读详情查看；超时不出现在界面，后端沿用已有值或默认值。外部配置保存到 `prompt_service/settings.json` 的 `external_asr` 字段；录音索引保存在同文件的 `recordings` 字段，提示词写入保留这些字段。默认归档目录为 `prompt_service/data/recordings/`，自定义路径以 `Path.expanduser()` 展开；历史记录保存原归档路径，修改设置不会移动或丢失历史文件。上传先写临时文件，检查完整性后原子落盘，只有完成原音频归档才返回成功；异常上传移除临时文件。服务端先使用系统 ffmpeg 转为 16 kHz 单声道 64 kbps MP3 并保留原音频；本机与外部转写共用`model_manager/asr_audio.py` 的时长探测、静音检测、最长 10 分钟切片和超限二次切分工具。Hub 进程会向提示词模块注入模型管理的本机 ASR 探测与转写函数，检测到唯一运行中的受管 ASR 时优先本机转写，并复用 ASR 页面的 FLAC 转码、输出 token 上限和噪声重复输出过滤流程逐段提交，长录音不会把整文件直接交给本机服务。本机不可用或独立启动提示词子服务时使用外部配置，同样先按静音边界规划片段，再把每段导出为 16 kHz 单声道 64 kbps MP3 并逐段请求，最后合并转写文本与片段进度：标准转写服务使用 Bearer Key 和 multipart `file`、可选 `model`/`language`、`response_format=json`，读取 JSON `text`；MiMo ASR 自动适配 `/v1/chat/completions`，使用 JSON `messages[].content[].input_audio.data` 传入 MP3 的 Base64 data URL，语言通过 `asr_options.language` 传入，读取 `choices[0].message.content`。外部单片原始 MP3 超过 7 MB 时会按实际大小继续切分并保留最短 15 秒保护，确保 MiMo Base64 字符串低于官方 10 MB 上限。基础地址会补全对应端点，其他完整端点保留原路径与查询参数。转写内容归档为 UTF-8 文本。第三方服务自己的其他请求限制仍适用。MiMo 请求格式依据[小米官方文档](https://mimo.mi.com/docs/en-US/api/audio/Speech-Recognition)。
 
 录音状态依次为 `queued`、`processing`、`done`，未检测到本机 ASR 且未配置外部接口为 `waiting_config`，转码或转写请求失败为 `failed`；失败不清理音频，用户可重试。录音记录保存实际引擎和进度说明，前端处理中显示本机 / 外部引擎与当前阶段。后台队列随 Hub 或独立子服务启动，服务重启后继续未完成任务，取消任务会回收归档转码 ffmpeg。浏览器录音需要 HTTPS 或 localhost；本地数据与浏览器和源站绑定，清理站点数据会删除本地副本，浏览器关闭前尚未提交的最后片段也无法保证保存。前端请求持久存储并提供下载备份；存储失败时停止录音，并提供内存中整段音频的紧急下载。
 
@@ -843,5 +856,5 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 统一前端 `/llama/ocr` 不再嵌入官方工作台，改为 `frontend/components/llama/ocr-panel.tsx` 自研页面，保留官方交互结构：顶部任务切换（文档解析 / 字段提取 / 图像问答，后两者分别显示字段与问题输入框）与「上传文件 / 开始解析」按钮，下方左右两栏「01 原始文档 / 02 识别结果」。左栏未选文件时为拖入上传区，并以标签展示支持格式（PNG / JPG / JPEG / WEBP / BMP / PDF，单文件 ≤ 50 MB）；选中后预览图片或 PDF，点击图片或「开始解析」提交。右栏提供 预览 / 原文 / JSON 视图与复制、下载（.md / .json）。已移除官方页面的 OCR 服务卡片、首屏标语、样例区与底部社区区块；服务状态与「启动服务」按钮移到页头右侧。
 - 结果预览由 `ocr-result.tsx` 渲染：支持标题、段落、列表、管道表格、`$$` 公式块、PDF 分页标记，模型输出的 HTML 表格经 DOMParser 只提取单元格文本与合并属性后用 React 渲染，不注入原始 HTML；字段提取的 JSON 结果格式化显示。
 - PDF 选择字段提取或图像问答时走两段链路：先按 PDF 文档解析链路得到整份 Markdown（进度占 0–90%，中间结果保存为记录目录下 `parsed.md`），再把 Markdown 交给「设置 · AI 能力」当前启用的 OpenAI 兼容模型（`ai_settings.chat_completion`，temperature 0.1）完成字段提取（只输出 JSON，未找到的字段为 null，自动去掉代码块标记）或问答（只依据文档回答，未提及时明确说明）；解析结果超过 20 万字符或文本模型调用失败时记录标记失败并给出原因。图片的三种任务与 PDF 文档解析仍直接调用小米 OCR。页面不再禁用 PDF 的字段提取 / 图像问答，选中时在任务切换旁说明该链路，记录列表标注「先解析后文本处理」。
-- 识别由 Hub 后端 `ocr_records.py` 在后台调用受管 OCR 实例（`llama_manager.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注失败页码；全部页面失败时记录标记为失败并显示首个原因。全局最多 2 个任务并发，关闭页面不影响识别。
+- 识别由 Hub 后端 `model_manager/ocr_records.py` 在后台调用受管 OCR 实例（`model_manager.app.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注失败页码；全部页面失败时记录标记为失败并显示首个原因。全局最多 2 个任务并发，关闭页面不影响识别。
 - 识别记录按登录用户隔离，保存在 `data/ocr_records/<用户名 SHA-256 前 32 位>/`：`records.json` 为索引，`<记录 ID>/source.<扩展名>` 为原始文件、`result.md` 为结果；每个账号最多 500 条。Hub 重启时把未完成的记录标记为「服务重启导致任务中断」。页面在有进行中的记录时每 2 秒刷新列表，可查看、打开原文件、重命名与删除（进行中的记录不可删除）。上传、完成与失败写入 `uvicorn.error` 日志。

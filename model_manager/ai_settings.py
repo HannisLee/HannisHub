@@ -19,9 +19,10 @@ from fastapi import HTTPException
 import httpx
 
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 模块位于子目录，ROOT_DIR 指向项目根目录
+ROOT_DIR = Path(__file__).resolve().parent.parent
 AI_SETTINGS_PATH = ROOT_DIR / "ai_settings.json"
-LEGACY_LLAMA_SETTINGS_PATH = ROOT_DIR / "llama_manager" / "settings.json"
+LEGACY_LLAMA_SETTINGS_PATH = ROOT_DIR / "model_manager" / "settings.json"
 
 OPENAI_API_BASE_URL_KEY = "openai_api_base_url"
 OPENAI_API_MODEL_KEY = "openai_api_model"

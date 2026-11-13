@@ -21,8 +21,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-import ai_settings
-from asr_audio import (
+from model_manager import ai_settings
+from model_manager.asr_audio import (
     ASR_MAX_CHUNK_SECONDS,
     ASR_MIN_CHUNK_SECONDS,
     build_chunks as _asr_build_chunks,

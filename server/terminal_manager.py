@@ -23,7 +23,8 @@ from typing import Any
 
 from fastapi import HTTPException, WebSocket
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 模块位于子目录，ROOT_DIR 指向项目根目录
+ROOT_DIR = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = ROOT_DIR / "settings.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {

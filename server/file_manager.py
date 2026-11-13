@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, Request
 from starlette.requests import ClientDisconnect
 
-from auth import get_settings_section, update_settings_section
+from core.auth import get_settings_section, update_settings_section
 
 
 DEFAULT_ROOT = "~"
@@ -797,7 +797,7 @@ async def upload_file(
 
 def _request_username(request: Request) -> str:
     """读取上传请求所属的登录用户，仅用于日志与分片会话归属。"""
-    from auth import current_username
+    from core.auth import current_username
 
     try:
         return current_username(request.session) or "-"

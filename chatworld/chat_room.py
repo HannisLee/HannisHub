@@ -24,7 +24,8 @@ from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 模块位于子目录，ROOT_DIR 指向项目根目录
+ROOT_DIR = Path(__file__).resolve().parent.parent
 CHAT_ROOM_PATH = ROOT_DIR / "data" / "chat_room.json"
 READS_PATH = ROOT_DIR / "data" / "chat_room_reads.json"
 FILES_DIR = ROOT_DIR / "data" / "chat_room_files"

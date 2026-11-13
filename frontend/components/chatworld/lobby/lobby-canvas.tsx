@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createLobbyGame } from "../../game/lobby/create-game";
-import type { TouchState } from "../../game/lobby/player";
+import { createLobbyGame } from "./game/create-game";
+import type { TouchState } from "./game/player";
 
 interface LobbyCanvasProps {
   touch: TouchState;

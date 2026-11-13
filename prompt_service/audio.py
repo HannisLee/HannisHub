@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
-from asr_audio import (
+from model_manager.asr_audio import (
     ASR_MAX_CHUNK_SECONDS,
     ASR_MIN_CHUNK_SECONDS,
     build_chunks,

@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from auth import (
+from core.auth import (
     AuthMiddleware,
     authenticate,
     change_password,
@@ -34,13 +34,13 @@ from auth import (
     validate_password,
     validate_username,
 )
-import ai_settings
-import chat_room
-import ocr_records
-import terminal_manager
-from compression import SelectiveGZipMiddleware
-import llama_manager.app as llama_manager_app
-from file_manager import (
+from model_manager import ai_settings
+from chatworld import chat_room
+from model_manager import ocr_records
+from server import terminal_manager
+from core.compression import SelectiveGZipMiddleware
+import model_manager.app as model_manager_app
+from server.file_manager import (
     add_favorite,
     configured_roots,
     date_search_folders,
@@ -64,7 +64,7 @@ from file_manager import (
     abort_chunked_upload,
     sync_roots,
 )
-from point_cloud import resolve_cloud_file
+from server.point_cloud import resolve_cloud_file
 import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
@@ -72,11 +72,11 @@ ROOT_DIR = Path(__file__).resolve().parent
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 # 提示词语音输入与模型管理运行在同一 Hub 进程中，优先复用受管本机 ASR。
 prompt_service_app.audio_service.configure_local_asr(
-    llama_manager_app.get_running_asr_service,
-    llama_manager_app.transcribe_with_managed_asr,
+    model_manager_app.get_running_asr_service,
+    model_manager_app.transcribe_with_managed_asr,
 )
 # OCR 识别记录由 Hub 后台调用受管小米 OCR 服务。
-ocr_records.configure(llama_manager_app.get_running_ocr_service)
+ocr_records.configure(model_manager_app.get_running_ocr_service)
 SERVICES: list[dict[str, str]] = [
     {
         "id": "llama-manager",
@@ -121,9 +121,9 @@ async def lifespan(_: FastAPI):
     """由 Hub 统一管理子服务生命周期。"""
     await server_manager_app.start_scheduler()
     await prompt_service_app.audio_service.start()
-    await llama_manager_app.recover_interrupted_asr_tasks()
+    await model_manager_app.recover_interrupted_asr_tasks()
     ocr_records.recover_interrupted()
-    auto_start_task = asyncio.create_task(llama_manager_app.auto_start_watchdog())
+    auto_start_task = asyncio.create_task(model_manager_app.auto_start_watchdog())
     terminal_reaper = asyncio.create_task(terminal_manager.manager.reaper_loop())
     try:
         yield
@@ -164,13 +164,13 @@ def _frontend_page(route: str) -> FileResponse | None:
 @app.get("/", include_in_schema=False)
 async def index():
     """返回综合管理站服务列表页面。"""
-    return _frontend_page("") or FileResponse(ROOT_DIR / "index.html")
+    return _frontend_page("") or FileResponse(ROOT_DIR / "legacy" / "index.html")
 
 
 @app.get("/login", include_in_schema=False)
 async def login_page():
     """返回登录 / 首次初始化页面。"""
-    return _frontend_page("login") or FileResponse(ROOT_DIR / "login.html")
+    return _frontend_page("login") or FileResponse(ROOT_DIR / "legacy" / "login.html")
 
 
 async def _new_frontend_route(route: str) -> FileResponse:
@@ -304,7 +304,7 @@ async def point_clouds_page():
 @app.get("/icon.png", include_in_schema=False)
 async def icon():
     """返回 HannisHub 图标，同时兼容各子页面引用。"""
-    return FileResponse(ROOT_DIR / "llama_manager" / "icon.png", media_type="image/png")
+    return FileResponse(ROOT_DIR / "model_manager" / "icon.png", media_type="image/png")
 
 
 @app.get("/icon.svg", include_in_schema=False)
@@ -824,7 +824,7 @@ async def users_delete(username: str, request: Request):
 
 # 统一前端页面在挂载的旧子服务之前注册，避免 /server/connections 等路由
 # 被 /server 子应用的根挂载抢先匹配。旧页面与 API 继续完整保留。
-app.mount("/llama-manager", llama_manager_app.app)
+app.mount("/llama-manager", model_manager_app.app)
 app.mount("/server", server_manager_app.app)
 app.mount("/prompt", prompt_service_app.app)
 

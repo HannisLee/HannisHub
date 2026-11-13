@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useState, useSyncExternalStore } from "react";
-import type { TouchState } from "../../game/lobby/player";
+import type { TouchState } from "./game/player";
 
 const LobbyCanvas = dynamic(() => import("./lobby-canvas"), {
   ssr: false,

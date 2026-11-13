@@ -91,18 +91,20 @@ bash run.sh
 
 ```text
 HannisHub/
-├── app.py                    # Hub、认证、子服务挂载与前端静态托管
-├── auth.py                   # 登录、密码哈希与会话中间件
-├── ai_settings.py            # AI API、密钥与提示词的本地配置模块
-├── file_manager.py           # 受限文件浏览、目录缓存与下载
+├── app.py                    # Hub、认证、子服务挂载与前端静态托管（根目录只保留入口与配置）
+├── core/                     # 登录认证、会话中间件与 gzip 压缩
+├── chatworld/                # 聊天室与聊天大厅后端；asset/ 为大厅素材原件（不入库，asset_index.md 速查）
+├── model_manager/            # 模型管理子服务（原 llama_manager/），含 AI 设置、ASR、OCR 模块
+├── server/                   # SSH/任务子服务，以及文件管理、网页终端、点云组件
+├── prompt_service/           # 提示词 FastAPI 子服务与旧版页面
+├── legacy/                   # Hub 旧版首页与登录页
 ├── frontend/                 # 唯一的 Next.js 前端工程
-│   ├── app/                  # App Router 页面与全局设计 tokens
-│   ├── components/           # layout、ui、llama、server、prompts、settings、file-manager、overview
+│   ├── app/                  # App Router 页面与全局设计 tokens；(chatworld)/ 收纳聊天页面
+│   ├── components/           # layout、ui、chatworld、llama、server、prompts、settings、file-manager、overview 等
 │   ├── lib/                  # API 客户端、类型、格式化与导航
 │   └── public/               # 静态前端资源
-├── llama_manager/            # 模型管理 FastAPI 子服务与旧版页面
-├── server/                   # SSH/任务 FastAPI 子服务与旧版页面
-├── prompt_service/           # 提示词 FastAPI 子服务与旧版页面
+├── scripts/                  # 外部服务启动脚本
+├── docs/                     # 项目记忆等补充文档
 ├── design.md                 # 强制前端设计规范
 ├── spec.md                   # 架构文档
 └── run.sh                    # 固定监听 0.0.0.0:8081
@@ -112,7 +114,7 @@ HannisHub/
 
 - 根目录 `settings.json`：Hub 登录与会话配置，以及默认 `~/reproduce` 的文件管理暴露范围
 - 根目录 `ai_settings.json`：AI API、密钥与提示词；已加入 `.gitignore`，不会提交到 GitHub
-- `llama_manager/settings.json`：模型管理配置和运行状态
+- `model_manager/settings.json`：模型管理配置和运行状态
 - `server/settings.json`：Server 配置
 - `prompt_service/settings.json`：提示词分组与归档数据
 - 所有配置均使用 JSON 文件，不引入数据库
@@ -120,4 +122,4 @@ HannisHub/
 
 ## 旧版页面
 
-旧版 `index.html` 暂时保留，便于迁移验证和兼容既有入口：`/llama-manager/`、`/server/`、`/prompt/`。新的日常入口是上表中的统一 Dashboard 路径。
+旧版 `index.html`（Hub 级位于 `legacy/`）暂时保留，便于迁移验证和兼容既有入口：`/llama-manager/`、`/server/`、`/prompt/`。新的日常入口是上表中的统一 Dashboard 路径。

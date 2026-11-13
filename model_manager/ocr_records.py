@@ -22,11 +22,12 @@ import httpx
 from fastapi import HTTPException, Request
 from starlette.requests import ClientDisconnect
 
-import ai_settings
-from auth import current_username
+from model_manager import ai_settings
+from core.auth import current_username
 
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 模块位于子目录，ROOT_DIR 指向项目根目录
+ROOT_DIR = Path(__file__).resolve().parent.parent
 OCR_DATA_DIR = ROOT_DIR / "data" / "ocr_records"
 # 小米 OCR 服务以 base64 JSON 接收文件且请求体上限 80 MB，原始文件需留出编码膨胀空间。
 MAX_OCR_UPLOAD_BYTES = 50 * 1024 * 1024

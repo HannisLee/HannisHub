@@ -14,7 +14,8 @@ from urllib.parse import quote
 from fastapi.responses import JSONResponse, RedirectResponse
 from pwdlib import PasswordHash
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 模块位于子目录，ROOT_DIR 指向项目根目录
+ROOT_DIR = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = ROOT_DIR / "settings.json"
 DEFAULT_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 LEGACY_DEFAULT_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60

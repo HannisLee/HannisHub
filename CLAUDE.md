@@ -14,9 +14,9 @@
 
 - 后端：Python + FastAPI，所有 API 返回 JSON
 - 前端：根目录唯一的 Next.js + React + TypeScript App Router 工程，位于 `frontend/`
-- 前端设计：所有新增页面必须严格遵守根目录 `design.md`；使用其中的 CSS Variables、暖黑配色、衬线标题和无阴影卡片规范
+- 前端设计：所有新增网页页面必须严格遵守根目录 `design.md`；使用其中的 CSS Variables、暖黑配色、衬线标题和无阴影卡片规范
 - 前端组织：页面放在 `frontend/app/`，通用组件放在 `frontend/components/layout/` 与 `frontend/components/ui/`，业务组件按模块放在对应文件夹，API 客户端放在 `frontend/lib/`
-- 旧版 `index.html` 页面在迁移验证期保留，不新增旧版页面功能
+- 旧版 `index.html` 页面（Hub 级位于 `legacy/`）在迁移验证期保留，不新增旧版页面功能
 - 配置：settings.json 存储所有配置，无数据库
 - 语言：代码注释和文档全部使用中文
 

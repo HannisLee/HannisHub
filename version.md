@@ -1155,3 +1155,12 @@
 - 新增本地选房画廊 `frontend/out/room-gallery/`（源文件 `data/room-gallery/`，均不入库：许可证禁止再分发预览图，且构建输出会在下次前端构建时清除）：收录素材包 `6_Home_Designs` 全部 14 张官方预拼户型预览（×3 最近邻放大）与当前大厅对照图，逐张标注格数、像素、类别、内容说明与选用建议。
 - 画廊交互：类别/换壳首选/仅候选筛选、缩放 ×1 整间适应至 ×6 细节滚动、Tile 网格叠加（格宽随显示比例对齐）、推荐/面积/名称排序、舒适/紧凑密度、候选标记（localStorage 持久化、底部候选栏、清空可撤销）、复制候选清单、导出 Markdown 对比表、灯箱（适应/缩放/前后间/Esc/背景关闭）；桌面/移动/平板 55 项断言全部通过、无控制台与资源错误。
 - 选房建议：整体换壳首选 museum-1（20×17 矩形单厅）、museum-entrance（16×22 纵向门厅）、gym（19×15 中央开阔）；保留现壳借鉴布局 generic-home / japanese-home / condominium；暂不建议 ice-cream / museum-4 / tv-studio / shooting-range / museum-2 / condominium2 / gym2。
+
+### v0.2.89 — 2026-11-13
+- 根目录 `AGENTS.md` 改为指向 `CLAUDE.md` 的软链接，两份项目指令只维护一份；合并前已把 AGENTS.md 中「新增网页页面」的措辞同步到 CLAUDE.md。
+
+### v0.2.90 — 2026-11-13
+- 终端页新增可拖动的浮动提示词（`frontend/components/prompts/prompt-float.tsx`）：圆形按钮可拖到页面任意位置（按住移动超过 4px 视为拖动，松开记忆位置，窗口缩放时自动收回视口），点击展开面板，只有输入框、复制、归档三项，不接入润色；Esc 或再次点击按钮收起。
+- 归档调用提示词模块既有接口 `POST /prompt/api/prompts`，数据写入 `prompt_service/settings.json`，与「提示词」页归档列表共用；草稿单独暂存在 `localStorage` 的 `hannishub_prompt_float_draft`，不覆盖提示词页草稿。
+- 复制逻辑抽出到 `frontend/lib/clipboard.ts`，提示词页与浮动组件共用（非安全上下文下回退 `execCommand`）。
+- 样式沿用 design.md tokens：无阴影、1px 边框、品牌色悬停描边。同步 spec.md。验证：`tsc --noEmit`、eslint 通过；未执行 build（避免覆盖线上 `frontend/out`）。

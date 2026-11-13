@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from file_manager import configured_roots, resolve_root
+from server.file_manager import configured_roots, resolve_root
 
 
 POINT_CLOUD_EXTENSIONS = {".ply", ".pcd", ".xyz", ".xyzn", ".xyzrgb", ".pts", ".las", ".laz"}

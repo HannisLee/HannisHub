@@ -12,8 +12,8 @@ from starlette.requests import Request
 from pathlib import Path
 from unittest.mock import patch
 
-from llama_manager.app import _asr_extract_text, _asr_max_completion_tokens
-import llama_manager.app as app
+from model_manager.app import _asr_extract_text, _asr_max_completion_tokens
+import model_manager.app as app
 
 
 class AsrHelperTests(unittest.TestCase):

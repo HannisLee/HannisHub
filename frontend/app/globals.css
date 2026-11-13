@@ -1055,6 +1055,18 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .terminal-empty p { max-width: 420px; margin: 0; }
 .terminal-statusbar { display: flex; flex: 0 0 auto; gap: var(--space-5); padding: var(--space-1) var(--space-4); border-top: 1px solid var(--color-divider); color: var(--color-text-muted); font: 400 12px/1.8 var(--font-mono); }
 
+/* 终端页浮动提示词：可拖动圆形按钮 + 输入面板（仅输入、复制、归档） */
+.prompt-float-bubble { position: fixed; z-index: 40; display: inline-grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--color-control-border); border-radius: var(--radius-pill); background: var(--color-surface); color: var(--color-text-secondary); cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.prompt-float-bubble:hover, .prompt-float-bubble.is-open { border-color: var(--color-brand); background: var(--color-surface-hover); color: var(--color-text-primary); }
+.prompt-float-bubble:active { cursor: grabbing; }
+.prompt-float-bubble svg { width: 20px; height: 20px; }
+.prompt-float-panel { position: fixed; z-index: 40; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.prompt-float-input { min-height: 0; flex: 1 1 auto; resize: none; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-control-border); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-text-primary); font: 400 14px/1.6 var(--font-ui); }
+.prompt-float-input:focus { border-color: var(--color-brand); outline: none; }
+.prompt-float-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
+.prompt-float-status { min-width: 0; flex: 1 1 auto; overflow: hidden; color: var(--color-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-float-status.is-error { color: var(--color-error); }
+
 @media (max-width: 1023px) {
   .ocr-stage { grid-template-columns: 1fr; }
   .ocr-pane { height: clamp(420px, 64vh, 640px); }

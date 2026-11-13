@@ -3,8 +3,8 @@ __pycache__/
 .venv/
 logs/*.log
 logs/
-llama_manager/data/asr_history/
-llama_manager/data/asr_jobs/
+model_manager/data/asr_history/
+model_manager/data/asr_jobs/
 prompt_service/data/recordings/
 .claude/
 nohup.out
@@ -21,3 +21,6 @@ frontend/.eslintcache
 data/
 4265_moderninteriors.zip
 .4265_moderninteriors.zip.*.upload
+# 付费素材包原件（许可证禁止再分发），仅保留速查索引入库
+chatworld/asset/*
+!chatworld/asset/asset_index.md

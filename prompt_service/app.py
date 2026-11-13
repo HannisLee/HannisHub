@@ -19,7 +19,7 @@ if str(ROOT_DIR) not in sys.path:
     # 独立启动子服务时补充项目根目录，以复用统一 AI 配置模块。
     sys.path.insert(0, str(ROOT_DIR))
 
-import ai_settings
+from model_manager import ai_settings
 
 SETTINGS_PATH = APP_DIR / "settings.json"
 PROMPT_MAX_CHARS = 2_000_000
