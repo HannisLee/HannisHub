@@ -3,6 +3,7 @@ import {
   ASSET_BASE, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
   type PortalDef, type Rect, type RoomDef,
 } from "./layout";
+import { FRAME_HEIGHT, FRAME_WIDTH, SHEET_HEIGHT, SHEET_WIDTH } from "./avatar";
 import { Player } from "./player";
 
 /** 世界坐标下的房间：在布局数据基础上附加偏移后的矩形，便于判定 */
@@ -15,6 +16,8 @@ interface RuntimeRoom {
 }
 
 const FADE_MS = 220;
+/** 自定义形象贴图键：一张常驻的画布贴图，形象变化时重绘并刷新，已有动画与精灵无需重建 */
+const AVATAR_TEXTURE = "avatar-self";
 const CAMERA_MARGIN = 12;
 const LABEL_FONT = '"Anthropic Sans", Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 /** 文字纹理放大倍数：世界坐标 1px 在屏幕上会被放大 2–4 倍，文字需更高分辨率才清晰 */
@@ -44,12 +47,13 @@ export class LobbyScene extends Phaser.Scene {
   private rooms = new Map<string, RuntimeRoom>();
   private current!: RuntimeRoom;
   private nearby: MachineDef | null = null;
-  private keyE!: Phaser.Input.Keyboard.Key;
-  private keySpace!: Phaser.Input.Keyboard.Key;
+  /** 交互键按下标记：在 keydown 事件里置位，避免按下与抬起落在同一帧时 JustDown 丢失快速轻按 */
+  private interactPressed = false;
   private prompt!: Phaser.GameObjects.Container;
   private transitioning = false;
   private paused = false;
   private failed = false;
+  private avatarVersion = -1;
 
   constructor(bridge: LobbyBridge, events: LobbyEvents) {
     super("lobby");
@@ -91,12 +95,19 @@ export class LobbyScene extends Phaser.Scene {
 
     const start = this.rooms.get(this.layout.start.room)!;
     const spawn = start.def.spawns[this.layout.start.spawn];
-    this.player = new Player(this, start.def.x + spawn.x, start.def.y + spawn.y, this.bridge);
+    this.createAvatarTexture();
+    this.player = new Player(this, start.def.x + spawn.x, start.def.y + spawn.y, this.bridge, this.applyAvatar());
     this.physics.add.collider(this.player, solids);
 
     const keyboard = this.input.keyboard!;
-    this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-    this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    // addKey 同时负责拦截按键默认行为（如空格滚动页面）
+    keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    const markInteract = (event: KeyboardEvent) => {
+      if (!event.repeat) this.interactPressed = true;
+    };
+    keyboard.on("keydown-E", markInteract);
+    keyboard.on("keydown-SPACE", markInteract);
     this.prompt = this.createPrompt();
 
     this.cameras.main.setBackgroundColor("#141413");
@@ -109,7 +120,7 @@ export class LobbyScene extends Phaser.Scene {
     this.events_.onReady?.();
   }
 
-  /** 为每个动画帧条创建循环动画；门额外拆出开门 / 关门两段 */
+  /** 为每个动画帧条创建循环动画；自动门（玻璃门、电梯）额外按布局给出的帧序拆出开门 / 关门两段 */
   private createAnimations() {
     for (const [key, sheet] of Object.entries(this.layout.anims)) {
       const animKey = `anim-${key}`;
@@ -118,14 +129,38 @@ export class LobbyScene extends Phaser.Scene {
         key: animKey,
         frames: this.anims.generateFrameNumbers(key),
         frameRate: sheet.frameRate,
-        repeat: key === "elevator" ? 0 : -1,
+        repeat: sheet.door ? 0 : -1,
       });
-      if (key === "door_glass") {
-        // 帧 0 关闭 → 帧 4 全开；帧 5–7 为回关过程，最后回到帧 0
-        this.anims.create({ key: "door-open", frames: this.anims.generateFrameNumbers(key, { start: 0, end: 4 }), frameRate: sheet.frameRate });
-        this.anims.create({ key: "door-close", frames: this.anims.generateFrameNumbers(key, { frames: [5, 6, 7, 0] }), frameRate: sheet.frameRate });
+      if (sheet.door) {
+        this.anims.create({ key: `${key}-open`, frames: this.anims.generateFrameNumbers(key, { frames: sheet.door.open }), frameRate: sheet.frameRate });
+        this.anims.create({ key: `${key}-close`, frames: this.anims.generateFrameNumbers(key, { frames: sheet.door.close }), frameRate: sheet.frameRate });
       }
     }
+  }
+
+  /** 创建 96x256 的画布贴图并切出 48 帧（与 player.png 相同布局） */
+  private createAvatarTexture() {
+    if (this.textures.exists(AVATAR_TEXTURE)) this.textures.remove(AVATAR_TEXTURE);
+    const texture = this.textures.createCanvas(AVATAR_TEXTURE, SHEET_WIDTH, SHEET_HEIGHT);
+    if (!texture) return;
+    const columns = SHEET_WIDTH / FRAME_WIDTH;
+    const count = columns * (SHEET_HEIGHT / FRAME_HEIGHT);
+    for (let i = 0; i < count; i++) {
+      texture.add(i, 0, (i % columns) * FRAME_WIDTH, Math.floor(i / columns) * FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT);
+    }
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+
+  /** 把桥接对象中的形象帧表画进画布贴图；返回应使用的皮肤（无自定义形象时为默认角色） */
+  private applyAvatar(): string {
+    this.avatarVersion = this.bridge.avatar.version;
+    const sheet = this.bridge.avatar.sheet;
+    const texture = this.textures.get(AVATAR_TEXTURE) as Phaser.Textures.CanvasTexture;
+    if (!sheet || !texture?.context) return "player";
+    texture.context.clearRect(0, 0, SHEET_WIDTH, SHEET_HEIGHT);
+    texture.context.drawImage(sheet, 0, 0);
+    texture.refresh();
+    return AVATAR_TEXTURE;
   }
 
   private buildRoom(def: RoomDef, solids: Phaser.Physics.Arcade.StaticGroup): RuntimeRoom {
@@ -160,7 +195,7 @@ export class LobbyScene extends Phaser.Scene {
 
     const doors = def.doors.map(door => {
       const sprite = this.add.sprite(ox + door.x, oy + door.y, door.key, 0).setOrigin(0);
-      sprite.setDepth(oy + door.y + sprite.height);
+      sprite.setDepth(oy + (door.depth ?? door.y + sprite.height));
       return { def: door, sprite, cx: ox + door.x + sprite.width / 2, cy: oy + door.y + sprite.height, open: false };
     });
 
@@ -305,6 +340,7 @@ export class LobbyScene extends Phaser.Scene {
   update() {
     if (this.failed || !this.player) return;
     this.syncPause();
+    if (this.bridge.avatar.version !== this.avatarVersion) this.player.setSkin(this.applyAvatar());
     this.player.update();
 
     const feetX = this.player.x;
@@ -315,10 +351,14 @@ export class LobbyScene extends Phaser.Scene {
       const near = Phaser.Math.Distance.Between(feetX, feetY, door.cx, door.cy) < door.def.radius;
       if (near !== door.open) {
         door.open = near;
-        door.sprite.play(near ? "door-open" : "door-close");
+        door.sprite.play(`${door.def.key}-${near ? "open" : "close"}`);
       }
     }
 
+    // 交互请求只在当帧有效：本帧不在机器地台上（或正在切换房间）时直接丢弃
+    const interact = this.interactPressed || this.bridge.interactQueued;
+    this.interactPressed = false;
+    this.bridge.interactQueued = false;
     if (this.transitioning || this.paused) return;
 
     const portal = this.current.portals.find(p => p.rect.contains(feetX, feetY));
@@ -331,11 +371,7 @@ export class LobbyScene extends Phaser.Scene {
     this.setNearby(machine);
     if (machine) {
       this.prompt.setPosition(this.player.x, this.player.y - 40);
-      const pressed = Phaser.Input.Keyboard.JustDown(this.keyE) || Phaser.Input.Keyboard.JustDown(this.keySpace);
-      if (pressed || this.bridge.interactQueued) {
-        this.events_.onInteract?.({ id: machine.id, title: machine.title, hint: machine.hint });
-      }
+      if (interact) this.events_.onInteract?.({ id: machine.id, title: machine.title, hint: machine.hint });
     }
-    this.bridge.interactQueued = false;
   }
 }

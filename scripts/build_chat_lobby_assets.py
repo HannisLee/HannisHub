@@ -4,9 +4,10 @@
 从本机付费素材包 chatworld/asset/modern_interiors/（Limezu Modern Interiors，不入库）提取派生素材，
 输出到 frontend/public/chat-lobby/club/：
 
-- foyer.png / hall.png：两个房间的烘焙背景（地板、墙面、墙顶收边、区域地毯、墙面挂饰）
+- street.png / foyer.png / room.png / hall.png：各场景的烘焙背景（地板、墙面、墙顶收边、区域地毯、墙面挂饰）
 - objects.png + objects.json：可遮挡家具的图集（Phaser JSON Hash 格式）
 - anims/*.png：动画物件帧条
+- avatar/*.png + avatar/parts.json：角色生成器分层部件（身体、眼睛、服装、发型、配饰），前端运行时叠层合成
 - layout.json：房间尺寸、家具坐标、碰撞盒、传送门、出生点、交互机器（前端运行时读取）
 
 布局只在本脚本中维护；修改后重新运行即可，前端无需改代码。
@@ -39,6 +40,8 @@ SINGLE_PATTERNS = {
     "studio": SINGLES + "23_Television_and_Film_Studio_SIngles/Television_and_FIlm_Studio_Singles_{}.png",
 }
 GENERIC = "1_Interiors/16x16/Theme_Sorter/1_Generic_16x16.png"
+BEDROOM = "1_Interiors/16x16/Theme_Sorter/4_Bedroom_16x16.png"
+CHARGEN = "2_Characters/Character_Generator/"
 FLOORS = "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png"
 WALLS = "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Walls_16x16.png"
 ANIM_DIR = "3_Animated_objects/16x16/spritesheets/"
@@ -93,6 +96,12 @@ def flood(rel: str, x: int, y: int, gap: int = 1) -> Image.Image:
 
 def crop(rel: str, box: tuple[int, int, int, int]) -> Image.Image:
     return load(rel).crop(box)
+
+
+def trimmed(rel: str, box: tuple[int, int, int, int]) -> Image.Image:
+    """裁剪后再去掉四周透明边（用于相邻物件间距太小、泛洪会粘连的总表）。"""
+    img = crop(rel, box)
+    return img.crop(img.getbbox())
 
 
 # ---------------------------------------------------------------- 素材清单
@@ -166,6 +175,11 @@ def build_objects() -> None:
     o["stool_blue"] = single("basement", 103)
     o["stool_yellow"] = single("basement", 105)
     o["stool_wood"] = single("basement", 113)
+    # 我的房间：单人床、床头柜、衣柜、穿衣镜
+    o["bed_blue"] = flood(BEDROOM, 215, 365)
+    o["nightstand"] = trimmed(BEDROOM, (128, 1140, 144, 1166))
+    o["wardrobe"] = trimmed(BEDROOM, (128, 1572, 160, 1618))
+    o["mirror"] = trimmed(GENERIC, (224, 1040, 240, 1084))
 
 
 # 墙面挂饰与地毯（直接烘焙进背景，永远在人物下方）
@@ -208,11 +222,17 @@ def gif_strip(rel: str) -> Image.Image:
 def build_anims() -> None:
     a = ANIMS
 
-    def add(key: str, img: Image.Image, fw: int, fh: int, rate: int) -> None:
+    def add(key: str, img: Image.Image, fw: int, fh: int, rate: int, door: dict | None = None) -> None:
         a[key] = {"image": img, "frameWidth": fw, "frameHeight": fh, "frameRate": rate}
+        if door:
+            # 自动门：靠近时播放 open 帧序列，离开时播放 close 帧序列
+            a[key]["door"] = door
 
-    add("door_glass", load(ANIM_DIR + "animated_door_glass_double.png"), 32, 48, 14)
-    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10)
+    add("door_glass", load(ANIM_DIR + "animated_door_glass_double.png"), 32, 48, 14,
+        door={"open": [0, 1, 2, 3, 4], "close": [5, 6, 7, 0]})
+    # 电梯：帧 0 关闭，1–7 打开并停在全开，8–13 关闭
+    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10,
+        door={"open": list(range(0, 8)), "close": list(range(8, 14)) + [0]})
     add("receptionist", load(ANIM_DIR + "animated_receptionist.png"), 16, 32, 5)
     add("monitor", load(ANIM_DIR + "animated_control_room_facebook_scrolling.png"), 16, 32, 4)
     add("speaker", load(ANIM_DIR + "animated_amplifier_big.png"), 16, 48, 6)
@@ -286,6 +306,9 @@ class Room:
         self.signs: list[dict] = []
         self.bottom_openings: list[tuple[int, int]] = []
         self.top_openings: list[tuple[int, int]] = []
+        # 左右墙开口（纵向区间 y0..y1，须位于墙面以下的地板段）
+        self.left_openings: list[tuple[int, int]] = []
+        self.right_openings: list[tuple[int, int]] = []
 
     # ---- 背景
     def draw_shell(self) -> None:
@@ -312,6 +335,16 @@ class Room:
                 shade(bg, (x0, h - 16 + i, x1, h - 15 + i), min(230, i * 16), (20, 20, 19))
             d.rectangle((x0 - 1, h - 16, x0 - 1, h - 9), fill=OUTLINE)
             d.rectangle((x1, h - 16, x1, h - 9), fill=OUTLINE)
+        # 左右墙开口：墙顶断开，地板向外延伸并逐渐变暗，上下两端补描边
+        for side, openings in (("left", self.left_openings), ("right", self.right_openings)):
+            for y0, y1 in openings:
+                tile_fill(bg, self.floor, (0, y0, 16, y1) if side == "left" else (w - 16, y0, w, y1))
+                for i in range(16):
+                    x = 15 - i if side == "left" else w - 16 + i
+                    shade(bg, (x, y0, x + 1, y1), min(230, i * 16), (20, 20, 19))
+                xs = (8, 15) if side == "left" else (w - 16, w - 9)
+                d.rectangle((xs[0], y0 - 1, xs[1], y0 - 1), fill=OUTLINE)
+                d.rectangle((xs[0], y1, xs[1], y1), fill=OUTLINE)
 
     def rug(self, box: tuple[int, int, int, int], tex: Image.Image, edge=(54, 46, 58), inner=None) -> None:
         """程序化区域地毯：平铺纹理 + 深色描边 + 可选内框线。"""
@@ -364,8 +397,12 @@ class Room:
             self.walls.append([g0, 0, g1 - g0, 20])
             x = g1
         self.walls.append([x, 0, w - x, 48])
-        self.walls.append([0, 48, 16, h - 48])
-        self.walls.append([w - 16, 48, 16, h - 48])
+        for x, openings in ((0, self.left_openings), (w - 16, self.right_openings)):
+            y = 48
+            for g0, g1 in sorted(openings):
+                self.walls.append([x, y, 16, g0 - y])
+                y = g1
+            self.walls.append([x, y, 16, h - y])
         x = 0
         for g0, g1 in sorted(self.bottom_openings):
             self.walls.append([x, h - 16, g0 - x, 16])
@@ -388,10 +425,15 @@ def t(n: float) -> int:
 
 
 def build_foyer() -> Room:
-    """入口厅：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅。"""
+    """入口厅：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅；
+    走进电梯下楼到街道，左墙开口通往隔壁「我的房间」。"""
     room = Room("foyer", "入口厅", 20, 13, floor_tex(4, 8), wall_tex(1, 26))
     exit_x0, exit_x1 = t(9), t(11)
     room.bottom_openings.append((exit_x0, exit_x1))
+    side_y0, side_y1 = t(6), t(8)
+    room.left_openings.append((side_y0, side_y1))
+    # 电梯门洞：墙体碰撞只挡住电梯最里侧，角色可以走进电梯
+    room.top_openings.append((t(9) + 6, t(11) - 6))
     room.draw_shell()
     w, h = room.w, room.h
 
@@ -406,8 +448,9 @@ def build_foyer() -> Room:
     room.decal("rug_red_gold", t(13.5) + 2, t(7) - 4)
     room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
 
-    # 电梯（上墙中央），进入场景时开合一次
-    room.anim("elevator", t(9), 16, depth=20, frames="once")
+    # 电梯（上墙中央）：靠近自动开门，走进去即下楼到街道；固定深度 20，角色进入时画在门上
+    room.doors.append({"key": "elevator", "x": t(9), "y": 16, "radius": 30, "depth": 20})
+    room.portals.append({"rect": [t(9) + 8, 22, 16, 12], "to": "street", "spawn": "fromFoyer"})
     room.signs.append({"x": t(10), "y": 10, "text": "HannisHub", "tone": "brand"})
 
     # 前台：L 形柜台 + 接待员
@@ -437,8 +480,15 @@ def build_foyer() -> Room:
     room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "大厅", "tone": "muted"})
     room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "hall", "spawn": "fromFoyer"})
 
+    # 左墙门洞：通往隔壁「我的房间」，门口地垫 + 标牌
+    room.rug((16, side_y0 + 3, 40, side_y1 - 3), floor_tex(12, 26), edge=(60, 40, 30))
+    room.signs.append({"x": 34, "y": side_y0 - 8, "text": "我的房间", "tone": "muted"})
+    room.portals.append({"rect": [0, side_y0, 6, side_y1 - side_y0], "to": "room", "spawn": "fromFoyer"})
+
     room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
     room.spawns["fromHall"] = {"x": t(10), "y": h - 24, "dir": "up"}
+    room.spawns["fromStreet"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
+    room.spawns["fromRoom"] = {"x": 26, "y": (side_y0 + side_y1) // 2 + 4, "dir": "right"}
     room.build_walls()
     return room
 
@@ -565,6 +615,195 @@ def build_hall() -> Room:
     return room
 
 
+def build_room() -> Room:
+    """我的房间：入口厅左侧隔壁的小卧室。右墙门洞回入口厅；衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
+    room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
+    door_y0, door_y1 = t(6), t(8)
+    room.right_openings.append((door_y0, door_y1))
+    room.draw_shell()
+    w, h = room.w, room.h
+
+    # 左上：单人床 + 床头柜与台灯，墙上窗帘窗
+    room.prop("bed_blue", 18, 30, foot=30)
+    room.prop("nightstand", 46, 36, foot=8)
+    room.prop("lamp_desk_cream", 46, 24, solid=False, depth=55)
+    room.decal("window_curtain", 68, 18)
+
+    # 右上：衣柜 + 穿衣镜，台前高亮地台为交互区
+    wx = 110
+    room.rug((wx - 6, 50, wx + 50, 80), floor_tex(8, 20), edge=(110, 54, 40), inner=(217, 119, 87))
+    room.prop("wardrobe", wx, 20, foot=10)
+    room.prop("mirror", wx + 34, 31, foot=6)
+    room.machines.append({
+        "id": "wardrobe", "title": "形象与名字", "hint": "换装、设置别人看到的名字",
+        "zone": [wx - 4, 60, 52, 18], "signX": wx + 22, "signY": 8,
+    })
+    room.prop("plant_pot", 158, 34, foot=8)
+
+    # 下半：书架、落地灯、地毯上的扶手椅与小圆桌，猫
+    room.prop("bookshelf", 16, 90, foot=16)
+    room.prop("lamp_floor", 50, 92, foot=8)
+    room.decal("rug_beige", 74, 104)
+    room.prop("armchair_blue", 70, 90, foot=14)
+    room.prop("table_round", 102, 98, foot=16)
+    room.anim("cat", 120, 126, depth=142)
+
+    room.portals.append({"rect": [w - 6, door_y0, 6, door_y1 - door_y0], "to": "foyer", "spawn": "fromRoom"})
+    room.spawns["fromFoyer"] = {"x": w - 26, "y": (door_y0 + door_y1) // 2 + 4, "dir": "left"}
+    room.build_walls()
+    return room
+
+
+ROAD = (58, 58, 64, 255)
+
+
+def build_street() -> Room:
+    """街道：公司大楼外立面（玻璃门进入后乘电梯上楼到入口厅）、人行道、马路与对面人行道。
+    素材包只有室内素材，外立面、路面、路缘与斑马线均由室内地砖墙面程序化拼接。"""
+    room = Room("street", "街道", 30, 18, floor_tex(12, 24), wall_tex(1, 16))
+    w, h = room.w, room.h
+    bg = room.bg
+    d = ImageDraw.Draw(bg)
+    facade_y = 112           # 外立面底边
+    curb_y = 176             # 上侧路缘
+    road_y1 = 240            # 下侧路缘
+    door_x = t(14)
+
+    # ---- 大楼：屋檐（俯视墙顶）+ 三层外立面
+    d.rectangle((0, 0, w - 1, 15), fill=OUTLINE)
+    d.rectangle((0, 1, w - 1, 13), fill=CAP)
+    d.rectangle((0, 14, w - 1, 15), fill=OUTLINE)
+    tile_fill(bg, room.wall, (0, 16, w, facade_y))
+    shade(bg, (0, 16, w, 18), 70)
+    # 二、三层办公窗：深色窗框 + 蓝灰玻璃 + 高光斜线 + 窗台
+    for x in list(range(t(1), t(13), t(2))) + list(range(t(17), t(29), t(2))):
+        for y in (22, 54):
+            d.rectangle((x + 4, y, x + 27, y + 19), fill=OUTLINE)
+            d.rectangle((x + 5, y + 1, x + 26, y + 18), fill=(120, 156, 180, 255))
+            d.rectangle((x + 5, y + 1, x + 26, y + 5), fill=(170, 200, 216, 255))
+            d.line((x + 15, y + 1, x + 15, y + 18), fill=OUTLINE)
+            d.line((x + 8, y + 14, x + 12, y + 9), fill=(214, 232, 240, 255))
+            d.rectangle((x + 3, y + 20, x + 28, y + 21), fill=(200, 194, 182, 255))
+    # 一层两侧大玻璃橱窗
+    for x0 in (t(9.5), t(16.5)):
+        d.rectangle((x0, 78, x0 + 63, 107), fill=OUTLINE)
+        d.rectangle((x0 + 1, 79, x0 + 62, 106), fill=(150, 186, 204, 255))
+        d.rectangle((x0 + 1, 79, x0 + 62, 84), fill=(196, 222, 232, 255))
+        d.line((x0 + 31, 79, x0 + 31, 106), fill=OUTLINE)
+        d.line((x0 + 6, 98, x0 + 14, 88), fill=(230, 242, 246, 255))
+        d.line((x0 + 38, 98, x0 + 46, 88), fill=(230, 242, 246, 255))
+    # 墙脚阴影
+    for i, a in enumerate((90, 50, 24)):
+        shade(bg, (0, facade_y + i, w, facade_y + i + 1), a)
+
+    # ---- 人行道铺满立面以下区域，随后在其上叠马路
+    tile_fill(bg, room.floor, (0, facade_y, w, h))
+    for i, a in enumerate((90, 50, 24)):
+        shade(bg, (0, facade_y + i, w, facade_y + i + 1), a)
+    # 门前地垫
+    room.rug((door_x - 6, facade_y, door_x + 38, facade_y + 14), floor_tex(12, 26), edge=(60, 40, 30))
+
+    # ---- 马路：沥青 + 路缘 + 中线虚线 + 门前斑马线
+    tile_fill(bg, floor_tex(12, 16), (0, curb_y, w, road_y1))
+    shade(bg, (0, curb_y, w, road_y1), 60, (30, 30, 40))
+    for y0 in (curb_y, road_y1 - 3):
+        d.rectangle((0, y0, w - 1, y0 + 2), fill=(176, 172, 162, 255))
+        d.line((0, y0 + 3 if y0 == curb_y else y0 - 1, w - 1, y0 + 3 if y0 == curb_y else y0 - 1), fill=(40, 38, 44, 255))
+    mid = (curb_y + road_y1) // 2
+    for x in range(4, w, 32):
+        d.rectangle((x, mid - 1, x + 15, mid), fill=(226, 190, 90, 255))
+    for x in range(door_x - 8, door_x + 44, 8):
+        d.rectangle((x, curb_y + 8, x + 4, road_y1 - 9), fill=(222, 220, 212, 255))
+
+    # ---- 左右两端向舞台背景渐隐，暗示街道继续延伸
+    for i in range(24):
+        a = int(230 * (1 - i / 24))
+        shade(bg, (i, facade_y, i + 1, h), a, (20, 20, 19))
+        shade(bg, (w - 1 - i, facade_y, w - i, h), a, (20, 20, 19))
+
+    # ---- 大楼入口：玻璃双开门 + 招牌 + 门两侧绿植
+    room.doors.append({"key": "door_glass", "x": door_x, "y": facade_y - 48, "radius": 40})
+    room.portals.append({"rect": [door_x + 6, facade_y - 26, 20, 12], "to": "foyer", "spawn": "fromStreet"})
+    room.signs.append({"x": door_x + 16, "y": facade_y - 56, "text": "HannisHub", "tone": "brand"})
+    room.prop("plant_tall2", door_x - 16, facade_y - 30, foot=12)
+    room.prop("plant_tall2", door_x + 34, facade_y - 30, foot=12)
+
+    # ---- 人行道街景：路灯、长椅、盆栽树、垃圾桶
+    for x in (t(3), t(10), t(19), t(26)):
+        room.prop("lamp_floor", x, curb_y - 40, foot=8)
+    room.prop("bench", t(5), curb_y - 26, foot=10)
+    room.prop("bench", t(21), curb_y - 26, foot=10)
+    room.prop("plant_big", t(8), facade_y - 4, foot=14)
+    room.prop("plant_big", t(20), facade_y - 4, foot=14)
+    room.prop("trash", t(12), curb_y - 24, foot=8)
+    room.prop("trash", t(24), curb_y - 24, foot=8)
+    # 对面人行道：一排绿植
+    for x in range(t(2), w - t(2), t(4)):
+        room.prop("plant_palm", x, road_y1 - 10, foot=12)
+
+    # ---- 碰撞：外立面（门洞只挡住门里侧）、左右边界、下边界
+    gx0, gx1 = door_x + 4, door_x + 28
+    room.walls += [
+        [0, 0, gx0, facade_y], [gx0, 0, gx1 - gx0, facade_y - 34], [gx1, 0, w - gx1, facade_y],
+        [0, facade_y, 4, h - facade_y], [w - 4, facade_y, 4, h - facade_y], [0, h - 4, w, 4],
+    ]
+    room.spawns["fromFoyer"] = {"x": door_x + 16, "y": facade_y + 18, "dir": "down"}
+    return room
+
+
+# ---------------------------------------------------------------- 角色部件
+
+# 角色生成器原图（16x16 档 896x656）帧布局：每帧 16x32；第 1 行 idle、第 2 行 walk，
+# 每行 24 帧按 右/上/左/下 每方向 6 帧。导出为与 player.png 相同的 96x256 块：
+# 6 帧 x 8 行（静止 南/北/左/右 + 行走 南/北/左/右）。
+AVATAR_DIR_ORDER = {"down": 3, "up": 1, "left": 2, "right": 0}
+AVATAR_ROWS = [(1, "down"), (1, "up"), (1, "left"), (1, "right"), (2, "down"), (2, "up"), (2, "left"), (2, "right")]
+AVATAR_CATEGORIES = [
+    # (前端槽位, 源目录, 是否允许不选)
+    ("body", "Bodies", False),
+    ("eyes", "Eyes", False),
+    ("outfit", "Outfits", False),
+    ("hair", "Hairstyles", True),
+    ("accessory", "Accessories", True),
+]
+AVATAR_COLS = 16
+
+
+def avatar_block(src: Image.Image) -> Image.Image:
+    out = Image.new("RGBA", (96, 256))
+    for r, (row, direction) in enumerate(AVATAR_ROWS):
+        for i in range(6):
+            fx = (AVATAR_DIR_ORDER[direction] * 6 + i) * 16
+            out.paste(src.crop((fx, row * 32, fx + 16, row * 32 + 32)), (i * 16, r * 32))
+    return out
+
+
+def split_part_name(stem: str) -> tuple[str, str]:
+    """Outfit_03_02 → ("03", "02")；Accessory_15_Glasses_01 → ("15_Glasses", "01")；Body_04 → ("04", "")。"""
+    parts = stem.split("_")[1:]
+    if len(parts) == 1:
+        return parts[0], ""
+    return "_".join(parts[:-1]), parts[-1]
+
+
+def build_avatar_parts() -> tuple[dict[str, Image.Image], dict]:
+    sheets: dict[str, Image.Image] = {}
+    manifest: dict = {"frameWidth": 16, "frameHeight": 32, "blockWidth": 96, "blockHeight": 256,
+                      "columns": AVATAR_COLS, "categories": {}}
+    for slot, folder, optional in AVATAR_CATEGORIES:
+        files = sorted((PACK / CHARGEN / folder / "16x16").glob("*.png"))
+        rows = (len(files) + AVATAR_COLS - 1) // AVATAR_COLS
+        sheet = Image.new("RGBA", (min(AVATAR_COLS, len(files)) * 96, rows * 256))
+        items = []
+        for i, f in enumerate(files):
+            sheet.paste(avatar_block(Image.open(f).convert("RGBA")), ((i % AVATAR_COLS) * 96, (i // AVATAR_COLS) * 256))
+            style, variant = split_part_name(f.stem)
+            items.append({"id": f.stem, "style": style, "variant": variant})
+        sheets[slot] = sheet
+        manifest["categories"][slot] = {"file": f"avatar/{slot}.png", "optional": optional, "items": items}
+    return sheets, manifest
+
+
 # ---------------------------------------------------------------- 输出
 
 def pack_atlas(images: dict[str, Image.Image], width: int = 512, pad: int = 2):
@@ -608,13 +847,11 @@ def render_preview(rooms: list[tuple[Room, tuple[int, int]]], path: Path, world:
         for a in room.anims:
             meta = ANIMS[a["key"]]
             img = meta["image"].crop((0, 0, meta["frameWidth"], meta["frameHeight"]))
-            if a["key"] == "door_glass":
-                pass
             drawables.append((a.get("depth", a["y"] + meta["frameHeight"]), img, a["x"], a["y"]))
         for door in room.doors:
             meta = ANIMS[door["key"]]
             img = meta["image"].crop((0, 0, meta["frameWidth"], meta["frameHeight"]))
-            drawables.append((door["y"] + meta["frameHeight"], img, door["x"], door["y"]))
+            drawables.append((door.get("depth", door["y"] + meta["frameHeight"]), img, door["x"], door["y"]))
         for depth, img, x, y in sorted(drawables, key=lambda d: d[0]):
             canvas.alpha_composite(img, (ox + x, oy + y))
         overlay = Image.new("RGBA", world)
@@ -648,42 +885,59 @@ def main() -> None:
     build_objects()
     build_decals()
     build_anims()
+    street = build_street()
     foyer = build_foyer()
+    room = build_room()
     hall = build_hall()
 
-    gap = 64
-    foyer_off = ((hall.w - foyer.w) // 2, 0)
-    hall_off = (0, foyer.h + gap)
-    world = (max(foyer.w, hall.w), foyer.h + gap + hall.h)
+    # 世界排布：街道在最上方，下一行左侧是我的房间、右侧是入口厅，大厅在入口厅正下方。
+    # 房间之间留足间距：小房间在大屏上居中显示时，相机视野会超出房间，不能看到相邻房间。
+    gap = 256
+    room_off = (0, street.h + gap)
+    foyer_off = (room.w + gap, street.h + gap)
+    hall_off = (foyer_off[0] + (foyer.w - hall.w) // 2, foyer_off[1] + foyer.h + gap)
+    street_off = (foyer_off[0] + (foyer.w - street.w) // 2, 0)
+    placed = [(street, street_off), (room, room_off), (foyer, foyer_off), (hall, hall_off)]
+    shift_x = -min(off[0] for _, off in placed)
+    placed = [(r, (x + shift_x, y)) for r, (x, y) in placed]
+    world = (max(x + r.w for r, (x, _) in placed), max(y + r.h for r, (_, y) in placed))
+
     layout = {
-        "version": 1,
+        "version": 2,
         "tile": T,
         "world": {"width": world[0], "height": world[1]},
         "start": {"room": "foyer", "spawn": "start"},
         "anims": {k: {"file": f"anims/{k}.png", "frameWidth": v["frameWidth"], "frameHeight": v["frameHeight"],
-                      "frameRate": v["frameRate"]} for k, v in ANIMS.items()},
-        "rooms": [foyer.to_json(foyer_off), hall.to_json(hall_off)],
+                      "frameRate": v["frameRate"], **({"door": v["door"]} if "door" in v else {})}
+                  for k, v in ANIMS.items()},
+        "rooms": [r.to_json(off) for r, off in placed],
     }
 
     if args.preview:
-        render_preview([(foyer, foyer_off), (hall, hall_off)], args.preview, world)
+        render_preview(placed, args.preview, world)
         print(f"预览：{args.preview}")
     if args.no_write:
         return
 
     if OUT.exists():
-        for child in ("anims",):
+        for child in ("anims", "avatar"):
             shutil.rmtree(OUT / child, ignore_errors=True)
     (OUT / "anims").mkdir(parents=True, exist_ok=True)
-    foyer.bg.save(OUT / "foyer.png", optimize=True)
-    hall.bg.save(OUT / "hall.png", optimize=True)
+    (OUT / "avatar").mkdir(parents=True, exist_ok=True)
+    for r, _ in placed:
+        r.bg.save(OUT / f"{r.id}.png", optimize=True)
     atlas, atlas_json = pack_atlas(OBJECTS)
     atlas.save(OUT / "objects.png", optimize=True)
     (OUT / "objects.json").write_text(json.dumps(atlas_json, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     for key, meta in ANIMS.items():
         meta["image"].save(OUT / "anims" / f"{key}.png", optimize=True)
+    sheets, manifest = build_avatar_parts()
+    for slot, sheet in sheets.items():
+        sheet.save(OUT / "avatar" / f"{slot}.png", optimize=True)
+    (OUT / "avatar" / "parts.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     (OUT / "layout.json").write_text(json.dumps(layout, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    print(f"已输出到 {OUT.relative_to(ROOT)}：{len(OBJECTS)} 件家具、{len(ANIMS)} 组动画、2 个房间")
+    parts = sum(len(c["items"]) for c in manifest["categories"].values())
+    print(f"已输出到 {OUT.relative_to(ROOT)}：{len(OBJECTS)} 件家具、{len(ANIMS)} 组动画、{len(placed)} 个场景、{parts} 个角色部件")
 
 
 if __name__ == "__main__":

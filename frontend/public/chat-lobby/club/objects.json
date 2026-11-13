@@ -400,9 +400,49 @@
     "h": 48
    }
   },
-  "armchair_blue": {
+  "bed_blue": {
    "frame": {
     "x": 68,
+    "y": 50,
+    "w": 26,
+    "h": 40
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 26,
+    "h": 40
+   },
+   "sourceSize": {
+    "w": 26,
+    "h": 40
+   }
+  },
+  "wardrobe": {
+   "frame": {
+    "x": 96,
+    "y": 50,
+    "w": 31,
+    "h": 36
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 31,
+    "h": 36
+   },
+   "sourceSize": {
+    "w": 31,
+    "h": 36
+   }
+  },
+  "armchair_blue": {
+   "frame": {
+    "x": 129,
     "y": 50,
     "w": 32,
     "h": 32
@@ -422,7 +462,7 @@
   },
   "armchair_red": {
    "frame": {
-    "x": 102,
+    "x": 163,
     "y": 50,
     "w": 32,
     "h": 32
@@ -442,7 +482,7 @@
   },
   "armchair_white": {
    "frame": {
-    "x": 136,
+    "x": 197,
     "y": 50,
     "w": 32,
     "h": 32
@@ -462,7 +502,7 @@
   },
   "armchair_yellow": {
    "frame": {
-    "x": 170,
+    "x": 231,
     "y": 50,
     "w": 32,
     "h": 32
@@ -482,7 +522,7 @@
   },
   "chair_task": {
    "frame": {
-    "x": 204,
+    "x": 265,
     "y": 50,
     "w": 16,
     "h": 32
@@ -502,7 +542,7 @@
   },
   "copier": {
    "frame": {
-    "x": 222,
+    "x": 283,
     "y": 50,
     "w": 16,
     "h": 32
@@ -522,7 +562,7 @@
   },
   "desk": {
    "frame": {
-    "x": 240,
+    "x": 301,
     "y": 50,
     "w": 32,
     "h": 32
@@ -542,7 +582,7 @@
   },
   "desk_plain": {
    "frame": {
-    "x": 274,
+    "x": 335,
     "y": 50,
     "w": 32,
     "h": 32
@@ -562,7 +602,7 @@
   },
   "egg_blue": {
    "frame": {
-    "x": 308,
+    "x": 369,
     "y": 50,
     "w": 32,
     "h": 32
@@ -582,7 +622,7 @@
   },
   "egg_red": {
    "frame": {
-    "x": 342,
+    "x": 403,
     "y": 50,
     "w": 32,
     "h": 32
@@ -602,7 +642,7 @@
   },
   "egg_white": {
    "frame": {
-    "x": 376,
+    "x": 437,
     "y": 50,
     "w": 32,
     "h": 32
@@ -622,7 +662,7 @@
   },
   "egg_yellow": {
    "frame": {
-    "x": 410,
+    "x": 471,
     "y": 50,
     "w": 32,
     "h": 32
@@ -642,66 +682,6 @@
   },
   "globe": {
    "frame": {
-    "x": 444,
-    "y": 50,
-    "w": 16,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 16,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 16,
-    "h": 32
-   }
-  },
-  "kiosk": {
-   "frame": {
-    "x": 462,
-    "y": 50,
-    "w": 16,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 16,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 16,
-    "h": 32
-   }
-  },
-  "lamp_desk_blue": {
-   "frame": {
-    "x": 480,
-    "y": 50,
-    "w": 16,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 16,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 16,
-    "h": 32
-   }
-  },
-  "lamp_desk_cream": {
-   "frame": {
     "x": 0,
     "y": 100,
     "w": 16,
@@ -720,7 +700,7 @@
     "h": 32
    }
   },
-  "mic": {
+  "kiosk": {
    "frame": {
     "x": 18,
     "y": 100,
@@ -740,7 +720,7 @@
     "h": 32
    }
   },
-  "plant_desk": {
+  "lamp_desk_blue": {
    "frame": {
     "x": 36,
     "y": 100,
@@ -760,9 +740,69 @@
     "h": 32
    }
   },
-  "plant_palm": {
+  "lamp_desk_cream": {
    "frame": {
     "x": 54,
+    "y": 100,
+    "w": 16,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 16,
+    "h": 32
+   }
+  },
+  "mic": {
+   "frame": {
+    "x": 72,
+    "y": 100,
+    "w": 16,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 16,
+    "h": 32
+   }
+  },
+  "plant_desk": {
+   "frame": {
+    "x": 90,
+    "y": 100,
+    "w": 16,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 16,
+    "h": 32
+   }
+  },
+  "plant_palm": {
+   "frame": {
+    "x": 108,
     "y": 100,
     "w": 32,
     "h": 32
@@ -782,7 +822,7 @@
   },
   "plant_pot": {
    "frame": {
-    "x": 88,
+    "x": 142,
     "y": 100,
     "w": 16,
     "h": 32
@@ -802,7 +842,7 @@
   },
   "sideboard": {
    "frame": {
-    "x": 106,
+    "x": 160,
     "y": 100,
     "w": 32,
     "h": 32
@@ -822,7 +862,7 @@
   },
   "stool_blue": {
    "frame": {
-    "x": 140,
+    "x": 194,
     "y": 100,
     "w": 16,
     "h": 32
@@ -842,7 +882,7 @@
   },
   "stool_wood": {
    "frame": {
-    "x": 158,
+    "x": 212,
     "y": 100,
     "w": 16,
     "h": 32
@@ -862,7 +902,7 @@
   },
   "stool_yellow": {
    "frame": {
-    "x": 176,
+    "x": 230,
     "y": 100,
     "w": 16,
     "h": 32
@@ -882,7 +922,7 @@
   },
   "table_round": {
    "frame": {
-    "x": 194,
+    "x": 248,
     "y": 100,
     "w": 32,
     "h": 32
@@ -902,7 +942,7 @@
   },
   "table_round_dark": {
    "frame": {
-    "x": 228,
+    "x": 282,
     "y": 100,
     "w": 32,
     "h": 32
@@ -922,7 +962,7 @@
   },
   "trash": {
    "frame": {
-    "x": 262,
+    "x": 316,
     "y": 100,
     "w": 16,
     "h": 32
@@ -940,9 +980,29 @@
     "h": 32
    }
   },
+  "mirror": {
+   "frame": {
+    "x": 334,
+    "y": 100,
+    "w": 12,
+    "h": 25
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 25
+   },
+   "sourceSize": {
+    "w": 12,
+    "h": 25
+   }
+  },
   "bench": {
    "frame": {
-    "x": 280,
+    "x": 348,
     "y": 100,
     "w": 30,
     "h": 18
@@ -957,12 +1017,32 @@
    },
    "sourceSize": {
     "w": 30,
+    "h": 18
+   }
+  },
+  "nightstand": {
+   "frame": {
+    "x": 380,
+    "y": 100,
+    "w": 15,
+    "h": 18
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 15,
+    "h": 18
+   },
+   "sourceSize": {
+    "w": 15,
     "h": 18
    }
   },
   "chair_office": {
    "frame": {
-    "x": 312,
+    "x": 397,
     "y": 100,
     "w": 16,
     "h": 16
@@ -982,7 +1062,7 @@
   },
   "chair_office_brown": {
    "frame": {
-    "x": 330,
+    "x": 415,
     "y": 100,
     "w": 16,
     "h": 16
@@ -1002,7 +1082,7 @@
   },
   "chair_office_green": {
    "frame": {
-    "x": 348,
+    "x": 433,
     "y": 100,
     "w": 16,
     "h": 16
@@ -1022,7 +1102,7 @@
   },
   "chair_office_white": {
    "frame": {
-    "x": 366,
+    "x": 451,
     "y": 100,
     "w": 16,
     "h": 16
@@ -1042,7 +1122,7 @@
   },
   "sofa_blue": {
    "frame": {
-    "x": 384,
+    "x": 469,
     "y": 100,
     "w": 32,
     "h": 16
@@ -1062,8 +1142,8 @@
   },
   "sofa_gray": {
    "frame": {
-    "x": 418,
-    "y": 100,
+    "x": 0,
+    "y": 134,
     "w": 32,
     "h": 16
    },
@@ -1082,8 +1162,8 @@
   },
   "sofa_white": {
    "frame": {
-    "x": 452,
-    "y": 100,
+    "x": 34,
+    "y": 134,
     "w": 32,
     "h": 16
    },
@@ -1106,7 +1186,7 @@
   "format": "RGBA8888",
   "size": {
    "w": 512,
-   "h": 132
+   "h": 150
   },
   "scale": "1"
  }

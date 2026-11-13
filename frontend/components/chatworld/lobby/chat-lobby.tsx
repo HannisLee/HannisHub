@@ -2,6 +2,9 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { fetchLobbyProfile, type LobbyProfile } from "../../../lib/chat-lobby";
+import { AvatarDialog } from "./avatar-dialog";
+import { composeAvatarSheet, loadAvatarParts, normalizeAvatar } from "./game/avatar";
 import type { LobbyBridge, LobbyEvents, MachineInfo, RoomInfo } from "./game/layout";
 import { MachineDialog } from "./machine-dialog";
 
@@ -14,9 +17,14 @@ type Phase = "loading" | "ready" | "error";
 
 /** 每个房间的一句话引导 */
 const ROOM_GUIDES: Record<string, string> = {
-  foyer: "入口厅 · 穿过下方的门进入大厅",
+  street: "街道 · 从玻璃门进入大楼，乘电梯上楼",
+  foyer: "入口厅 · 下方的门通往大厅，左边是我的房间，走进电梯可下楼到街道",
+  room: "我的房间 · 站到衣柜前的地台上按 E 换形象、改名字",
   hall: "大厅 · 走到 ASR / OCR 机器前的地台上按 E 使用",
 };
+
+/** 在「我的房间」衣柜前交互时打开形象面板，其余机器打开功能面板 */
+const AVATAR_MACHINE = "wardrobe";
 
 const COARSE_QUERY = "(pointer: coarse)";
 
@@ -37,7 +45,26 @@ function Key({ children }: { children: string }) {
 }
 
 /** 与游戏循环共享的桥接对象：事件写入、Phaser 每帧读取，绕过 React 渲染 */
-const bridge: LobbyBridge = { touch: { x: 0, y: 0 }, paused: false, interactQueued: false };
+const bridge: LobbyBridge = {
+  touch: { x: 0, y: 0 },
+  avatar: { sheet: null, version: 0 },
+  paused: false,
+  interactQueued: false,
+};
+
+/** 把资料中的形象合成为帧表写入桥接对象；无自定义形象或素材加载失败时使用默认角色 */
+async function applyProfileAvatar(profile: LobbyProfile | null) {
+  let sheet: HTMLCanvasElement | null = null;
+  if (profile?.avatar) {
+    try {
+      const parts = await loadAvatarParts();
+      sheet = composeAvatarSheet(parts, normalizeAvatar(parts, profile.avatar));
+    } catch {
+      sheet = null;
+    }
+  }
+  bridge.avatar = { sheet, version: bridge.avatar.version + 1 };
+}
 
 function resetBridge() {
   bridge.touch.x = 0;
@@ -53,6 +80,9 @@ export function ChatLobby() {
   const [room, setRoom] = useState<RoomInfo | null>(null);
   const [nearby, setNearby] = useState<MachineInfo | null>(null);
   const [active, setActive] = useState<MachineInfo | null>(null);
+  // 资料（名字与形象）就绪后才创建游戏，避免先显示默认角色再闪换
+  const [profile, setProfile] = useState<LobbyProfile | null>(null);
+  const [profileReady, setProfileReady] = useState(false);
   // 重试时递增，LobbyCanvas 据此重建游戏
   const [gameKey, setGameKey] = useState(0);
   const coarse = useSyncExternalStore(subscribeCoarse, coarseSnapshot, coarseServerSnapshot);
@@ -61,6 +91,28 @@ export function ChatLobby() {
   useEffect(() => {
     resetBridge();
     return resetBridge;
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetchLobbyProfile()
+      .catch(() => null)
+      .then(async loaded => {
+        await applyProfileAvatar(loaded);
+        if (!alive) return;
+        setProfile(loaded);
+        setProfileReady(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const saveProfile = useCallback((saved: LobbyProfile) => {
+    setProfile(saved);
+    void applyProfileAvatar(saved);
+    bridge.paused = false;
+    setActive(null);
   }, []);
 
   const openMachine = useCallback((machine: MachineInfo) => {
@@ -129,7 +181,7 @@ export function ChatLobby() {
       </header>
 
       <div className="lobby-stage">
-        <LobbyCanvas key={gameKey} bridge={bridge} events={events} />
+        {profileReady ? <LobbyCanvas key={gameKey} bridge={bridge} events={events} /> : <div className="lobby-canvas-host" />}
 
         {ready && room ? (
           <div className="lobby-room-chip" aria-live="polite">
@@ -177,7 +229,14 @@ export function ChatLobby() {
 
       <p className="lobby-credit">场景素材 Modern Interiors by <a href="https://limezu.itch.io/moderninteriors" target="_blank" rel="noreferrer">LimeZu</a></p>
 
-      {active ? <MachineDialog machine={active} onClose={closeMachine} /> : null}
+      {active && active.id === AVATAR_MACHINE ? (
+        <AvatarDialog
+          profile={profile ?? { username: "", name: "", avatar: null, updated_at: null }}
+          onClose={closeMachine}
+          onSaved={saveProfile}
+        />
+      ) : null}
+      {active && active.id !== AVATAR_MACHINE ? <MachineDialog machine={active} onClose={closeMachine} /> : null}
     </div>
   );
 }

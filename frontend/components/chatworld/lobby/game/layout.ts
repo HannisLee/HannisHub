@@ -56,6 +56,8 @@ export interface DoorDef {
   y: number;
   /** 角色脚底距门底中心小于该半径时自动开门 */
   radius: number;
+  /** 渲染深度（房间局部 y）；缺省按贴图底边。电梯用较小值，角色走进去时画在门上 */
+  depth?: number;
 }
 
 export interface SignDef {
@@ -89,6 +91,8 @@ export interface AnimSheetDef {
   frameWidth: number;
   frameHeight: number;
   frameRate: number;
+  /** 自动门：开门 / 关门的帧序列 */
+  door?: { open: number[]; close: number[] };
 }
 
 export interface LobbyLayout {
@@ -115,6 +119,8 @@ export interface MachineInfo {
 /** React 与 Phaser 共享的可变桥接对象：React 写入，场景每帧读取，避免跨层重渲染 */
 export interface LobbyBridge {
   touch: { x: number; y: number };
+  /** 自定义形象：合成好的 96x256 帧表（null 时使用默认角色）；version 变化时场景重新贴图 */
+  avatar: { sheet: HTMLCanvasElement | null; version: number };
   /** 机器面板打开时为 true：角色冻结，键盘释放给页面输入框 */
   paused: boolean;
   /** 触屏「使用」按钮按下后置 true，场景消费后复位 */

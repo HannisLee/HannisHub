@@ -1195,3 +1195,13 @@
 - 新增 `scripts/build_chat_lobby_assets.py`：从本机素材包裁剪单件、程序化绘制墙顶与阴影、烘焙房间背景、打包家具图集、导出动画帧条，并输出 `layout.json`；`--preview` 生成带碰撞标注的预览图。前端改为按 `layout.json` 搭建场景（`game/layout.ts`、`lobby-scene.ts` 重写，删除 `room-map.ts`）。
 - 运行时素材从 `frontend/public/chat-lobby/modern/` 迁至 `club/`（旧客厅素材删除，`player.png` 与 `LICENSE.txt` 保留迁移）；更新 CREDITS.md、asset_index.md 与 spec.md，页面底部增加 LimeZu 署名。
 - 验证：`tsc --noEmit`、eslint 通过；`next dev` + 无头 Chrome（mock `/api`，未连接线上服务）实测入口厅→大厅→入口厅往返、ASR/OCR 地台按 E 打开对应面板、Esc 关闭、面板内与页面输入框可正常输入 WASD/E，移动端布局正常，无控制台错误。
+
+### v0.2.96 — 2026-11-13
+- 聊天大厅新增**街道**：公司大楼外立面（屋檐、三层办公窗、一层橱窗、「HannisHub」招牌、玻璃双开门），人行道（路灯、长椅、盆栽、垃圾桶）、马路（路缘、中线虚线、门前斑马线）与对面人行道。走进玻璃门到达入口厅电梯前；在入口厅走进电梯下楼到街道。电梯改为与玻璃门相同的自动门（走近开门、离开关门），开关门帧序由 `layout.json` 的 `door` 字段给出。
+- 新增**我的房间**：入口厅左墙门洞隔壁的小卧室（床、床头柜、衣柜、穿衣镜、书架、扶手椅、睡猫等），衣柜前地台按 E 打开「形象与名字」面板。原有入口厅、大厅布局与功能不变（入口厅仅增加左墙门洞、门口地垫与电梯通道）。
+- 像素形象：构建脚本导出角色生成器 432 个部件（身体、眼睛、服装、发型、配饰）为 5 张图集 + `parts.json`；面板按分类展示款式缩略图与配色，支持转身/走动预览、随机搭配、恢复默认角色；保存后场景角色立即换装（常驻画布贴图 `avatar-self`，`Player` 支持切换皮肤）。
+- 名字：面板内设置（最多 16 字），预览中显示在头顶；多人同场时供其他人看到，自己在场景里看不到自己的名字。
+- 后端新增 `chatworld/lobby_profile.py` 与 `GET/PUT /api/chat-lobby/profile`，按登录账号把名字与形象部件编号保存到 `data/chat_lobby_profiles.json`；新增 `tests/test_lobby_profile.py`。
+- 交互键 E / 空格改为在 keydown 事件中置位，修复按下与抬起落在同一帧时快速轻按被漏掉的问题（ASR / OCR 机器同样受益）。
+- 更新 spec.md、asset_index.md、CREDITS.md。
+- 验证：`tsc --noEmit`、eslint、后端单元测试通过；`npm run build` 成功；用只托管静态前端与资料接口（临时数据文件）的隔离服务 + 无头 Chrome 实测：入口厅↔我的房间、电梯↔街道、玻璃门回入口厅，衣柜前按 E 打开面板、随机搭配、改名并保存后角色换装，刷新后形象保留，手机宽度布局正常，无页面错误；未连接 8081 线上服务，线上数据未改动。

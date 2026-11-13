@@ -1,9 +1,9 @@
 {
- "version": 1,
+ "version": 2,
  "tile": 16,
  "world": {
-  "width": 576,
-  "height": 656
+  "width": 896,
+  "height": 1392
  },
  "start": {
   "room": "foyer",
@@ -14,13 +14,49 @@
    "file": "anims/door_glass.png",
    "frameWidth": 32,
    "frameHeight": 48,
-   "frameRate": 14
+   "frameRate": 14,
+   "door": {
+    "open": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "close": [
+     5,
+     6,
+     7,
+     0
+    ]
+   }
   },
   "elevator": {
    "file": "anims/elevator.png",
    "frameWidth": 32,
    "frameHeight": 32,
-   "frameRate": 10
+   "frameRate": 10,
+   "door": {
+    "open": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7
+    ],
+    "close": [
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     0
+    ]
+   }
   },
   "receptionist": {
    "file": "anims/receptionist.png",
@@ -91,10 +127,497 @@
  },
  "rooms": [
   {
+   "id": "street",
+   "name": "街道",
+   "x": 368,
+   "y": 0,
+   "width": 480,
+   "height": 288,
+   "background": "street.png",
+   "walls": [
+    [
+     0,
+     0,
+     228,
+     112
+    ],
+    [
+     228,
+     0,
+     24,
+     78
+    ],
+    [
+     252,
+     0,
+     228,
+     112
+    ],
+    [
+     0,
+     112,
+     4,
+     176
+    ],
+    [
+     476,
+     112,
+     4,
+     176
+    ],
+    [
+     0,
+     284,
+     480,
+     4
+    ]
+   ],
+   "props": [
+    {
+     "key": "plant_tall2",
+     "x": 208,
+     "y": 82,
+     "solid": [
+      209,
+      118,
+      14,
+      12
+     ]
+    },
+    {
+     "key": "plant_tall2",
+     "x": 258,
+     "y": 82,
+     "solid": [
+      259,
+      118,
+      14,
+      12
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 48,
+     "y": 136,
+     "solid": [
+      49,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 160,
+     "y": 136,
+     "solid": [
+      161,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 304,
+     "y": 136,
+     "solid": [
+      305,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 416,
+     "y": 136,
+     "solid": [
+      417,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "bench",
+     "x": 80,
+     "y": 150,
+     "solid": [
+      81,
+      158,
+      28,
+      10
+     ]
+    },
+    {
+     "key": "bench",
+     "x": 336,
+     "y": 150,
+     "solid": [
+      337,
+      158,
+      28,
+      10
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 128,
+     "y": 108,
+     "solid": [
+      129,
+      142,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 320,
+     "y": 108,
+     "solid": [
+      321,
+      142,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "trash",
+     "x": 192,
+     "y": 152,
+     "solid": [
+      193,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "trash",
+     "x": 384,
+     "y": 152,
+     "solid": [
+      385,
+      176,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 32,
+     "y": 230,
+     "solid": [
+      33,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 96,
+     "y": 230,
+     "solid": [
+      97,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 160,
+     "y": 230,
+     "solid": [
+      161,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 224,
+     "y": 230,
+     "solid": [
+      225,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 288,
+     "y": 230,
+     "solid": [
+      289,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 352,
+     "y": 230,
+     "solid": [
+      353,
+      250,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 416,
+     "y": 230,
+     "solid": [
+      417,
+      250,
+      30,
+      12
+     ]
+    }
+   ],
+   "anims": [],
+   "portals": [
+    {
+     "rect": [
+      230,
+      86,
+      20,
+      12
+     ],
+     "to": "foyer",
+     "spawn": "fromStreet"
+    }
+   ],
+   "spawns": {
+    "fromFoyer": {
+     "x": 240,
+     "y": 130,
+     "dir": "down"
+    }
+   },
+   "machines": [],
+   "doors": [
+    {
+     "key": "door_glass",
+     "x": 224,
+     "y": 64,
+     "radius": 40
+    }
+   ],
+   "signs": [
+    {
+     "x": 240,
+     "y": 56,
+     "text": "HannisHub",
+     "tone": "brand"
+    }
+   ]
+  },
+  {
+   "id": "room",
+   "name": "我的房间",
+   "x": 0,
+   "y": 544,
+   "width": 192,
+   "height": 160,
+   "background": "room.png",
+   "walls": [
+    [
+     0,
+     0,
+     192,
+     48
+    ],
+    [
+     0,
+     48,
+     16,
+     112
+    ],
+    [
+     176,
+     48,
+     16,
+     48
+    ],
+    [
+     176,
+     128,
+     16,
+     32
+    ],
+    [
+     0,
+     144,
+     192,
+     16
+    ]
+   ],
+   "props": [
+    {
+     "key": "bed_blue",
+     "x": 18,
+     "y": 30,
+     "solid": [
+      19,
+      40,
+      24,
+      30
+     ]
+    },
+    {
+     "key": "nightstand",
+     "x": 46,
+     "y": 36,
+     "solid": [
+      47,
+      46,
+      13,
+      8
+     ]
+    },
+    {
+     "key": "lamp_desk_cream",
+     "x": 46,
+     "y": 24,
+     "depth": 55
+    },
+    {
+     "key": "wardrobe",
+     "x": 110,
+     "y": 20,
+     "solid": [
+      111,
+      46,
+      29,
+      10
+     ]
+    },
+    {
+     "key": "mirror",
+     "x": 144,
+     "y": 31,
+     "solid": [
+      145,
+      50,
+      10,
+      6
+     ]
+    },
+    {
+     "key": "plant_pot",
+     "x": 158,
+     "y": 34,
+     "solid": [
+      159,
+      58,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "bookshelf",
+     "x": 16,
+     "y": 90,
+     "solid": [
+      17,
+      122,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 50,
+     "y": 92,
+     "solid": [
+      51,
+      132,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "armchair_blue",
+     "x": 70,
+     "y": 90,
+     "solid": [
+      71,
+      108,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "table_round",
+     "x": 102,
+     "y": 98,
+     "solid": [
+      103,
+      114,
+      30,
+      16
+     ]
+    }
+   ],
+   "anims": [
+    {
+     "key": "cat",
+     "x": 120,
+     "y": 126,
+     "depth": 142
+    }
+   ],
+   "portals": [
+    {
+     "rect": [
+      186,
+      96,
+      6,
+      32
+     ],
+     "to": "foyer",
+     "spawn": "fromRoom"
+    }
+   ],
+   "spawns": {
+    "fromFoyer": {
+     "x": 166,
+     "y": 116,
+     "dir": "left"
+    }
+   },
+   "machines": [
+    {
+     "id": "wardrobe",
+     "title": "形象与名字",
+     "hint": "换装、设置别人看到的名字",
+     "zone": [
+      106,
+      60,
+      52,
+      18
+     ],
+     "signX": 132,
+     "signY": 8
+    }
+   ],
+   "doors": [],
+   "signs": []
+  },
+  {
    "id": "foyer",
    "name": "入口厅",
-   "x": 128,
-   "y": 0,
+   "x": 448,
+   "y": 544,
    "width": 320,
    "height": 208,
    "background": "foyer.png",
@@ -102,14 +625,32 @@
     [
      0,
      0,
-     320,
+     150,
+     48
+    ],
+    [
+     150,
+     0,
+     20,
+     20
+    ],
+    [
+     170,
+     0,
+     150,
      48
     ],
     [
      0,
      48,
      16,
-     160
+     48
+    ],
+    [
+     0,
+     128,
+     16,
+     80
     ],
     [
      304,
@@ -288,13 +829,6 @@
    ],
    "anims": [
     {
-     "key": "elevator",
-     "x": 144,
-     "y": 16,
-     "depth": 20,
-     "frames": "once"
-    },
-    {
      "key": "receptionist",
      "x": 56,
      "y": 48
@@ -315,12 +849,32 @@
    "portals": [
     {
      "rect": [
+      152,
+      22,
+      16,
+      12
+     ],
+     "to": "street",
+     "spawn": "fromFoyer"
+    },
+    {
+     "rect": [
       144,
       198,
       32,
       10
      ],
      "to": "hall",
+     "spawn": "fromFoyer"
+    },
+    {
+     "rect": [
+      0,
+      96,
+      6,
+      32
+     ],
+     "to": "room",
      "spawn": "fromFoyer"
     }
    ],
@@ -334,10 +888,28 @@
      "x": 160,
      "y": 184,
      "dir": "up"
+    },
+    "fromStreet": {
+     "x": 160,
+     "y": 58,
+     "dir": "down"
+    },
+    "fromRoom": {
+     "x": 26,
+     "y": 116,
+     "dir": "right"
     }
    },
    "machines": [],
-   "doors": [],
+   "doors": [
+    {
+     "key": "elevator",
+     "x": 144,
+     "y": 16,
+     "radius": 30,
+     "depth": 20
+    }
+   ],
    "signs": [
     {
      "x": 160,
@@ -350,14 +922,20 @@
      "y": 154,
      "text": "大厅",
      "tone": "muted"
+    },
+    {
+     "x": 34,
+     "y": 88,
+     "text": "我的房间",
+     "tone": "muted"
     }
    ]
   },
   {
    "id": "hall",
    "name": "大厅",
-   "x": 0,
-   "y": 272,
+   "x": 320,
+   "y": 1008,
    "width": 576,
    "height": 384,
    "background": "hall.png",

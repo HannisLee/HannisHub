@@ -11,7 +11,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 | 后端 | Python 3.12 + FastAPI |
 | 前端 | Next.js 16 + React 19 + TypeScript，App Router，静态导出 |
 | UI 规范 | 根目录 `design.md` 的 CSS Variables、暖黑编辑风格、统一组件 |
-| 2D 场景 | Phaser 3（聊天大厅像素俱乐部：入口厅 + 大厅，付费素材 Limezu Modern Interiors，`pixelArt` 整数倍缩放，Arcade 物理碰撞） |
+| 2D 场景 | Phaser 3（聊天大厅像素俱乐部：街道 + 入口厅 + 我的房间 + 大厅，付费素材 Limezu Modern Interiors，`pixelArt` 整数倍缩放，Arcade 物理碰撞） |
 | 网页终端 | xterm.js（`@xterm/xterm` + `@xterm/addon-fit`）+ FastAPI WebSocket + 标准库 pty |
 | 进程管理 | subprocess + psutil |
 | GPU 监控 | nvidia-smi + psutil |
@@ -33,6 +33,7 @@ HannisHub/
 │   └── compression.py        # 选择性 gzip 中间件：只压缩长度已知的文本类响应
 ├── chatworld/                # 聊天世界后端（聊天室与聊天大厅）
 │   ├── chat_room.py          # 聊天室组件：公共聊天室消息、用户资料、在线状态与附件，存储于根目录 data/（不入库）
+│   ├── lobby_profile.py      # 聊天大厅个人资料：按登录账号保存场景名字与像素形象部件，存储于 data/chat_lobby_profiles.json（不入库）
 │   └── asset/                # 聊天大厅素材原件 Modern Interiors 整包（不入库）；asset_index.md 为入库的速查索引
 ├── model_manager/            # 模型管理子服务（原 model_manager/），含 AI、ASR、OCR 相关模块
 │   ├── app.py                # 子服务 FastAPI 后端
@@ -99,7 +100,11 @@ HannisHub/
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
   - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 50 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
-- `/chat-lobby`：聊天大厅，2D 像素俱乐部风格单人场景（Phaser 3），全部使用付费素材 Limezu Modern Interiors 的 16×16 原生规格，3/4 俯视、16px Tile、整数倍缩放（2×～4×，房间能完整放下时居中静止，否则平滑跟随角色，相机限定在当前房间并留 12px 暗边）。场景由两个房间组成：**入口厅**（20×13 格，进入时上墙电梯开合一次，左侧前台与动画接待员，右侧等候区，下墙中间开口带「大厅」指示与下箭头）与**大厅**（36×24 格，上墙中间玻璃双开门，走近自动开门）。从入口厅向下穿过开口、或从大厅走进上墙玻璃门，相机淡出淡入后切换到另一房间。大厅布置：入口红色迎宾长毯；左上工位区（浅灰地毯上 2×2 共 4 个工位，每个工位为 64px 长桌 + 双屏滚动动画显示器 + 台灯/绿植/咖啡 + 转椅）；右上机器区两台可见机器——**ASR 录音台**（音箱、音频工作台、机柜、挂墙声纹屏、录音话筒，紫色地台）与 **OCR 文档终端**（自助扫描终端、挂墙文档屏、复印机、纸篓，蓝色地台），机器上方悬浮名称铭牌；右侧吧台与高脚凳、鱼缸；左下休息区（单人椅围合圆桌、睡猫、落地灯、书柜）；中下咖啡角；右下游戏角（街机、弹珠机、台球桌）。站在机器前的地台上，角色头顶出现「E」提示、舞台底部出现使用提示条，按 E（或空格；触屏点「使用」）弹出大尺寸对话框，内嵌原 `/llama/asr`、`/llama/ocr` 页面组件（`AsrPanel` / `OcrPanel`，按需动态加载），Esc、关闭按钮或点击遮罩返回大厅，对话框右上角可跳转独立页面。面板打开或页面输入框获得焦点时，游戏冻结角色并关闭 Phaser 全局按键拦截，保证输入框可以正常输入 WASD/E/空格。角色贴图为 6 列 × 8 行、每帧 16×32（静止与行走四方向各 6 帧），行走 10fps、静止 4fps；WASD/方向键移动（斜向归一化），墙体、家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡；触屏设备显示方向垫。本轮仍为单人场景，不含多人同步与工位就座。**布局与素材由构建脚本 `scripts/build_chat_lobby_assets.py` 统一生成**：脚本从本机素材包（`chatworld/asset/modern_interiors/`，不入库）裁剪单件、程序化绘制墙顶收边/墙脚阴影/区域地毯并烘焙两个房间背景，打包家具图集（Phaser JSON Hash），导出动画帧条，并输出 `layout.json`（房间偏移、家具坐标与碰撞盒、动画物件、门、传送门、出生点、机器交互区与铭牌）；`--preview` 可额外输出带碰撞标注的整图预览。前端只读取 `layout.json` 搭建场景，调整布局无需改前端代码。运行时素材位于 `frontend/public/chat-lobby/club/`（`foyer.png`、`hall.png`、`objects.png/json`、`anims/`、`player.png`、`layout.json`、许可证副本 `LICENSE.txt`），派生清单与署名见 `frontend/public/chat-lobby/CREDITS.md`，素材包速查索引见 `chatworld/asset/asset_index.md`；页面底部署名 LimeZu。
+- `/chat-lobby`：聊天大厅，2D 像素俱乐部风格单人场景（Phaser 3），全部使用付费素材 Limezu Modern Interiors 的 16×16 原生规格，3/4 俯视、16px Tile、整数倍缩放（2×～4×，房间能完整放下时居中静止，否则平滑跟随角色，相机限定在当前房间并留 12px 暗边）。场景由四个区域组成（街道、我的房间见下文）：**入口厅**（20×13 格，上墙电梯走近自动开门，左侧前台与动画接待员，右侧等候区，下墙中间开口带「大厅」指示与下箭头）与**大厅**（36×24 格，上墙中间玻璃双开门，走近自动开门）。从入口厅向下穿过开口、或从大厅走进上墙玻璃门，相机淡出淡入后切换到另一房间。大厅布置：入口红色迎宾长毯；左上工位区（浅灰地毯上 2×2 共 4 个工位，每个工位为 64px 长桌 + 双屏滚动动画显示器 + 台灯/绿植/咖啡 + 转椅）；右上机器区两台可见机器——**ASR 录音台**（音箱、音频工作台、机柜、挂墙声纹屏、录音话筒，紫色地台）与 **OCR 文档终端**（自助扫描终端、挂墙文档屏、复印机、纸篓，蓝色地台），机器上方悬浮名称铭牌；右侧吧台与高脚凳、鱼缸；左下休息区（单人椅围合圆桌、睡猫、落地灯、书柜）；中下咖啡角；右下游戏角（街机、弹珠机、台球桌）。站在机器前的地台上，角色头顶出现「E」提示、舞台底部出现使用提示条，按 E（或空格；触屏点「使用」）弹出大尺寸对话框，内嵌原 `/llama/asr`、`/llama/ocr` 页面组件（`AsrPanel` / `OcrPanel`，按需动态加载），Esc、关闭按钮或点击遮罩返回大厅，对话框右上角可跳转独立页面。面板打开或页面输入框获得焦点时，游戏冻结角色并关闭 Phaser 全局按键拦截，保证输入框可以正常输入 WASD/E/空格。角色贴图为 6 列 × 8 行、每帧 16×32（静止与行走四方向各 6 帧），行走 10fps、静止 4fps；WASD/方向键移动（斜向归一化），墙体、家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡；触屏设备显示方向垫。本轮仍为单人场景，不含多人同步与工位就座。**布局与素材由构建脚本 `scripts/build_chat_lobby_assets.py` 统一生成**：脚本从本机素材包（`chatworld/asset/modern_interiors/`，不入库）裁剪单件、程序化绘制墙顶收边/墙脚阴影/区域地毯并烘焙两个房间背景，打包家具图集（Phaser JSON Hash），导出动画帧条，并输出 `layout.json`（房间偏移、家具坐标与碰撞盒、动画物件、门、传送门、出生点、机器交互区与铭牌）；`--preview` 可额外输出带碰撞标注的整图预览。前端只读取 `layout.json` 搭建场景，调整布局无需改前端代码。运行时素材位于 `frontend/public/chat-lobby/club/`（`foyer.png`、`hall.png`、`objects.png/json`、`anims/`、`player.png`、`layout.json`、许可证副本 `LICENSE.txt`），派生清单与署名见 `frontend/public/chat-lobby/CREDITS.md`，素材包速查索引见 `chatworld/asset/asset_index.md`；页面底部署名 LimeZu。
+  - **街道**（30×18 格，位于大楼外）：上方为公司大楼外立面（屋檐、三层办公窗、一层橱窗、「HannisHub」招牌），中间玻璃双开门走近自动开门；下方依次为人行道（路灯、长椅、盆栽、垃圾桶）、马路（沥青、路缘、黄色中线虚线、门前斑马线）与对面人行道，左右两端渐隐到舞台背景。素材包没有室外素材，外立面、路面与路缘由室内地砖墙面程序化拼接。走进玻璃门 → 到达入口厅电梯前（电梯门自动打开）；在入口厅走进电梯 → 下楼到街道门前。初始出生点仍是入口厅电梯前。
+  - **我的房间**（12×10 格，入口厅左墙门洞隔壁，门口有地垫与「我的房间」标牌；右墙门洞回入口厅）：单人床、床头柜与台灯、窗帘窗、衣柜 + 穿衣镜、书架、落地灯、扶手椅与小圆桌、睡猫。衣柜前的地台为交互区，铭牌「形象与名字」，按 E 打开**形象与名字**面板：左侧为放大 6 倍的动画预览（可左右转身、切换走动/站立），头顶显示名字标签，下方为名字输入框（最多 16 字）；右侧按 肤色 / 眼睛 / 服装 / 发型 / 配饰 分页列出款式缩略图（缩略图为「当前搭配 + 该款式」的正面形象，发型与配饰可选「不戴」），选中款式后下方列出该款全部配色；底部有「随机搭配」「恢复默认角色」「取消」「保存」。保存后场景中的角色立即换装。名字用于多人同场时显示在其他人看到的角色头顶，自己在场景中看不到自己的名字（当前仍为单人场景，本地角色不渲染名字）。
+  - **像素形象**：使用素材包角色生成器（`2_Characters/Character_Generator`）的分层部件，构建脚本把 身体 9 / 眼睛 7 / 服装 132（33 款）/ 发型 200（29 款）/ 配饰 84（19 款）共 432 个部件的静止与行走帧重排为与 `player.png` 相同的 96×256 块，按类别打成 5 张图集 `avatar/{body,eyes,outfit,hair,accessory}.png`（每行 16 块）并输出清单 `avatar/parts.json`（部件编号、款式、配色）。前端 `game/avatar.ts` 按 身体 → 眼睛 → 服装 → 发型 → 配饰 顺序在画布上叠层合成帧表；Phaser 场景使用一张常驻画布贴图 `avatar-self`，形象变化时重绘并刷新，角色动画按皮肤贴图分组（`player:*` / `avatar-self:*`），切换时保留当前动作与朝向。资料未设置形象时沿用默认角色 `player.png`。页面先读取资料、合成好形象再创建游戏，避免默认角色闪现。
+  - 世界排布：街道在最上方，下一行左为我的房间、右为入口厅，大厅在入口厅正下方，各区域间隔 256px，保证小房间在大屏居中显示时相机视野内看不到相邻区域。电梯与玻璃门共用自动门逻辑，开门/关门帧序列由 `layout.json` 中动画的 `door` 字段给出；门可指定 `depth`（电梯为 20，角色走进时画在门上）。交互键 E / 空格改为在 keydown 事件中置位，避免按下与抬起落在同一帧时被漏掉。
 - `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」。页面右下角另有可拖动的浮动提示词按钮（位置记忆在 `hannishub_prompt_float_position`），点击展开仅含输入框、复制、归档的面板，不提供润色；草稿暂存在 `hannishub_prompt_float_draft`（与提示词页草稿互不覆盖），归档调用提示词模块既有的 `POST /prompt/api/prompts`，写入 `prompt_service/settings.json`，与提示词页归档列表共用同一份数据
 - `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
@@ -131,8 +136,8 @@ HannisHub/
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件；`prompt-float.tsx` 为终端页使用的可拖动浮动提示词（仅输入、复制、归档） |
 | `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
-| `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR 面板）；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏 |
-| `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色、`create-game.ts` 游戏工厂，与普通 UI 组件解耦 |
+| `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR 面板）；`avatar-dialog.tsx` 为我的房间「形象与名字」面板；页面加载时读取 `/api/chat-lobby/profile` 并合成形象；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏 |
+| `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色（可切换皮肤贴图）、`avatar.ts` 角色生成器部件加载与叠层合成（React 与 Phaser 共用）、`create-game.ts` 游戏工厂，与普通 UI 组件解耦 |
 | `frontend/components/terminal/` | 网页终端：横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
@@ -194,6 +199,8 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/chat-room/files/{id}?download=<bool>` | 读取附件：`image` 且未要求下载时以原类型内联显示，其余一律以 `application/octet-stream` 附件下载；带 `nosniff`、沙箱 CSP 与长期私有缓存头 |
 | POST | `/api/chat-room/messages` | 接收 `client_id`、`content`（最多 4,000 字）、可选 `nonce`（8-64 位字母数字）与可选 `attachment_id` 追加一条消息（有附件时文字可为空），同一浏览器重复的 `nonce` 直接返回已有消息，昵称取已保存的资料（无资料时使用请求中的 `nickname`）；最多保留最近 10,000 条 |
 | DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
+| GET | `/api/chat-lobby/profile` | 读取当前登录账号在聊天大厅中的资料 `{username, name, avatar, updated_at}`；未保存过时 `name` 为登录用户名、`avatar` 为 `null`（使用默认角色） |
+| PUT | `/api/chat-lobby/profile` | 接收 `name`（去控制字符、合并空白，最多 16 字，不能为空）与 `avatar`（`null`，或含 `body`/`eyes`/`outfit` 必填、`hair`/`accessory` 可为空字符串的部件编号对象，编号限 1-48 位字母数字下划线）保存到 `data/chat_lobby_profiles.json`，以登录用户名为键，最多 500 份；与聊天大厅页面一样目前仅管理员可访问 |
 | GET | `/api/file-manager/settings` | 读取文件管理组件已暴露的顶层目录及展开后的 `resolved_roots`；未显式配置时默认返回 `~` |
 | PUT | `/api/file-manager/settings` | 保存顶层目录数组；仅接受存在的绝对路径或以 `~/` 开头的路径，保存后清空缓存 |
 | GET | `/api/file-manager/directory?root=<index>&path=<relative_path>&refresh=<bool>` | 返回受限目录的直接子项；默认使用 1 小时服务端缓存，`refresh=true` 强制读取磁盘 |

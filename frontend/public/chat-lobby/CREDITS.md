@@ -14,6 +14,12 @@
   速查索引见 `chatworld/asset/asset_index.md`。
 - 派生文件（本项目自原始包裁剪 / 拼接 / 烘焙，仍受上述许可约束），除 `player.png` 外
   全部由 `scripts/build_chat_lobby_assets.py` 生成，来源路径相对原始包目录：
+  - `club/street.png`：街道背景。外立面墙面取自 `Room_Builder_Walls_16x16.png`，人行道与沥青取自
+    `Room_Builder_Floors_16x16.png`；屋檐、窗户、橱窗、路缘、中线与斑马线为脚本绘制。
+  - `club/room.png`：我的房间背景（Room_Builder 木地板与墙面，烘焙 Generic 窗帘窗与地毯）。
+  - `club/avatar/*.png` + `club/avatar/parts.json`：角色生成器分层部件，取自
+    `2_Characters/Character_Generator/` 的 Bodies、Eyes、Outfits、Hairstyles、Accessories（16x16 档），
+    每件只保留静止与行走帧并重排为 96x256 块（与 `player.png` 同布局），按类别拼成图集，前端运行时叠层合成。
   - `club/foyer.png`、`club/hall.png`：入口厅与大厅背景。地板取自
     `1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png`，墙面取自
     `Room_Builder_Walls_16x16.png`；墙顶收边、墙脚阴影与区域地毯边框为脚本绘制；
@@ -21,7 +27,8 @@
     与各主题 `Theme_Sorter_Singles`）。
   - `club/objects.png` + `club/objects.json`：家具图集（Phaser JSON Hash），单件取自
     `Theme_Sorter_Singles` 的 Living Room、Basement、Classroom and Library、Conference Hall、
-    Television and Film Studio，办公椅与长椅裁剪自 Generic 总表。
+    Television and Film Studio，办公椅、长椅与穿衣镜裁剪自 Generic 总表，单人床、床头柜与衣柜裁剪自
+    `Theme_Sorter/4_Bedroom_16x16.png`。
   - `club/anims/*.png`：动画帧条，取自 `3_Animated_objects/16x16/spritesheets`：
     玻璃双开门 32x48（8 帧）、电梯 32x32（14 帧）、接待员 16x32（7 帧）、
     滚动屏显示器 16x32（12 帧）、音箱 16x48、机柜 16x48、文档屏 32x32（5 帧）、

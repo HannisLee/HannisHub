@@ -6,6 +6,7 @@ export const API_PATHS = {
   ocr: "/api/ocr",
   aiSettings: "/api/ai-settings",
   chatRoom: "/api/chat-room",
+  chatLobby: "/api/chat-lobby",
   users: "/api/users",
   terminal: "/api/terminal",
   llama: "/llama-manager/api",

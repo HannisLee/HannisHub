@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import chat_room
+from chatworld import chat_room, lobby_profile
 from model_manager import ocr_records
 from server import terminal_manager
 from core.compression import SelectiveGZipMiddleware
@@ -636,6 +636,24 @@ async def file_manager_resource(
     """返回受限目录中的原始资源，供 Markdown 内的相对图片与链接引用。"""
     file_path = resolve_file(root, path)
     return FileResponse(file_path, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/chat-lobby/profile")
+async def chat_lobby_profile(request: Request):
+    """读取当前账号在聊天大厅中的名字与像素形象。"""
+    username = current_username(request.session)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return JSONResponse(await run_in_threadpool(lobby_profile.get_profile, username))
+
+
+@app.put("/api/chat-lobby/profile")
+async def chat_lobby_profile_save(request: Request, payload: dict[str, Any] = Body(...)):
+    """保存当前账号在聊天大厅中的名字与像素形象。"""
+    username = current_username(request.session)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return JSONResponse(await run_in_threadpool(lobby_profile.save_profile, username, payload))
 
 
 @app.get("/api/point-clouds/file")

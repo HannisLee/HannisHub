@@ -1,0 +1,2199 @@
+{
+ "frameWidth": 16,
+ "frameHeight": 32,
+ "blockWidth": 96,
+ "blockHeight": 256,
+ "columns": 16,
+ "categories": {
+  "body": {
+   "file": "avatar/body.png",
+   "optional": false,
+   "items": [
+    {
+     "id": "Body_01",
+     "style": "01",
+     "variant": ""
+    },
+    {
+     "id": "Body_02",
+     "style": "02",
+     "variant": ""
+    },
+    {
+     "id": "Body_03",
+     "style": "03",
+     "variant": ""
+    },
+    {
+     "id": "Body_04",
+     "style": "04",
+     "variant": ""
+    },
+    {
+     "id": "Body_05",
+     "style": "05",
+     "variant": ""
+    },
+    {
+     "id": "Body_06",
+     "style": "06",
+     "variant": ""
+    },
+    {
+     "id": "Body_07",
+     "style": "07",
+     "variant": ""
+    },
+    {
+     "id": "Body_08",
+     "style": "08",
+     "variant": ""
+    },
+    {
+     "id": "Body_09",
+     "style": "09",
+     "variant": ""
+    }
+   ]
+  },
+  "eyes": {
+   "file": "avatar/eyes.png",
+   "optional": false,
+   "items": [
+    {
+     "id": "Eyes_01",
+     "style": "01",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_02",
+     "style": "02",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_03",
+     "style": "03",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_04",
+     "style": "04",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_05",
+     "style": "05",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_06",
+     "style": "06",
+     "variant": ""
+    },
+    {
+     "id": "Eyes_07",
+     "style": "07",
+     "variant": ""
+    }
+   ]
+  },
+  "outfit": {
+   "file": "avatar/outfit.png",
+   "optional": false,
+   "items": [
+    {
+     "id": "Outfit_01_01",
+     "style": "01",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_01_02",
+     "style": "01",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_01_03",
+     "style": "01",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_01_04",
+     "style": "01",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_01_05",
+     "style": "01",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_01_06",
+     "style": "01",
+     "variant": "06"
+    },
+    {
+     "id": "Outfit_01_07",
+     "style": "01",
+     "variant": "07"
+    },
+    {
+     "id": "Outfit_01_08",
+     "style": "01",
+     "variant": "08"
+    },
+    {
+     "id": "Outfit_01_09",
+     "style": "01",
+     "variant": "09"
+    },
+    {
+     "id": "Outfit_01_10",
+     "style": "01",
+     "variant": "10"
+    },
+    {
+     "id": "Outfit_02_01",
+     "style": "02",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_02_02",
+     "style": "02",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_02_03",
+     "style": "02",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_02_04",
+     "style": "02",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_03_01",
+     "style": "03",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_03_02",
+     "style": "03",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_03_03",
+     "style": "03",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_03_04",
+     "style": "03",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_04_01",
+     "style": "04",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_04_02",
+     "style": "04",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_04_03",
+     "style": "04",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_05_01",
+     "style": "05",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_05_02",
+     "style": "05",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_05_03",
+     "style": "05",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_05_04",
+     "style": "05",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_05_05",
+     "style": "05",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_06_01",
+     "style": "06",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_06_02",
+     "style": "06",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_06_03",
+     "style": "06",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_06_04",
+     "style": "06",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_07_01",
+     "style": "07",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_07_02",
+     "style": "07",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_07_03",
+     "style": "07",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_07_04",
+     "style": "07",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_08_01",
+     "style": "08",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_08_02",
+     "style": "08",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_08_03",
+     "style": "08",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_09_01",
+     "style": "09",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_09_02",
+     "style": "09",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_09_03",
+     "style": "09",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_10_01",
+     "style": "10",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_10_02",
+     "style": "10",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_10_03",
+     "style": "10",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_10_04",
+     "style": "10",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_10_05",
+     "style": "10",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_11_01",
+     "style": "11",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_11_02",
+     "style": "11",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_11_03",
+     "style": "11",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_11_04",
+     "style": "11",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_12_01",
+     "style": "12",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_12_02",
+     "style": "12",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_12_03",
+     "style": "12",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_13_01",
+     "style": "13",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_13_02",
+     "style": "13",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_13_03",
+     "style": "13",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_13_04",
+     "style": "13",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_14_01",
+     "style": "14",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_14_02",
+     "style": "14",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_14_03",
+     "style": "14",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_14_04",
+     "style": "14",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_14_05",
+     "style": "14",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_15_01",
+     "style": "15",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_15_02",
+     "style": "15",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_15_03",
+     "style": "15",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_16_01",
+     "style": "16",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_16_02",
+     "style": "16",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_16_03",
+     "style": "16",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_17_01",
+     "style": "17",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_17_02",
+     "style": "17",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_17_03",
+     "style": "17",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_18_01",
+     "style": "18",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_18_02",
+     "style": "18",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_18_03",
+     "style": "18",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_18_04",
+     "style": "18",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_19_01",
+     "style": "19",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_19_02",
+     "style": "19",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_19_03",
+     "style": "19",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_19_04",
+     "style": "19",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_20_01",
+     "style": "20",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_20_02",
+     "style": "20",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_20_03",
+     "style": "20",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_21_01",
+     "style": "21",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_21_02",
+     "style": "21",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_21_03",
+     "style": "21",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_21_04",
+     "style": "21",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_22_01",
+     "style": "22",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_22_02",
+     "style": "22",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_22_03",
+     "style": "22",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_22_04",
+     "style": "22",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_23_01",
+     "style": "23",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_23_02",
+     "style": "23",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_23_03",
+     "style": "23",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_23_04",
+     "style": "23",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_24_01",
+     "style": "24",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_24_02",
+     "style": "24",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_24_03",
+     "style": "24",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_24_04",
+     "style": "24",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_25_01",
+     "style": "25",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_25_02",
+     "style": "25",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_25_03",
+     "style": "25",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_25_04",
+     "style": "25",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_25_05",
+     "style": "25",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_26_01",
+     "style": "26",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_26_02",
+     "style": "26",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_26_03",
+     "style": "26",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_27_01",
+     "style": "27",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_27_02",
+     "style": "27",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_27_03",
+     "style": "27",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_28_01",
+     "style": "28",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_28_02",
+     "style": "28",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_28_03",
+     "style": "28",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_28_04",
+     "style": "28",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_29_01",
+     "style": "29",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_29_02",
+     "style": "29",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_29_03",
+     "style": "29",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_29_04",
+     "style": "29",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_30_01",
+     "style": "30",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_30_02",
+     "style": "30",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_30_03",
+     "style": "30",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_31_01",
+     "style": "31",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_31_02",
+     "style": "31",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_31_03",
+     "style": "31",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_31_04",
+     "style": "31",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_31_05",
+     "style": "31",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_32_01",
+     "style": "32",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_32_02",
+     "style": "32",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_32_03",
+     "style": "32",
+     "variant": "03"
+    },
+    {
+     "id": "Outfit_32_04",
+     "style": "32",
+     "variant": "04"
+    },
+    {
+     "id": "Outfit_32_05",
+     "style": "32",
+     "variant": "05"
+    },
+    {
+     "id": "Outfit_33_01",
+     "style": "33",
+     "variant": "01"
+    },
+    {
+     "id": "Outfit_33_02",
+     "style": "33",
+     "variant": "02"
+    },
+    {
+     "id": "Outfit_33_03",
+     "style": "33",
+     "variant": "03"
+    }
+   ]
+  },
+  "hair": {
+   "file": "avatar/hair.png",
+   "optional": true,
+   "items": [
+    {
+     "id": "Hairstyle_01_01",
+     "style": "01",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_01_02",
+     "style": "01",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_01_03",
+     "style": "01",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_01_04",
+     "style": "01",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_01_05",
+     "style": "01",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_01_06",
+     "style": "01",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_01_07",
+     "style": "01",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_02_01",
+     "style": "02",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_02_02",
+     "style": "02",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_02_03",
+     "style": "02",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_02_04",
+     "style": "02",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_02_05",
+     "style": "02",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_02_06",
+     "style": "02",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_02_07",
+     "style": "02",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_03_01",
+     "style": "03",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_03_02",
+     "style": "03",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_03_03",
+     "style": "03",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_03_04",
+     "style": "03",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_03_05",
+     "style": "03",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_03_06",
+     "style": "03",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_03_07",
+     "style": "03",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_04_01",
+     "style": "04",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_04_02",
+     "style": "04",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_04_03",
+     "style": "04",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_04_04",
+     "style": "04",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_04_05",
+     "style": "04",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_04_06",
+     "style": "04",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_04_07",
+     "style": "04",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_05_01",
+     "style": "05",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_05_02",
+     "style": "05",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_05_03",
+     "style": "05",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_05_04",
+     "style": "05",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_05_05",
+     "style": "05",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_05_06",
+     "style": "05",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_05_07",
+     "style": "05",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_06_01",
+     "style": "06",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_06_02",
+     "style": "06",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_06_03",
+     "style": "06",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_06_04",
+     "style": "06",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_06_05",
+     "style": "06",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_06_06",
+     "style": "06",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_06_07",
+     "style": "06",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_07_01",
+     "style": "07",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_07_02",
+     "style": "07",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_07_03",
+     "style": "07",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_07_04",
+     "style": "07",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_07_05",
+     "style": "07",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_07_06",
+     "style": "07",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_07_07",
+     "style": "07",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_08_01",
+     "style": "08",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_08_02",
+     "style": "08",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_08_03",
+     "style": "08",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_08_04",
+     "style": "08",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_08_05",
+     "style": "08",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_08_06",
+     "style": "08",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_08_07",
+     "style": "08",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_09_01",
+     "style": "09",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_09_02",
+     "style": "09",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_09_03",
+     "style": "09",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_09_04",
+     "style": "09",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_09_05",
+     "style": "09",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_09_06",
+     "style": "09",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_09_07",
+     "style": "09",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_10_01",
+     "style": "10",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_10_02",
+     "style": "10",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_10_03",
+     "style": "10",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_10_04",
+     "style": "10",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_10_05",
+     "style": "10",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_10_06",
+     "style": "10",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_10_07",
+     "style": "10",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_11_01",
+     "style": "11",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_11_02",
+     "style": "11",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_11_03",
+     "style": "11",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_11_04",
+     "style": "11",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_11_05",
+     "style": "11",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_11_06",
+     "style": "11",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_11_07",
+     "style": "11",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_12_01",
+     "style": "12",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_12_02",
+     "style": "12",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_12_03",
+     "style": "12",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_12_04",
+     "style": "12",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_12_05",
+     "style": "12",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_12_06",
+     "style": "12",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_12_07",
+     "style": "12",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_13_01",
+     "style": "13",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_13_02",
+     "style": "13",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_13_03",
+     "style": "13",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_13_04",
+     "style": "13",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_13_05",
+     "style": "13",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_13_06",
+     "style": "13",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_13_07",
+     "style": "13",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_14_01",
+     "style": "14",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_14_02",
+     "style": "14",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_14_03",
+     "style": "14",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_14_04",
+     "style": "14",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_14_05",
+     "style": "14",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_14_06",
+     "style": "14",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_14_07",
+     "style": "14",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_15_01",
+     "style": "15",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_15_02",
+     "style": "15",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_15_03",
+     "style": "15",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_15_04",
+     "style": "15",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_15_05",
+     "style": "15",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_15_06",
+     "style": "15",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_15_07",
+     "style": "15",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_16_01",
+     "style": "16",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_16_02",
+     "style": "16",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_16_03",
+     "style": "16",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_16_04",
+     "style": "16",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_16_05",
+     "style": "16",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_16_06",
+     "style": "16",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_16_07",
+     "style": "16",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_17_01",
+     "style": "17",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_17_02",
+     "style": "17",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_17_03",
+     "style": "17",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_17_04",
+     "style": "17",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_17_05",
+     "style": "17",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_17_06",
+     "style": "17",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_17_07",
+     "style": "17",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_18_01",
+     "style": "18",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_18_02",
+     "style": "18",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_18_03",
+     "style": "18",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_18_04",
+     "style": "18",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_18_05",
+     "style": "18",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_18_06",
+     "style": "18",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_18_07",
+     "style": "18",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_19_01",
+     "style": "19",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_19_02",
+     "style": "19",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_19_03",
+     "style": "19",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_19_04",
+     "style": "19",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_19_05",
+     "style": "19",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_19_06",
+     "style": "19",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_19_07",
+     "style": "19",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_20_01",
+     "style": "20",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_20_02",
+     "style": "20",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_20_03",
+     "style": "20",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_20_04",
+     "style": "20",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_20_05",
+     "style": "20",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_20_06",
+     "style": "20",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_20_07",
+     "style": "20",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_21_01",
+     "style": "21",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_21_02",
+     "style": "21",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_21_03",
+     "style": "21",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_21_04",
+     "style": "21",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_21_05",
+     "style": "21",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_21_06",
+     "style": "21",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_21_07",
+     "style": "21",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_22_01",
+     "style": "22",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_22_02",
+     "style": "22",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_22_03",
+     "style": "22",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_22_04",
+     "style": "22",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_22_05",
+     "style": "22",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_22_06",
+     "style": "22",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_22_07",
+     "style": "22",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_23_01",
+     "style": "23",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_23_02",
+     "style": "23",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_23_03",
+     "style": "23",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_23_04",
+     "style": "23",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_23_05",
+     "style": "23",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_23_06",
+     "style": "23",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_23_07",
+     "style": "23",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_24_01",
+     "style": "24",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_24_02",
+     "style": "24",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_24_03",
+     "style": "24",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_24_04",
+     "style": "24",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_24_05",
+     "style": "24",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_24_06",
+     "style": "24",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_24_07",
+     "style": "24",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_25_01",
+     "style": "25",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_25_02",
+     "style": "25",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_25_03",
+     "style": "25",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_25_04",
+     "style": "25",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_25_05",
+     "style": "25",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_25_06",
+     "style": "25",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_25_07",
+     "style": "25",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_26_01",
+     "style": "26",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_26_02",
+     "style": "26",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_26_03",
+     "style": "26",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_26_04",
+     "style": "26",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_26_05",
+     "style": "26",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_26_06",
+     "style": "26",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_26_07",
+     "style": "26",
+     "variant": "07"
+    },
+    {
+     "id": "Hairstyle_27_01",
+     "style": "27",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_27_02",
+     "style": "27",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_27_03",
+     "style": "27",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_27_04",
+     "style": "27",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_27_05",
+     "style": "27",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_27_06",
+     "style": "27",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_28_01",
+     "style": "28",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_28_02",
+     "style": "28",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_28_03",
+     "style": "28",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_28_04",
+     "style": "28",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_28_05",
+     "style": "28",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_28_06",
+     "style": "28",
+     "variant": "06"
+    },
+    {
+     "id": "Hairstyle_29_01",
+     "style": "29",
+     "variant": "01"
+    },
+    {
+     "id": "Hairstyle_29_02",
+     "style": "29",
+     "variant": "02"
+    },
+    {
+     "id": "Hairstyle_29_03",
+     "style": "29",
+     "variant": "03"
+    },
+    {
+     "id": "Hairstyle_29_04",
+     "style": "29",
+     "variant": "04"
+    },
+    {
+     "id": "Hairstyle_29_05",
+     "style": "29",
+     "variant": "05"
+    },
+    {
+     "id": "Hairstyle_29_06",
+     "style": "29",
+     "variant": "06"
+    }
+   ]
+  },
+  "accessory": {
+   "file": "avatar/accessory.png",
+   "optional": true,
+   "items": [
+    {
+     "id": "Accessory_01_Ladybug_01",
+     "style": "01_Ladybug",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_01_Ladybug_02",
+     "style": "01_Ladybug",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_01_Ladybug_03",
+     "style": "01_Ladybug",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_01_Ladybug_04",
+     "style": "01_Ladybug",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_02_Bee_01",
+     "style": "02_Bee",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_02_Bee_02",
+     "style": "02_Bee",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_02_Bee_03",
+     "style": "02_Bee",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_03_Backpack_01",
+     "style": "03_Backpack",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_03_Backpack_02",
+     "style": "03_Backpack",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_03_Backpack_03",
+     "style": "03_Backpack",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_03_Backpack_04",
+     "style": "03_Backpack",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_03_Backpack_05",
+     "style": "03_Backpack",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_03_Backpack_06",
+     "style": "03_Backpack",
+     "variant": "06"
+    },
+    {
+     "id": "Accessory_03_Backpack_07",
+     "style": "03_Backpack",
+     "variant": "07"
+    },
+    {
+     "id": "Accessory_03_Backpack_08",
+     "style": "03_Backpack",
+     "variant": "08"
+    },
+    {
+     "id": "Accessory_03_Backpack_09",
+     "style": "03_Backpack",
+     "variant": "09"
+    },
+    {
+     "id": "Accessory_03_Backpack_10",
+     "style": "03_Backpack",
+     "variant": "10"
+    },
+    {
+     "id": "Accessory_04_Snapback_01",
+     "style": "04_Snapback",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_04_Snapback_02",
+     "style": "04_Snapback",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_04_Snapback_03",
+     "style": "04_Snapback",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_04_Snapback_04",
+     "style": "04_Snapback",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_04_Snapback_05",
+     "style": "04_Snapback",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_04_Snapback_06",
+     "style": "04_Snapback",
+     "variant": "06"
+    },
+    {
+     "id": "Accessory_05_Dino_Snapback_01",
+     "style": "05_Dino_Snapback",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_05_Dino_Snapback_02",
+     "style": "05_Dino_Snapback",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_05_Dino_Snapback_03",
+     "style": "05_Dino_Snapback",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_01",
+     "style": "06_Policeman_Hat",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_02",
+     "style": "06_Policeman_Hat",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_03",
+     "style": "06_Policeman_Hat",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_04",
+     "style": "06_Policeman_Hat",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_05",
+     "style": "06_Policeman_Hat",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_06_Policeman_Hat_06",
+     "style": "06_Policeman_Hat",
+     "variant": "06"
+    },
+    {
+     "id": "Accessory_07_Bataclava_01",
+     "style": "07_Bataclava",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_07_Bataclava_02",
+     "style": "07_Bataclava",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_07_Bataclava_03",
+     "style": "07_Bataclava",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_08_Detective_Hat_01",
+     "style": "08_Detective_Hat",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_08_Detective_Hat_02",
+     "style": "08_Detective_Hat",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_08_Detective_Hat_03",
+     "style": "08_Detective_Hat",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_09_Zombie_Brain_01",
+     "style": "09_Zombie_Brain",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_09_Zombie_Brain_02",
+     "style": "09_Zombie_Brain",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_09_Zombie_Brain_03",
+     "style": "09_Zombie_Brain",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_10_Bolt_01",
+     "style": "10_Bolt",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_10_Bolt_02",
+     "style": "10_Bolt",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_10_Bolt_03",
+     "style": "10_Bolt",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_11_Beanie_01",
+     "style": "11_Beanie",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_11_Beanie_02",
+     "style": "11_Beanie",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_11_Beanie_03",
+     "style": "11_Beanie",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_11_Beanie_04",
+     "style": "11_Beanie",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_11_Beanie_05",
+     "style": "11_Beanie",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_12_Mustache_01",
+     "style": "12_Mustache",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_12_Mustache_02",
+     "style": "12_Mustache",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_12_Mustache_03",
+     "style": "12_Mustache",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_12_Mustache_04",
+     "style": "12_Mustache",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_12_Mustache_05",
+     "style": "12_Mustache",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_13_Beard_01",
+     "style": "13_Beard",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_13_Beard_02",
+     "style": "13_Beard",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_13_Beard_03",
+     "style": "13_Beard",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_13_Beard_04",
+     "style": "13_Beard",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_13_Beard_05",
+     "style": "13_Beard",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_14_Gloves_01",
+     "style": "14_Gloves",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_14_Gloves_02",
+     "style": "14_Gloves",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_14_Gloves_03",
+     "style": "14_Gloves",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_14_Gloves_04",
+     "style": "14_Gloves",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_15_Glasses_01",
+     "style": "15_Glasses",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_15_Glasses_02",
+     "style": "15_Glasses",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_15_Glasses_03",
+     "style": "15_Glasses",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_15_Glasses_04",
+     "style": "15_Glasses",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_15_Glasses_05",
+     "style": "15_Glasses",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_15_Glasses_06",
+     "style": "15_Glasses",
+     "variant": "06"
+    },
+    {
+     "id": "Accessory_16_Monocle_01",
+     "style": "16_Monocle",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_16_Monocle_02",
+     "style": "16_Monocle",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_16_Monocle_03",
+     "style": "16_Monocle",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_17_Medical_Mask_01",
+     "style": "17_Medical_Mask",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_17_Medical_Mask_02",
+     "style": "17_Medical_Mask",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_17_Medical_Mask_03",
+     "style": "17_Medical_Mask",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_17_Medical_Mask_04",
+     "style": "17_Medical_Mask",
+     "variant": "04"
+    },
+    {
+     "id": "Accessory_17_Medical_Mask_05",
+     "style": "17_Medical_Mask",
+     "variant": "05"
+    },
+    {
+     "id": "Accessory_18_Chef_01",
+     "style": "18_Chef",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_18_Chef_02",
+     "style": "18_Chef",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_18_Chef_03",
+     "style": "18_Chef",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_19_Party_Cone_01",
+     "style": "19_Party_Cone",
+     "variant": "01"
+    },
+    {
+     "id": "Accessory_19_Party_Cone_02",
+     "style": "19_Party_Cone",
+     "variant": "02"
+    },
+    {
+     "id": "Accessory_19_Party_Cone_03",
+     "style": "19_Party_Cone",
+     "variant": "03"
+    },
+    {
+     "id": "Accessory_19_Party_Cone_04",
+     "style": "19_Party_Cone",
+     "variant": "04"
+    }
+   ]
+  }
+ }
+}

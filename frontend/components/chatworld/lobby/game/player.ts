@@ -4,17 +4,21 @@ import type { Facing, LobbyBridge } from "./layout";
 const SPEED = 88;
 
 /** 可操控像素人物：WASD/方向键 + 触屏方向垫，四方向行走与呼吸静止动画。
- *  贴图来自付费包 Modern Interiors 预制角色（16x32 帧，6 帧/方向）。 */
+ *  贴图（皮肤）可切换：默认为付费包 Modern Interiors 预制角色 "player"，
+ *  自定义形象为运行时合成的 "avatar-self"；两者帧布局相同（16x32 帧，每行 6 帧）。
+ *  本地玩家自己不显示头顶名字。 */
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
   private bridge: LobbyBridge;
   private facing: Facing = "down";
+  private skin: string;
   /** 冻结时忽略输入（房间切换、面板打开） */
   frozen = false;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, bridge: LobbyBridge) {
-    super(scene, x, y, "player", 0);
+  constructor(scene: Phaser.Scene, x: number, y: number, bridge: LobbyBridge, skin = "player") {
+    super(scene, x, y, skin, 0);
+    this.skin = skin;
     this.bridge = bridge;
     scene.add.existing(this);
     scene.physics.add.existing(this);
@@ -34,16 +38,18 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
 
-    this.createAnimations(scene);
-    this.anims.play("idle-down");
+    Player.createAnimations(scene, skin);
+    this.anims.play(this.animKey("idle-down"));
   }
 
-  private createAnimations(scene: Phaser.Scene) {
-    // player.png 帧序：每行 6 帧，行序 静止(南/北/左/右) + 行走(南/北/左/右)
+  /** 为某个皮肤贴图创建 8 组动画，键名形如 `player:walk-left` */
+  static createAnimations(scene: Phaser.Scene, skin: string) {
+    // 帧序：每行 6 帧，行序 静止(南/北/左/右) + 行走(南/北/左/右)
     const anims = scene.anims;
-    const make = (key: string, row: number, frameRate: number) => {
+    const make = (name: string, row: number, frameRate: number) => {
+      const key = `${skin}:${name}`;
       if (anims.exists(key)) return;
-      const frames = Array.from({ length: 6 }, (_, i) => ({ key: "player", frame: row * 6 + i }));
+      const frames = Array.from({ length: 6 }, (_, i) => ({ key: skin, frame: row * 6 + i }));
       anims.create({ key, frames, frameRate, repeat: -1 });
     };
     make("idle-down", 0, 4);
@@ -56,19 +62,32 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     make("walk-right", 7, 10);
   }
 
+  private animKey(name: string) {
+    return `${this.skin}:${name}`;
+  }
+
+  /** 切换皮肤，保留当前动作与朝向 */
+  setSkin(skin: string) {
+    if (skin === this.skin) return;
+    const action = this.anims.currentAnim?.key.split(":")[1] ?? `idle-${this.facing}`;
+    this.skin = skin;
+    Player.createAnimations(this.scene, skin);
+    this.anims.play(this.animKey(action), true);
+  }
+
   /** 传送到指定位置并设定朝向（房间切换用），同时清零速度避免带入惯性 */
   teleport(x: number, y: number, dir: Facing) {
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.reset(x, y);
     this.facing = dir;
-    this.anims.play(`idle-${dir}`, true);
+    this.anims.play(this.animKey(`idle-${dir}`), true);
     this.setDepth(y);
   }
 
   update() {
     if (this.frozen) {
       this.setVelocity(0, 0);
-      const idle = `idle-${this.facing}`;
+      const idle = this.animKey(`idle-${this.facing}`);
       if (this.anims.currentAnim?.key !== idle) this.anims.play(idle, true);
       return;
     }
@@ -93,7 +112,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     else if (dy < 0) this.facing = "up";
     else if (dy > 0) this.facing = "down";
 
-    const target = `${moving ? "walk" : "idle"}-${this.facing}`;
+    const target = this.animKey(`${moving ? "walk" : "idle"}-${this.facing}`);
     if (this.anims.currentAnim?.key !== target) this.anims.play(target, true);
 
     this.setDepth(this.y);
