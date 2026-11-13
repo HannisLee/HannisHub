@@ -12,6 +12,7 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 | 前端 | Next.js 16 + React 19 + TypeScript，App Router，静态导出 |
 | UI 规范 | 根目录 `design.md` 的 CSS Variables、暖黑编辑风格、统一组件 |
 | 2D 场景 | Phaser 3（聊天大厅像素客厅，付费素材 Limezu Modern Interiors，`pixelArt` 整数倍缩放，Arcade 物理碰撞） |
+| 网页终端 | xterm.js（`@xterm/xterm` + `@xterm/addon-fit`）+ FastAPI WebSocket + 标准库 pty |
 | 进程管理 | subprocess + psutil |
 | GPU 监控 | nvidia-smi + psutil |
 | 模型下载 | huggingface_hub Python API（`hf_hub_download` 单文件 / `snapshot_download` 全量） |
@@ -28,6 +29,7 @@ HannisHub/
 ├── ai_settings.py            # AI 能力设置：API、密钥与提示词的本地 JSON 配置
 ├── chat_room.py              # 聊天室组件：公共聊天室消息、用户资料、在线状态与附件，存储于 data/（不入库）
 ├── file_manager.py           # 文件管理组件：受限目录、缓存、浏览与下载
+├── terminal_manager.py       # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像与空闲回收（仅内存）
 ├── point_cloud.py            # 旧版点云文件读取接口兼容层
 ├── index.html                # Hub 旧版服务列表页，迁移验证期保留
 ├── login.html                # Hub 旧版登录页，迁移验证期保留
@@ -85,6 +87,7 @@ HannisHub/
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
   - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 50 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
 - `/chat-lobby`：聊天大厅，内置 2D 像素风客厅单人场景（Phaser 3），房间与角色全部使用付费素材 Limezu Modern Interiors 的 16×16 原生规格。3/4 俯视视角，32×22 格、16px Tile，整数倍缩放（按宽度适配 2×～3×）保持像素清晰。墙壳为上墙 2 行（容纳 32px 高的门与挂钟）+ 侧墙顶部 3 行透视斜肩 + 底部 1 行收边，砖块裁剪自包内官方预拼房间的同套素材以保证透视连贯。场景含左下休息区（沙发、单人椅、茶几、落地灯与桌上小绿植）、中央 48×32 暖陶土色区域毯（猫睡在其上）、右下影音角（电视柜 + 播放中的动画电视、绿植）、右侧工作角（两张电脑桌与朝北椅子、饮水机）、靠上墙的两组书柜与储物柜、门、墙面挂画与角落大绿植。动画物件：电视（32×32、6 帧 / 8fps）、布谷鸟挂钟（16×32、10 帧 / 2fps）、猫（48×16、12 帧 / 6fps）。角色贴图重排为 6 列 × 8 行、每帧 16×32（静止四方向各 6 帧 + 行走四方向各 6 帧），行走 10fps、静止 4fps。WASD/方向键四方向行走（斜向归一化，朝向优先水平），墙壁与家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡（墙面挂件与地毯使用固定低深度）；触屏设备显示方向垫。相机在视野装得下整个房间时居中静止，否则平滑跟随角色。本轮仅单人场景与走动，不含多人同步、聊天、坐下等交互。游戏逻辑独立于 UI 组件，位于 `frontend/game/lobby/`（`room-map.ts` 地图与碰撞、`player.ts` 角色、`lobby-scene.ts` 场景），素材统一存放在 `frontend/public/chat-lobby/modern/`（付费包原件不入库；派生文件清单、来源与署名见该目录上级 `CREDITS.md`，许可证副本 `modern/LICENSE.txt`）
+- `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」
 - `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -117,6 +120,7 @@ HannisHub/
 | `frontend/components/chat/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
 | `frontend/components/chat-lobby/` | 聊天大厅页面外壳：标题与操作提示、加载/错误态、触屏方向垫，动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏 |
 | `frontend/game/lobby/` | 聊天大厅 Phaser 3 游戏逻辑：地图与家具数据、玩家移动与动画、场景与相机、游戏工厂，与普通 UI 组件解耦 |
+| `frontend/components/terminal/` | 网页终端：横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
@@ -136,17 +140,31 @@ GPU 页面提供全宽显存历史趋势图，右上角支持过去 24 / 12 / 6 
 
 ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服务中优先选择名称匹配 `Qwen3 ASR` 的 ASR 服务，调用 `/api/start` 启动并最多轮询 30 秒等待 `/api/asr` 的 `ready` 状态；之后继续每 3 秒刷新服务状态。
 
+### 网页终端
+
+- 后端 `terminal_manager.py` 在 Hub 进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
+- WebSocket 协议：服务端→客户端二进制帧为终端原始输出（连接后先发送回滚缓冲），文本帧为 JSON 控制消息 `{"type":"exit"|"released"|"closed"}`；客户端→服务端为 JSON `{"type":"input","data"}` 与 `{"type":"resize","cols","rows"}`。多端连接时 PTY 尺寸取最近一次调整的客户端。关闭码：4000 已释放、4401 未登录、4403 无权限或 Origin 不符、4404 终端不存在。
+- 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 6 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在内存，Hub 停止时全部结束；同时最多 10 个。
+- 权限：仅管理员可用——根 `settings.json` 的 `terminal.admins` 用户名列表，未配置时为最早创建的用户。`/api/auth/status` 返回 `terminal` 布尔值，侧栏据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
+- `AuthMiddleware` 对 WebSocket 握手同样校验会话，未登录直接拒绝（此前 WebSocket 请求不经过登录校验）。
+- 配置（根 `settings.json`，均可省略）：`"terminal": {"admins": ["用户名"], "idle_timeout_hours": 6, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
+
 ### Hub API
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET | `/api/health` | Hub 健康检查 |
 | GET | `/api/services` | 返回当前可用子服务列表 |
-| GET | `/api/auth/status` | 查询登录状态、当前用户名与是否已有用户 |
+| GET | `/api/auth/status` | 查询登录状态、当前用户名、是否已有用户，以及当前用户能否使用网页终端（`terminal`） |
 | POST | `/api/auth/setup` | 首次启动且没有任何用户时创建第一个账号 |
 | POST | `/api/auth/login` | 任一用户登录，会话写入用户名与该用户的会话版本 |
 | POST | `/api/auth/logout` | 退出登录并清空会话 |
 | POST | `/api/auth/password` | 当前用户校验旧密码后修改自己的密码；本会话保持登录，其他设备上的会话失效 |
+| GET | `/api/terminal/sessions` | 列出终端（id、标题、PID、创建时间、最后操作时间、剩余释放秒数 `expires_in`、连接数）与空闲时限，仅管理员 |
+| POST | `/api/terminal/sessions` | 新建终端（可选 `title`，默认「终端 N」），超过上限返回 409，仅管理员 |
+| PATCH | `/api/terminal/sessions/{id}` | 重命名终端（最多 40 字），仅管理员 |
+| DELETE | `/api/terminal/sessions/{id}` | 关闭终端并结束其进程组，仅管理员 |
+| WS | `/api/terminal/sessions/{id}/ws` | 终端交互通道，详见「网页终端」，仅管理员 |
 | GET | `/api/users` | 列出全部用户（用户名、创建时间、是否为当前账号），不返回密码哈希 |
 | POST | `/api/users` | 新增用户：`username` 3-64 位且不含空白，`password` 至少 8 位；最多 100 个用户 |
 | POST | `/api/users/{username}/password` | 重置指定用户密码，该用户已有会话全部失效 |

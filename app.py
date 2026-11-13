@@ -1,12 +1,13 @@
 """HannisHub：综合管理站入口与登录网关。"""
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -24,6 +25,7 @@ from auth import (
     ensure_auth_settings,
     is_configured,
     is_login_allowed,
+    is_terminal_admin,
     list_users,
     login_session,
     migrate_legacy_admin,
@@ -35,6 +37,7 @@ from auth import (
 import ai_settings
 import chat_room
 import ocr_records
+import terminal_manager
 from compression import SelectiveGZipMiddleware
 import llama_manager.app as llama_manager_app
 from file_manager import (
@@ -121,10 +124,13 @@ async def lifespan(_: FastAPI):
     await llama_manager_app.recover_interrupted_asr_tasks()
     ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(llama_manager_app.auto_start_watchdog())
+    terminal_reaper = asyncio.create_task(terminal_manager.manager.reaper_loop())
     try:
         yield
     finally:
         auto_start_task.cancel()
+        terminal_reaper.cancel()
+        await terminal_manager.manager.shutdown_all()
         await prompt_service_app.audio_service.stop()
         await server_manager_app.stop_scheduler()
 
@@ -281,6 +287,12 @@ async def chat_page():
 @app.get("/chat-lobby/", include_in_schema=False)
 async def chat_lobby_page():
     return await _new_frontend_route("chat-lobby")
+
+
+@app.get("/terminal", include_in_schema=False)
+@app.get("/terminal/", include_in_schema=False)
+async def terminal_page():
+    return await _new_frontend_route("terminal")
 
 
 @app.get("/point-clouds", include_in_schema=False)
@@ -643,8 +655,66 @@ async def auth_status(request: Request):
             "authenticated": bool(username),
             "configured": is_configured(),
             "username": username,
+            "terminal": is_terminal_admin(username),
         }
     )
+
+
+# ---------- 网页终端（仅管理员） ----------
+
+def _require_terminal_admin(session: dict[str, Any]) -> str:
+    username = current_username(session)
+    if not is_terminal_admin(username):
+        raise HTTPException(status_code=403, detail="终端仅对管理员开放")
+    return str(username)
+
+
+def _websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """防止跨站 WebSocket 劫持：Origin 必须与 Host 一致，开发模式可额外放行。"""
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    host = websocket.headers.get("host", "")
+    allowed = {f"http://{host}", f"https://{host}"}
+    allowed.update(item.strip() for item in os.environ.get("HANNISHUB_DEV_ORIGINS", "").split(",") if item.strip())
+    return origin in allowed
+
+
+@app.get("/api/terminal/sessions")
+async def terminal_list(request: Request):
+    _require_terminal_admin(request.session)
+    return JSONResponse({
+        "sessions": terminal_manager.manager.list(),
+        "idle_timeout_seconds": int(terminal_manager.idle_timeout_seconds()),
+    })
+
+
+@app.post("/api/terminal/sessions")
+async def terminal_create(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
+    username = _require_terminal_admin(request.session)
+    return JSONResponse({"session": terminal_manager.manager.create(username, payload.get("title"))})
+
+
+@app.patch("/api/terminal/sessions/{session_id}")
+async def terminal_rename(session_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    _require_terminal_admin(request.session)
+    return JSONResponse({"session": terminal_manager.manager.rename(session_id, payload.get("title"))})
+
+
+@app.delete("/api/terminal/sessions/{session_id}")
+async def terminal_delete(session_id: str, request: Request):
+    _require_terminal_admin(request.session)
+    if not await terminal_manager.manager.close(session_id, reason="closed"):
+        raise HTTPException(status_code=404, detail="终端不存在或已释放")
+    return JSONResponse({"ok": True})
+
+
+@app.websocket("/api/terminal/sessions/{session_id}/ws")
+async def terminal_socket(websocket: WebSocket, session_id: str):
+    if not is_terminal_admin(current_username(websocket.session)) or not _websocket_origin_allowed(websocket):
+        await websocket.close(code=4403)
+        return
+    await terminal_manager.manager.attach(session_id, websocket)
 
 
 @app.post("/api/auth/login")

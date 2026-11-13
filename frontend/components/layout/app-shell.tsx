@@ -152,7 +152,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
           </button>
         </div>
         <nav className="sidebar-nav" aria-label="主导航">
-          {navigation.map(group => (
+          {navigation.map(group => ({ ...group, items: group.items.filter(item => !item.adminOnly || auth.terminal) })).filter(group => group.items.length).map(group => (
             <div className="nav-group" key={group.label}>
               <p className="nav-group-label">{group.label}</p>
               {group.items.map(item => (

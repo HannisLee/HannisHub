@@ -6,6 +6,8 @@ export interface NavItem {
   /** 浏览器标签页标题，未设置时回退到 label */
   title?: string;
   icon: IconName;
+  /** 仅管理员可见（目前用于网页终端） */
+  adminOnly?: boolean;
 }
 
 export interface NavGroup {
@@ -46,6 +48,7 @@ export const navigation: NavGroup[] = [
       // { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
     ],
   },
+  { label: "终端", items: [{ href: "/terminal", label: "终端", icon: "terminal", adminOnly: true }] },
   { label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
   {
     label: "设置",

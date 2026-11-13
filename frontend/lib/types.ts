@@ -508,6 +508,24 @@ export interface AuthStatus {
   authenticated: boolean;
   configured: boolean;
   username?: string | null;
+  /** 是否可使用网页终端（仅管理员） */
+  terminal?: boolean;
+}
+
+export interface TerminalSession {
+  id: string;
+  title: string;
+  pid: number;
+  created_at: number;
+  last_active: number;
+  /** 距离因无操作被释放的剩余秒数 */
+  expires_in: number;
+  clients: number;
+}
+
+export interface TerminalSessionList {
+  sessions: TerminalSession[];
+  idle_timeout_seconds: number;
 }
 
 export interface HubUser {

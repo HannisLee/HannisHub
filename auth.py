@@ -298,6 +298,18 @@ def update_settings_section(name: str, value: Any) -> None:
         _write_settings_unlocked(data)
 
 
+def is_terminal_admin(username: str | None) -> bool:
+    """网页终端只对管理员开放：settings.json 的 terminal.admins，缺省为最早创建的用户。"""
+    if not username or username not in _user_map():
+        return False
+    section = _read_settings_unlocked().get("terminal")
+    admins = section.get("admins") if isinstance(section, dict) else None
+    if isinstance(admins, list):
+        return username in {str(item) for item in admins}
+    users = sorted(_user_map().values(), key=lambda user: float(user.get("created_at") or 0))
+    return bool(users) and str(users[0].get("username")) == username
+
+
 def current_username(session: dict[str, Any]) -> str | None:
     """从会话中读取当前用户名；用户已删除或密码已重置时会话失效。"""
     value = session.get("user")
@@ -352,6 +364,13 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "websocket":
+            # WebSocket 同样需要有效会话，未登录在握手阶段直接拒绝
+            if current_username(scope.get("session") or {}):
+                await self.app(scope, receive, send)
+            else:
+                await send({"type": "websocket.close", "code": 4401})
+            return
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return

@@ -1125,3 +1125,12 @@
 - 动画物件按原生帧宽切帧：电视 32×32（6 帧 / 8fps）、布谷鸟钟 16×32（10 帧 / 2fps）、猫 48×16（12 帧 / 6fps）；角色重排为 6 列 × 8 行、16×32 帧（静止/行走 × 四方向各 6 帧）。
 - 素材治理：仅提取派生 PNG 与 LICENSE.txt 入库至 `frontend/public/chat-lobby/modern/`，付费包原件不入库（zip 与上传临时文件加入 `.gitignore`）；重写 `CREDITS.md` 记录派生文件清单、帧宽与署名（limezu.itch.io）。
 - 同步 spec.md 技术栈表与 `/chat-lobby` 说明。验证：typecheck/lint/build 通过；Playwright 实测桌面 + 移动端——键盘四方向移动与斜向归一化、墙与家具碰撞停止（上墙 y=38、斜肩 x=475、书柜侧 x=85、沙发顶 y=212）、触屏方向垫移动、整数倍缩放与跟随相机、动画物件帧推进（像素差 128/304/44，空地板 0）、重复进出页面 canvas 仍为单个、无控制台错误、窄屏无横向溢出。
+
+### v0.2.86 — 2026-11-13
+- 新增网页终端板块 `/terminal`（仅管理员，侧栏「终端」）：顶部横向标签栏，`+` 新建、双击重命名、× 关闭；每个标签一个 xterm.js 终端，切换不丢状态、尺寸自适应，底部状态栏显示 PID、连接状态与预计释放时间。
+- 新增后端 `terminal_manager.py`：Hub 进程内常驻 PTY 登录 shell，关闭网页不释放，重连时回放最近 512 KB 输出；多个页面/设备可同时连接同一终端，输出同步镜像；断线自动重连。shell 内 `exit` 自动关闭标签。
+- 生命周期：键盘输入、调整尺寸、接入连接视为操作，6 小时无操作自动结束整个进程组（SIGHUP → 3 秒后 SIGKILL）并通知页面；最多同时 10 个；Hub 停止时全部释放。配置可写在根 `settings.json` 的 `terminal` 段（admins / idle_timeout_hours / max_sessions / shell / scrollback_kb），缺省管理员为最早创建的用户。
+- 新增接口 `GET/POST /api/terminal/sessions`、`PATCH/DELETE /api/terminal/sessions/{id}`、`WS /api/terminal/sessions/{id}/ws`；`/api/auth/status` 新增 `terminal` 字段。
+- 安全修复：`AuthMiddleware` 此前对 WebSocket 请求直接放行，现在握手阶段同样校验登录会话；终端 WebSocket 另校验 Origin 与 Host 一致。
+- 前端新增依赖 `@xterm/xterm`、`@xterm/addon-fit`，新增 `terminal`/`plus`/`close` 图标，导航项支持 `adminOnly`。同步更新 `spec.md`。
+- 验证：不启动 lifespan 的 TestClient 与 8090 临时实例上测试新建、输入输出、双连接镜像、尺寸同步、断开后 shell 存活与回放、重命名、删除后进程结束、`exit` 通知、空闲回收（4 秒时限）、未登录 / 非管理员 / 错误 Origin 被拒；`typecheck`/`lint`/`build` 通过。
