@@ -68,7 +68,7 @@ export function ChatLobby() {
       <header className="lobby-head">
         <div>
           <h1 className="lobby-title">聊天大厅</h1>
-          <p className="lobby-subtitle">像素办公室 · 单人场景预览</p>
+          <p className="lobby-subtitle">像素客厅 · 单人场景预览</p>
         </div>
         <div className="lobby-hint" aria-label="操作提示">
           <span className="lobby-hint-keys"><Key>W</Key><Key>A</Key><Key>S</Key><Key>D</Key></span>
@@ -82,7 +82,7 @@ export function ChatLobby() {
         {phase === "loading" ? (
           <div className="lobby-overlay">
             <span className="loading-line" />
-            <p>正在加载办公室素材… {Math.round(progress * 100)}%</p>
+            <p>正在加载大厅素材… {Math.round(progress * 100)}%</p>
           </div>
         ) : null}
 

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import {
-  buildTileGrid, FURNITURE, OBJECT_KEYS, SPAWN, TILE, WALL_TILES, WORLD_H, WORLD_W,
-} from "./office-map";
+  ANIMATED_OBJECTS, buildTileGrid, FURNITURE, OBJECT_KEYS, SPAWN, TILE, WALL_TILES, WORLD_H, WORLD_W,
+} from "./room-map";
 import { Player, type TouchState } from "./player";
 
 export interface LobbySceneOptions {
@@ -11,9 +11,9 @@ export interface LobbySceneOptions {
   onError?: (message: string) => void;
 }
 
-const ASSET_BASE = "/chat-lobby";
+const ASSET_BASE = "/chat-lobby/modern";
 
-/** 聊天大厅主场景：加载素材、铺设办公室、放置家具与碰撞、驱动角色与相机。 */
+/** 聊天大厅主场景：加载付费素材、铺设客厅、放置家具与碰撞、驱动角色/动画物件与相机。 */
 export class LobbyScene extends Phaser.Scene {
   private opts: LobbySceneOptions;
   private player!: Player;
@@ -31,11 +31,18 @@ export class LobbyScene extends Phaser.Scene {
       this.opts.onError?.(`素材加载失败：${file.key}`);
     });
 
-    this.load.image("office-tiles", `${ASSET_BASE}/office/tiles_sheet.png`);
-    this.load.spritesheet("player", `${ASSET_BASE}/npc/player.png`, { frameWidth: 12, frameHeight: 16 });
+    this.load.image("room-tiles", `${ASSET_BASE}/tiles_sheet.png`);
+    this.load.spritesheet("player", `${ASSET_BASE}/player.png`, { frameWidth: 16, frameHeight: 32 });
     for (const key of OBJECT_KEYS) {
-      this.load.image(key, `${ASSET_BASE}/office/objects/${key}.png`);
+      this.load.image(key, `${ASSET_BASE}/objects/${key}.png`);
     }
+    for (const obj of ANIMATED_OBJECTS) {
+      this.load.spritesheet(obj.key, `${ASSET_BASE}/objects/${obj.key}.png`, {
+        frameWidth: obj.frameWidth,
+        frameHeight: obj.frameHeight,
+      });
+    }
+    this.load.spritesheet("door", `${ASSET_BASE}/objects/door.png`, { frameWidth: 16, frameHeight: 32 });
   }
 
   create() {
@@ -43,7 +50,7 @@ export class LobbyScene extends Phaser.Scene {
 
     // 地板与墙砖
     const map = this.make.tilemap({ data: buildTileGrid(), tileWidth: TILE, tileHeight: TILE });
-    const tileset = map.addTilesetImage("office-tiles", "office-tiles", TILE, TILE, 0, 0, 0);
+    const tileset = map.addTilesetImage("room-tiles", "room-tiles", TILE, TILE, 0, 0, 0);
     const layer = map.createLayer(0, tileset!, 0, 0);
     if (!layer) return;
     layer.setDepth(0);
@@ -63,6 +70,12 @@ export class LobbyScene extends Phaser.Scene {
       }
     }
 
+    // 门与挂钟贴墙（低深度），电视落在柜面上、猫睡在中央区域毯上，参与前后遮挡
+    this.add.image(16 * TILE + 8, 2 * TILE, "door", 0).setOrigin(0.5, 1).setDepth(2);
+    this.addAnimated("clock", 12 * TILE + 8, 2 * TILE, 2);
+    this.addAnimated("tv", 24 * TILE + 16, 18 * TILE + 20, 18 * TILE + 32 + 1);
+    this.addAnimated("cat", 14 * TILE + 16, 10 * TILE + 22, 10 * TILE + 22);
+
     this.player = new Player(this, SPAWN.x, SPAWN.y, this.opts.touch);
     this.physics.add.collider(this.player, layer);
     this.physics.add.collider(this.player, solids);
@@ -72,6 +85,23 @@ export class LobbyScene extends Phaser.Scene {
     this.scale.on("resize", this.applyCameraSize, this);
 
     this.opts.onReady?.();
+  }
+
+  /** 创建循环动画物件：帧数由贴图尺寸推导，避免与素材帧数硬耦合。 */
+  private addAnimated(key: string, x: number, y: number, depth: number) {
+    const def = ANIMATED_OBJECTS.find(o => o.key === key)!;
+    const texture = this.textures.get(key);
+    const frameCount = Math.floor(texture.getSourceImage().width / def.frameWidth);
+    const animKey = `anim-${key}`;
+    if (!this.anims.exists(animKey)) {
+      this.anims.create({
+        key: animKey,
+        frames: Array.from({ length: frameCount }, (_, i) => ({ key, frame: i })),
+        frameRate: def.frameRate,
+        repeat: -1,
+      });
+    }
+    this.add.sprite(x, y, key).setOrigin(0.5, 1).setDepth(depth).play(animKey);
   }
 
   /** 整数倍缩放保持像素清晰：优先按宽度适配让整个房间横向完整可见（大屏 3×、常规 2×），

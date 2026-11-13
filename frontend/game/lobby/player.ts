@@ -7,8 +7,8 @@ export interface TouchState {
 
 const SPEED = 88;
 
-/** 可操控像素人物：WASD/方向键 + 触屏方向垫，四方向行走与静止动画。
- *  独立成类，便于后续扩展为多人远程玩家或加入坐下等交互。 */
+/** 可操控像素人物：WASD/方向键 + 触屏方向垫，四方向行走与呼吸静止动画。
+ *  贴图来自付费包 Modern Interiors 预制角色（16x32 帧，6 帧/方向）。 */
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
@@ -23,8 +23,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.setOrigin(0.5, 1);
     this.setCollideWorldBounds(true);
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(10, 8);
-    body.setOffset(1, 8);
+    body.setSize(10, 6);
+    body.setOffset(3, 26);
 
     const keyboard = scene.input.keyboard;
     this.cursors = keyboard!.createCursorKeys();
@@ -40,20 +40,21 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   private createAnimations(scene: Phaser.Scene) {
-    // player.png 帧序：0-2 南、3-5 北、6-9 侧（朝左）
+    // player.png 帧序：每行 6 帧，行序 静止(南/北/左/右) + 行走(南/北/左/右)
     const anims = scene.anims;
-    const make = (key: string, frames: number[], frameRate: number, repeat: number) => {
+    const make = (key: string, row: number, frameRate: number) => {
       if (anims.exists(key)) return;
-      anims.create({ key, frames: frames.map(f => ({ key: "player", frame: f })), frameRate, repeat });
+      const frames = Array.from({ length: 6 }, (_, i) => ({ key: "player", frame: row * 6 + i }));
+      anims.create({ key, frames, frameRate, repeat: -1 });
     };
-    make("idle-down", [0], 1, -1);
-    make("idle-up", [3], 1, -1);
-    make("idle-left", [6], 1, -1);
-    make("idle-right", [6], 1, -1);
-    make("walk-down", [1, 0, 2, 0], 8, -1);
-    make("walk-up", [4, 3, 5, 3], 8, -1);
-    make("walk-left", [8, 6, 9, 6], 8, -1);
-    make("walk-right", [8, 6, 9, 6], 8, -1);
+    make("idle-down", 0, 4);
+    make("idle-up", 1, 4);
+    make("idle-left", 2, 4);
+    make("idle-right", 3, 4);
+    make("walk-down", 4, 10);
+    make("walk-up", 5, 10);
+    make("walk-left", 6, 10);
+    make("walk-right", 7, 10);
   }
 
   update() {
@@ -78,7 +79,6 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     else if (dy < 0) dir = "up";
     else dir = "down";
 
-    this.setFlipX(dir === "right");
     const target = `${moving ? "walk" : "idle"}-${dir}`;
     if (this.anims.currentAnim?.key !== target) this.anims.play(target, true);
 

@@ -1,32 +1,35 @@
 # 聊天大厅素材来源与许可证
 
-本目录全部素材仅供 HannisHub「聊天大厅」场景使用，来源与授权如下。
+本目录素材仅供 HannisHub「聊天大厅」场景使用，来源与授权如下。
 
-## 办公室素材（office/）
+## 室内与人物素材（modern/）
 
-- 来源：Rubber Studio — Modern Office Tileset 16x16 (Free Sample)
-  https://rubberstudio.itch.io/modern-office-tileset-16x16-free-sample
-- 许可：见 `office/LICENSE.txt`。可免费用于商业与非商业游戏及互动项目，允许修改；
-  不得作为素材包单独转售或再分发。本项目将其作为内置场景资源使用，并保留原始许可证。
-- 内容：`office/tiles/`、`office/objects/` 为素材包原始 PNG（28 件）。
-- 派生文件（本项目修改/拼接，仍受上述许可约束）：
-  - `office/tiles/wall_upper.png`：由 `wall_lower.png` 去除踢脚线生成的纯墙面砖，用于加高上墙。
-  - `office/tiles_sheet.png`：9 块地板/墙砖横向拼接的图集，供 Phaser tilemap 使用。
-    索引顺序：1 木地板、2 地毯、3 瓷砖、4 墙面(带踢脚线)、5 墙顶、6 墙身、7 墙左端、8 墙右端、9 纯墙面。
+- 来源：Limezu — Modern Interiors（付费完整版，用户已购买）
+  https://limezu.itch.io/moderninteriors
+- 许可：见 `modern/LICENSE.txt`。允许在商业与非商业项目中使用与修改；
+  不得将素材单独转售或再分发；**要求署名（limezu.itch.io）**。
+  本项目将其作为内置场景资源使用，保留原始许可证并在页面素材说明中署名。
+- 原始包内容（16x16 / 32x32 / 48x48 三档分辨率、角色生成器、动画物件、户型参考图）
+  未整体入库，仅提取本场景所需部分，避免仓库体积膨胀。
+- 派生文件（本项目自原始包提取/拼接/改色，仍受上述许可约束）：
+  - `modern/tiles_sheet.png`：25 块 16x16 地板/墙壳砖横向图集，供 Phaser tilemap 使用。
+    索引顺序（0 起）：0 地板、1 地板变体、2 墙顶、3 墙面、4/5 墙顶左右角、6/7 墙面左右斜角、
+    8/11 侧墙上段外/外右、9/10 侧墙上段透视斜肩左/右、12/15 侧墙中段外左/外右、
+    13/14 侧墙中段斜肩左/右、16/19 侧墙下段外左/外右、17/18 侧墙下段斜肩左/右、
+    20/21 侧墙中段左/右、22/24 底边左右角、23 底边。
+    全部裁剪自包内官方预拼房间 `6_Home_Designs/Condominium_Designs/16x16/Condominium_Design_layer_1.png`
+    的同套砖块，保证透视斜肩与收边连贯（直接拼 Walls/borders 表易错接）。
+  - `modern/objects/*.png`：家具单件（沙发、单人椅、茶几、书柜、储物柜、电脑桌、椅子、
+    电视柜、饮水机、挂画、绿植、落地灯），取自 `Theme_Sorter_Singles` 的
+    Living Room / Conference Hall / Japanese Interiors 主题。
+  - `modern/objects/rug.png`：以 Japanese Interiors 榻榻米单件为底，按亮度映射改色为暖陶土色
+    区域毯，并在中段插入 16 列同纹样扩为 48x32（边框仍只在四周）。
+  - `modern/objects/tv.png`、`clock.png`、`cat.png`、`door.png`：动画物件 spritesheet，
+    取自 `3_Animated_objects/16x16/spritesheets`（旧电视、布谷鸟钟、猫、木门）。
+    原生帧宽：电视 32x32（6 帧）、布谷鸟钟 16x32（10 帧）、猫 48x16（12 帧）、门 16x32（5 帧）。
+  - `modern/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止与行走动画，
+    重排为 6 帧 × 8 行（16x32 帧）：静止 南/北/左/右 + 行走 南/北/左/右。
 
-## 人物素材（npc/）
+## 署名
 
-- 来源：5yvalia — 12x16 Top Down NPCs (Spritesheet)
-  https://5yvalia.itch.io/rpg-type-retro-top-down-npc-sprites
-- 许可：CC0（Creative Commons Zero），可免费用于任何项目（含商业），允许修改，无需署名。
-- 内容：`12x16-retro-rpg-topdown-npc-parts.png`（部件表）、
-  `12x16-retro-rpg-topdown-npc-samples.png`（成品角色表）、`[GUIDE].pdf`（布局指南）均为原始文件。
-- 派生文件：`npc/player.png` — 取成品表第 1 行男性角色（10 帧：南 3 / 北 3 / 侧 4），
-  将原 4 色灰阶palette重映射为暖色（轮廓 #2B2019、发色 #5E3E28、上衣 #D97757、肤色 #F2C9A0），
-  与办公室暖色风格及 HannisHub 品牌色协调。侧向帧朝左，朝右时水平翻转。
-
-## 说明
-
-- 两套素材均从 itch.io 官方页面下载，未使用第三方镜像。
-- Limezu Modern Interiors（https://limezu.itch.io/moderninteriors）为付费素材，本轮未使用；
-  如需扩展更多家具可购买后替换，接口保持不变。
+Modern Interiors by Limezu — https://limezu.itch.io/moderninteriors
