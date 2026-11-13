@@ -3,6 +3,11 @@
 
 export const ASSET_BASE = "/chat-lobby/club";
 
+/** 带版本号的素材地址；清单文件（layout.json、parts.json）本身每次都重新获取 */
+export function assetUrl(file: string, build?: string): string {
+  return build ? `${ASSET_BASE}/${file}?v=${encodeURIComponent(build)}` : `${ASSET_BASE}/${file}`;
+}
+
 /** [x, y, w, h] 矩形 */
 export type Rect = [number, number, number, number];
 
@@ -97,6 +102,8 @@ export interface AnimSheetDef {
 
 export interface LobbyLayout {
   version: number;
+  /** 素材内容哈希：其余素材地址带 ?v=build，重新构建后不会混用缓存的旧图集 */
+  build?: string;
   tile: number;
   world: { width: number; height: number };
   start: { room: string; spawn: string };

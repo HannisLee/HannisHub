@@ -138,7 +138,8 @@
 ## 7. 聊天大厅已使用的资产
 
 聊天大厅（入口厅 + 我的房间 + 大厅）的派生素材全部由 **`scripts/build_chat_lobby_assets.py`** 从本目录生成，输出到 `frontend/public/chat-lobby/club/`（Next.js 静态资源必须放在 `frontend/public/`，已入库）。
-布局（家具坐标、碰撞盒、门、传送门、机器交互区）也在该脚本中维护，改完重新运行即可：
+布局（家具坐标、碰撞盒、门、传送门、机器交互区）也在该脚本中维护，改完重新运行即可。
+`layout.json` / `avatar/parts.json` 中的 `build` 是输出内容哈希，前端据此给素材地址加 `?v=` 防止浏览器混用新旧缓存：
 
 ```bash
 python3 scripts/build_chat_lobby_assets.py --preview /tmp/lobby_preview.png   # 需要 Pillow

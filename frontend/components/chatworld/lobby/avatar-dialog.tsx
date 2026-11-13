@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ApiError } from "../../../lib/api";
 import { LOBBY_NAME_MAX, saveLobbyProfile, type LobbyProfile } from "../../../lib/chat-lobby";
 import { errorMessage } from "../../../lib/format";
 import {
@@ -179,7 +180,9 @@ export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
       const saved = await saveLobbyProfile(trimmedName, useDefault ? null : config);
       onSaved(saved);
     } catch (error) {
-      setSaveError(errorMessage(error));
+      // 404 / 405：后台进程还没有加载资料接口（请求落到了静态文件托管上），给出可操作的提示
+      const outdated = error instanceof ApiError && (error.status === 404 || error.status === 405);
+      setSaveError(outdated ? "后台服务尚未更新，请重启后台服务后再保存" : errorMessage(error));
       setSaving(false);
     }
   };

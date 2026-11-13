@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import {
-  ASSET_BASE, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
+  ASSET_BASE, assetUrl, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
   type PortalDef, type Rect, type RoomDef,
 } from "./layout";
 import { FRAME_HEIGHT, FRAME_WIDTH, SHEET_HEIGHT, SHEET_WIDTH } from "./avatar";
@@ -68,19 +68,21 @@ export class LobbyScene extends Phaser.Scene {
       this.events_.onError?.(`素材加载失败：${file.key}`);
     });
 
-    // 先读布局，再按布局追加房间背景与动画帧条
-    this.load.json("layout", `${ASSET_BASE}/layout.json`);
+    // 先读布局（时间戳参数绕过缓存，保证拿到最新版本号），再按布局带版本号追加其余素材：
+    // 图集图片与坐标表必须来自同一次构建，否则家具会显示成错误的贴图
+    this.load.json("layout", `${ASSET_BASE}/layout.json?t=${Date.now()}`);
     this.load.once("filecomplete-json-layout", (_key: string, _type: string, data: LobbyLayout) => {
-      for (const room of data.rooms) this.load.image(`bg-${room.id}`, `${ASSET_BASE}/${room.background}`);
+      const url = (file: string) => assetUrl(file, data.build);
+      for (const room of data.rooms) this.load.image(`bg-${room.id}`, url(room.background));
       for (const [key, sheet] of Object.entries(data.anims)) {
-        this.load.spritesheet(key, `${ASSET_BASE}/${sheet.file}`, {
+        this.load.spritesheet(key, url(sheet.file), {
           frameWidth: sheet.frameWidth,
           frameHeight: sheet.frameHeight,
         });
       }
+      this.load.atlas("objects", url("objects.png"), url("objects.json"));
+      this.load.spritesheet("player", url("player.png"), { frameWidth: 16, frameHeight: 32 });
     });
-    this.load.atlas("objects", `${ASSET_BASE}/objects.png`, `${ASSET_BASE}/objects.json`);
-    this.load.spritesheet("player", `${ASSET_BASE}/player.png`, { frameWidth: 16, frameHeight: 32 });
   }
 
   create() {
@@ -281,13 +283,16 @@ export class LobbyScene extends Phaser.Scene {
     cam.setZoom(zoom);
     const viewW = width / zoom;
     const viewH = height / zoom;
-    // 房间四周留出少量暗色边距，避免贴顶的铭牌被舞台边缘裁切
-    const roomW = room.width + CAMERA_MARGIN * 2;
-    const roomH = room.height + CAMERA_MARGIN * 2;
+    // 房间四周留出少量暗色边距，避免贴顶的铭牌被舞台边缘裁切。房间本身恰好放得下、
+    // 只是加上边距才超出时，把边距收窄到剩余空间，让整个房间静止完整显示，而不是为几像素边距滚动、裁掉顶部铭牌
+    const marginX = room.width <= viewW ? Math.min(CAMERA_MARGIN, (viewW - room.width) / 2) : CAMERA_MARGIN;
+    const marginY = room.height <= viewH ? Math.min(CAMERA_MARGIN, (viewH - room.height) / 2) : CAMERA_MARGIN;
+    const roomW = room.width + marginX * 2;
+    const roomH = room.height + marginY * 2;
     const padX = Math.max(0, (viewW - roomW) / 2);
     const padY = Math.max(0, (viewH - roomH) / 2);
     cam.setBounds(
-      room.x - CAMERA_MARGIN - padX, room.y - CAMERA_MARGIN - padY,
+      room.x - marginX - padX, room.y - marginY - padY,
       Math.max(roomW, viewW), Math.max(roomH, viewH),
     );
     cam.startFollow(this.player, true, 0.14, 0.14, 0, 8);

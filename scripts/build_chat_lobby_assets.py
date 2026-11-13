@@ -10,6 +10,9 @@
 - avatar/*.png + avatar/parts.json：角色生成器分层部件（身体、眼睛、服装、发型、配饰），前端运行时叠层合成
 - layout.json：房间尺寸、家具坐标、碰撞盒、传送门、出生点、交互机器（前端运行时读取）
 
+layout.json 与 avatar/parts.json 带有 build 字段（素材内容哈希）。前端总是重新获取这两个清单，
+并给其余素材加 ?v=<build>：重新构建后浏览器不会把缓存的旧图集与新坐标表混用（否则家具会错位）。
+
 布局只在本脚本中维护；修改后重新运行即可，前端无需改代码。
 用法：python3 scripts/build_chat_lobby_assets.py [--preview 预览图路径]
 依赖 Pillow（仅本地构建时需要，不是后端运行依赖）。
@@ -17,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 from collections import deque
@@ -507,8 +511,9 @@ def build_foyer() -> Room:
     room.portals.append({"rect": [0, side_y0, 6, side_y1 - side_y0], "to": "room", "spawn": "fromFoyer"})
 
     room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
-    room.spawns["fromHall"] = {"x": t(10), "y": h - 24, "dir": "up"}
-    room.spawns["fromRoom"] = {"x": 26, "y": (side_y0 + side_y1) // 2 + 4, "dir": "right"}
+    # 回到入口厅时站在出口标牌与箭头之外，避免标牌压在角色头上
+    room.spawns["fromHall"] = {"x": t(10), "y": h - 62, "dir": "up"}
+    room.spawns["fromRoom"] = {"x": 62, "y": (side_y0 + side_y1) // 2 + 4, "dir": "right"}
     room.build_walls()
     return room
 
@@ -680,7 +685,8 @@ def build_room() -> Room:
     room.anim("arrow_down", (exit_x0 + exit_x1) // 2 - 8, h - 50, depth=h + 100)
     room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "入口厅", "tone": "muted"})
     room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "foyer", "spawn": "fromRoom"})
-    room.spawns["fromFoyer"] = {"x": (exit_x0 + exit_x1) // 2, "y": h - 24, "dir": "up"}
+    # 进门后站在「入口厅」标牌上方，标牌与箭头不压在角色身上
+    room.spawns["fromFoyer"] = {"x": (exit_x0 + exit_x1) // 2, "y": h - 62, "dir": "up"}
     room.build_walls()
     return room
 
@@ -808,6 +814,15 @@ def render_preview(rooms: list[tuple[Room, tuple[int, int]]], path: Path, world:
     canvas.resize((world[0] * 3, world[1] * 3), Image.NEAREST).convert("RGB").save(path)
 
 
+def content_hash(files: list[Path]) -> str:
+    """按文件相对路径与内容计算短哈希，作为素材版本号；内容不变时哈希不变。"""
+    digest = hashlib.sha1()
+    for path in sorted(files):
+        digest.update(str(path.relative_to(OUT)).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="构建聊天大厅俱乐部场景素材")
     parser.add_argument("--preview", type=Path, help="额外输出带碰撞标注的整图预览（3 倍放大）")
@@ -866,7 +881,11 @@ def main() -> None:
     sheets, manifest = build_avatar_parts()
     for slot, sheet in sheets.items():
         sheet.save(OUT / "avatar" / f"{slot}.png", optimize=True)
+    manifest["build"] = content_hash(list((OUT / "avatar").glob("*.png")))
     (OUT / "avatar" / "parts.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # 场景版本覆盖背景、图集、动画帧条与默认角色（不含 layout.json 自身与角色部件）
+    scene_files = [f for f in OUT.glob("*") if f.suffix in {".png", ".json"} and f.name != "layout.json"]
+    layout["build"] = content_hash(scene_files + list((OUT / "anims").glob("*.png")))
     (OUT / "layout.json").write_text(json.dumps(layout, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     parts = sum(len(c["items"]) for c in manifest["categories"].values())
     print(f"已输出到 {OUT.relative_to(ROOT)}：{len(OBJECTS)} 件家具、{len(ANIMS)} 组动画、{len(placed)} 个场景、{parts} 个角色部件")

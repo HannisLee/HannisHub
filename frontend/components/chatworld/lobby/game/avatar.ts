@@ -2,7 +2,7 @@
  *  按 身体 → 眼睛 → 服装 → 发型 → 配饰 的顺序叠层，合成与 player.png 相同布局的 96x256 帧表
  *  （6 帧 x 8 行：静止 南/北/左/右 + 行走 南/北/左/右，每帧 16x32）。React 与 Phaser 共用。 */
 import type { LobbyAvatar } from "../../../../lib/chat-lobby";
-import { ASSET_BASE, type Facing } from "./layout";
+import { ASSET_BASE, assetUrl, type Facing } from "./layout";
 
 export const AVATAR_SLOTS = ["body", "eyes", "outfit", "hair", "accessory"] as const;
 export type AvatarSlot = (typeof AVATAR_SLOTS)[number];
@@ -24,6 +24,8 @@ interface PartCategory {
 }
 
 export interface PartsManifest {
+  /** 部件图集内容哈希，用作图片地址的版本号 */
+  build?: string;
   frameWidth: number;
   frameHeight: number;
   blockWidth: number;
@@ -69,11 +71,12 @@ let partsPromise: Promise<AvatarParts> | null = null;
 export function loadAvatarParts(): Promise<AvatarParts> {
   if (!partsPromise) {
     partsPromise = (async () => {
-      const response = await fetch(`${ASSET_BASE}/avatar/parts.json`);
+      // 清单每次向服务器确认是否更新，图集按清单中的版本号加载，避免新清单配旧图集
+      const response = await fetch(`${ASSET_BASE}/avatar/parts.json`, { cache: "no-cache" });
       if (!response.ok) throw new Error("形象部件清单加载失败");
       const manifest = (await response.json()) as PartsManifest;
       const entries = await Promise.all(AVATAR_SLOTS.map(async slot => {
-        const image = await loadImage(`${ASSET_BASE}/${manifest.categories[slot].file}`);
+        const image = await loadImage(assetUrl(manifest.categories[slot].file, manifest.build));
         return [slot, image] as const;
       }));
       const images = Object.fromEntries(entries) as Record<AvatarSlot, HTMLImageElement>;
