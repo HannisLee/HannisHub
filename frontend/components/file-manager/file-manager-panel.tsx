@@ -19,6 +19,23 @@ import { PointCloudViewer, type PointCloudSource } from "./point-cloud-viewer";
 
 const POINT_CLOUD_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts", "las", "laz"]);
 const VIEWABLE_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts"]);
+const FILE_TYPE_LABELS: Record<string, string> = {
+  py: "Python 源码", ipynb: "Jupyter 笔记本", md: "Markdown 文档", txt: "文本文件", log: "日志文件", json: "JSON 数据",
+  yaml: "YAML 配置", yml: "YAML 配置", toml: "TOML 配置", ini: "配置文件", cfg: "配置文件", sh: "Shell 脚本",
+  js: "JavaScript", ts: "TypeScript", tsx: "TypeScript", html: "网页", css: "样式表", csv: "表格数据",
+  png: "图片", jpg: "图片", jpeg: "图片", gif: "图片", webp: "图片", svg: "矢量图", mp4: "视频", mov: "视频",
+  pdf: "PDF 文档", zip: "压缩包", tar: "压缩包", gz: "压缩包", tgz: "压缩包", "7z": "压缩包",
+  pt: "模型权重", pth: "模型权重", ckpt: "模型权重", safetensors: "模型权重", gguf: "模型权重", npy: "数组数据", npz: "数组数据",
+};
+type SortKey = "name" | "type" | "modified";
+
+/** 文件游览列表的“类型”列文本，不直接展示后缀。 */
+function entryTypeLabel(entry: FileManagerEntry): string {
+  if (entry.type === "directory") return entry.symlink ? "软链接文件夹" : "文件夹";
+  if (entry.type !== "file") return "特殊文件";
+  if (POINT_CLOUD_EXTENSIONS.has(entry.extension)) return "点云";
+  return FILE_TYPE_LABELS[entry.extension] || "文件";
+}
 const DEFAULT_DIRECTORY = "RadioGS-stage1/output";
 
 function localDateValue(value: Date): string {
@@ -75,8 +92,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [dateResults, setDateResults] = useState<FileManagerDatePlyResponse | null>(null);
   const [dateBusy, setDateBusy] = useState(false);
   const [dateError, setDateError] = useState("");
-  const [query, setQuery] = useState("");
-  const [onlyPointClouds, setOnlyPointClouds] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortAscending, setSortAscending] = useState(true);
   const [previewFiles, setPreviewFiles] = useState<[SelectedFile | null, SelectedFile | null]>([null, null]);
   const [activePreview, setActivePreview] = useState<0 | 1>(0);
   const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
@@ -241,12 +258,18 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
       ...(directory?.entries.filter(entry => entry.type === "directory") || []),
       ...(plyFiles?.entries || []),
     ];
-    const normalized = query.trim().toLowerCase();
-    return (directory?.entries || []).filter(entry => {
-      if (onlyPointClouds && !(entry.type === "directory" || POINT_CLOUD_EXTENSIONS.has(entry.extension))) return false;
-      return !normalized || `${entry.name} ${entry.path}`.toLowerCase().includes(normalized);
+    // 文件夹始终排在文件前面，组内再按所选列排序。
+    const direction = sortAscending ? 1 : -1;
+    const byName = (left: FileManagerEntry, right: FileManagerEntry) => left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
+    return [...(directory?.entries || [])].sort((left, right) => {
+      const group = Number(left.type !== "directory") - Number(right.type !== "directory");
+      if (group) return group;
+      let result = 0;
+      if (sortKey === "type") result = entryTypeLabel(left).localeCompare(entryTypeLabel(right), "zh-CN") || left.extension.localeCompare(right.extension);
+      else if (sortKey === "modified") result = left.modified - right.modified;
+      return (result || byName(left, right)) * direction;
     });
-  }, [directory, plyFiles, pointCloudMode, onlyPointClouds, query]);
+  }, [directory, plyFiles, pointCloudMode, sortKey, sortAscending]);
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
   const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
   const previewDetails = previewFiles.map(previewFile => ({
@@ -259,7 +282,6 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   function goToDirectory(nextPath: string, rootIndex = selectedRootIndex) {
     if (nextPath === path && rootIndex === selectedRootIndex) return;
     setSelectedRootIndex(rootIndex);
-    setQuery("");
     if (!uploadLock.current) {
       setUploads([]);
       setUploadMessage("");
@@ -660,15 +682,8 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
           <CardHeader
             title={pointCloudMode ? directory ? `按文件夹探查 · ${filteredEntries.length}` : "按文件夹探查" : directory ? `当前目录 · ${filteredEntries.length}` : "当前目录"}
             description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已开放的顶层目录。"}
-            actions={
-              <div className={`file-manager-toolbar${pointCloudMode ? " is-point-cloud" : ""}`}>
-                {!pointCloudMode ? <>
-                  <select value={selectedRootIndex} onChange={event => goToDirectory("", Number(event.target.value))} aria-label="顶层文件夹" disabled={!roots.length}>
-                    {roots.map((root, index) => <option value={index} key={root}>{root}</option>)}
-                  </select>
-                  <input className="search-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索当前目录" />
-                  <button className="file-manager-filter" type="button" aria-pressed={onlyPointClouds} onClick={() => setOnlyPointClouds(value => !value)}>仅点云</button>
-                </> : null}
+            actions={pointCloudMode ? (
+              <div className="file-manager-toolbar is-point-cloud">
                 <select value={syncTarget} onChange={event => setSyncTarget(event.target.value)} aria-label="同步范围" disabled={syncing}>
                   <option value="all">同步两个项目</option>
                   <option value="RadioGS-perlight">RadioGS-perlight</option>
@@ -676,7 +691,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                 </select>
                 <Button variant="secondary" size="sm" onClick={() => void syncCache()} disabled={syncing || !roots.length}>{syncing ? "正在同步…" : "同步目录"}</Button>
               </div>
-            }
+            ) : undefined}
           />
           <div className="file-manager-meta">
             {directory ? (
@@ -690,11 +705,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
           </div>
           <button className="file-manager-up" type="button" onClick={() => goToDirectory(pathSegments.slice(0, -1).join("/"))} disabled={!path}>← 返回上级</button>
           <nav className="file-manager-breadcrumb" aria-label="目录路径">
-            <button type="button" onClick={() => goToDirectory("")}>{roots[selectedRootIndex]?.split("/").filter(Boolean).at(-1) || "顶层目录"}</button>
-            {pathSegments.map((segment, index) => <span key={pathAt(index)}><b>/</b><button type="button" onClick={() => goToDirectory(pathAt(index))}>{segment}</button></span>)}
+            <button type="button" onClick={() => goToDirectory("")} disabled={!path} aria-current={!path ? "page" : undefined}>{roots[selectedRootIndex]?.split("/").filter(Boolean).at(-1) || "顶层目录"}</button>
+            {pathSegments.map((segment, index) => <span key={pathAt(index)}><b>/</b><button type="button" onClick={() => goToDirectory(pathAt(index))} disabled={index === pathSegments.length - 1} aria-current={index === pathSegments.length - 1 ? "page" : undefined}>{segment}</button></span>)}
           </nav>
 
           {loading ? <LoadingState label="正在读取目录…" /> : !roots.length ? <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" /> : filteredEntries.length ? (
+            pointCloudMode ? (
             <div className="file-manager-list">
               {filteredEntries.map((entry: FileManagerEntry) => (
                 <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} key={entry.path}>
@@ -710,15 +726,41 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                   </button>
                   <span className="file-manager-entry-actions">
                     {entry.symlink ? <Badge tone="info">软链接</Badge> : null}
-                    {entry.extension ? <Badge tone={POINT_CLOUD_EXTENSIONS.has(entry.extension) ? "success" : "neutral"}>.{entry.extension}</Badge> : null}
-                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>{pointCloudMode ? `预览至 ${activePreview === 0 ? "A" : "B"}` : "预览"}</button> : null}
+                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>{`预览至 ${activePreview === 0 ? "A" : "B"}`}</button> : null}
                     {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
-                    {pointCloudMode && entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
+                    {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
                   </span>
                 </div>
               ))}
             </div>
-          ) : <EmptyState title={roots.length ? pointCloudMode ? "此目录没有文件夹或 PLY 文件" : "没有匹配的文件" : "没有已暴露的目录"} detail={roots.length ? pointCloudMode ? "可以返回上级目录，或选择其他收藏目录。" : "尝试更换搜索词，或取消“仅点云”过滤。" : "服务端尚未配置可浏览目录。"} />}
+          ) : (
+            <div className="file-manager-table" role="table" aria-label="当前目录文件">
+              <div className="file-manager-table-head" role="row">
+                {([["name", "文件名"], ["type", "类型"], ["modified", "修改时间"]] as [SortKey, string][]).map(([key, label]) => (
+                  <button key={key} type="button" role="columnheader" className={sortKey === key ? "is-active" : undefined} aria-sort={sortKey === key ? sortAscending ? "ascending" : "descending" : "none"} onClick={() => { if (sortKey === key) setSortAscending(value => !value); else { setSortKey(key); setSortAscending(key !== "modified"); } }}>
+                    {label}<span aria-hidden="true">{sortKey === key ? sortAscending ? " ↑" : " ↓" : ""}</span>
+                  </button>
+                ))}
+                <span role="columnheader">大小</span>
+                <span role="columnheader" className="file-manager-table-action">操作</span>
+              </div>
+              {filteredEntries.map((entry: FileManagerEntry) => (
+                <div className={`file-manager-table-row${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} role="row" key={entry.path}>
+                  <button className="file-manager-table-name" type="button" role="cell" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))} title={entry.name}>
+                    <span className="file-manager-entry-mark">{entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}</span>
+                    <strong>{entry.name}</strong>
+                  </button>
+                  <span role="cell">{entryTypeLabel(entry)}</span>
+                  <span role="cell">{formatDate(entry.modified)}</span>
+                  <span role="cell">{entry.type === "file" ? formatBytes(entry.size) : "—"}</span>
+                  <span role="cell" className="file-manager-table-action">
+                    {entry.type === "file" ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
+          ) : <EmptyState title={roots.length ? pointCloudMode ? "此目录没有文件夹或 PLY 文件" : "此目录为空" : "没有已暴露的目录"} detail={roots.length ? pointCloudMode ? "可以返回上级目录，或选择其他收藏目录。" : "可以返回上级目录。" : "服务端尚未配置可浏览目录。"} />}
           {directory?.truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span></div> : null}
         </Card>
       </div>
