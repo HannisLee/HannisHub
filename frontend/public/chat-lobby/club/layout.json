@@ -2,8 +2,8 @@
  "version": 2,
  "tile": 16,
  "world": {
-  "width": 896,
-  "height": 848
+  "width": 576,
+  "height": 1264
  },
  "start": {
   "room": "foyer",
@@ -114,7 +114,7 @@
   {
    "id": "room",
    "name": "我的房间",
-   "x": 0,
+   "x": 192,
    "y": 0,
    "width": 192,
    "height": 160,
@@ -280,12 +280,12 @@
       32,
       10
      ],
-     "to": "hall",
+     "to": "foyer",
      "spawn": "fromRoom"
     }
    ],
    "spawns": {
-    "fromHall": {
+    "fromFoyer": {
      "x": 96,
      "y": 98,
      "dir": "up"
@@ -311,7 +311,7 @@
     {
      "x": 96,
      "y": 106,
-     "text": "大厅",
+     "text": "入口厅",
      "tone": "muted"
     }
    ]
@@ -319,8 +319,8 @@
   {
    "id": "foyer",
    "name": "入口厅",
-   "x": 448,
-   "y": 0,
+   "x": 128,
+   "y": 416,
    "width": 320,
    "height": 208,
    "background": "foyer.png",
@@ -328,7 +328,19 @@
     [
      0,
      0,
-     320,
+     196,
+     48
+    ],
+    [
+     196,
+     0,
+     24,
+     20
+    ],
+    [
+     220,
+     0,
+     100,
      48
     ],
     [
@@ -536,6 +548,12 @@
      "x": 152,
      "y": 158,
      "depth": 308
+    },
+    {
+     "key": "arrow_up",
+     "x": 200,
+     "y": 50,
+     "depth": 308
     }
    ],
    "portals": [
@@ -547,6 +565,16 @@
       10
      ],
      "to": "hall",
+     "spawn": "fromFoyer"
+    },
+    {
+     "rect": [
+      198,
+      22,
+      20,
+      20
+     ],
+     "to": "room",
      "spawn": "fromFoyer"
     }
    ],
@@ -560,10 +588,22 @@
      "x": 160,
      "y": 146,
      "dir": "up"
+    },
+    "fromRoom": {
+     "x": 208,
+     "y": 96,
+     "dir": "down"
     }
    },
    "machines": [],
-   "doors": [],
+   "doors": [
+    {
+     "key": "door_glass",
+     "x": 192,
+     "y": 0,
+     "radius": 40
+    }
+   ],
    "signs": [
     {
      "x": 160,
@@ -576,14 +616,20 @@
      "y": 154,
      "text": "大厅",
      "tone": "muted"
+    },
+    {
+     "x": 208,
+     "y": 8,
+     "text": "我的房间",
+     "tone": "muted"
     }
    ]
   },
   {
    "id": "hall",
    "name": "大厅",
-   "x": 320,
-   "y": 464,
+   "x": 0,
+   "y": 880,
    "width": 576,
    "height": 384,
    "background": "hall.png",
@@ -591,19 +637,7 @@
     [
      0,
      0,
-     232,
-     48
-    ],
-    [
-     232,
-     0,
-     24,
-     20
-    ],
-    [
-     256,
-     0,
-     20,
+     276,
      48
     ],
     [
@@ -640,6 +674,17 @@
    "props": [
     {
      "key": "plant_tall2",
+     "x": 254,
+     "y": 16,
+     "solid": [
+      255,
+      52,
+      14,
+      12
+     ]
+    },
+    {
+     "key": "plant_tall2",
      "x": 306,
      "y": 16,
      "solid": [
@@ -658,6 +703,17 @@
       48,
       30,
       16
+     ]
+    },
+    {
+     "key": "plant_tall",
+     "x": 232,
+     "y": 16,
+     "solid": [
+      233,
+      52,
+      30,
+      12
      ]
     },
     {
@@ -1193,12 +1249,6 @@
    "anims": [
     {
      "key": "arrow_up",
-     "x": 236,
-     "y": 50,
-     "depth": 484
-    },
-    {
-     "key": "arrow_up",
      "x": 280,
      "y": 50,
      "depth": 484
@@ -1324,26 +1374,11 @@
      ],
      "to": "foyer",
      "spawn": "fromHall"
-    },
-    {
-     "rect": [
-      234,
-      22,
-      20,
-      20
-     ],
-     "to": "room",
-     "spawn": "fromHall"
     }
    ],
    "spawns": {
     "fromFoyer": {
      "x": 288,
-     "y": 96,
-     "dir": "down"
-    },
-    "fromRoom": {
-     "x": 244,
      "y": 96,
      "dir": "down"
     }
@@ -1395,21 +1430,9 @@
      "x": 272,
      "y": 0,
      "radius": 40
-    },
-    {
-     "key": "door_glass",
-     "x": 228,
-     "y": 0,
-     "radius": 40
     }
    ],
    "signs": [
-    {
-     "x": 244,
-     "y": 8,
-     "text": "我的房间",
-     "tone": "muted"
-    },
     {
      "x": 288,
      "y": 8,
@@ -1419,5 +1442,5 @@
    ]
   }
  ],
- "build": "4e305b7a3a6d"
+ "build": "18142135cae9"
 }

@@ -229,8 +229,11 @@ def build_anims() -> None:
             # 自动门：靠近时播放 open 帧序列，离开时播放 close 帧序列
             a[key]["door"] = door
 
-    add("door_glass", load(ANIM_DIR + "animated_door_glass_double.png"), 32, 48, 14,
-        door={"open": [0, 1, 2, 3, 4], "close": [5, 6, 7, 0]})
+    # 玻璃双开门：开门时门扇向上收起；原图开门帧的门扇会冒出墙顶，按关门状态的上沿（y=19）裁掉其上方像素，
+    # 门扇看起来是收进门楣
+    door = load(ANIM_DIR + "animated_door_glass_double.png").copy()
+    door.paste((0, 0, 0, 0), (0, 0, door.width, DOOR_TOP))
+    add("door_glass", door, 32, 48, 14, door={"open": [0, 1, 2, 3, 4], "close": [5, 6, 7, 0]})
     add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10)
     add("receptionist", load(ANIM_DIR + "animated_receptionist.png"), 16, 32, 5)
     add("monitor", load(ANIM_DIR + "animated_control_room_facebook_scrolling.png"), 16, 32, 4)
@@ -255,6 +258,7 @@ def build_anims() -> None:
 # ---------------------------------------------------------------- 房间绘制
 
 VOID = (20, 20, 19, 255)          # 与页面背景 #141413 一致，房间外融入舞台
+DOOR_TOP = 19                     # 玻璃双开门关门时的上沿（门贴图内 y）
 OUTLINE = (43, 40, 52, 255)       # 墙顶描边
 CAP = (233, 226, 212, 255)        # 墙顶（俯视看到的墙厚）
 SHADOW = (24, 18, 30)
@@ -373,6 +377,17 @@ class Room:
         if inner:
             d.ellipse((x0 + 3, y0 + 3, x1 - 4, y1 - 4), outline=(*inner, 255))
 
+    def door_recess(self, x: int, y: int = 0) -> None:
+        """上墙玻璃门背后的门洞：门打开后看到的是幽暗的通道而不是墙面。
+        门贴图 32x48 放在 (x, y)，两侧门框各 2px，门洞取门框之间、关门上沿以下的区域。"""
+        x0, y0, x1, y1 = x + 2, y + DOOR_TOP, x + 30, y + 48
+        d = ImageDraw.Draw(self.bg)
+        d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=(40, 37, 46, 255))
+        # 门楣投影：上沿两行更暗；底部几行略亮，暗示门外的地面
+        d.rectangle((x0, y0, x1 - 1, y0 + 1), fill=(24, 22, 28, 255))
+        for i, color in enumerate(((50, 46, 56), (58, 54, 64), (66, 61, 72), (72, 67, 78))):
+            d.line((x0, y1 - 4 + i, x1 - 1, y1 - 4 + i), fill=(*color, 255))
+
     def decal(self, key: str, x: int, y: int) -> None:
         self.bg.alpha_composite(DECALS[key], (x, y))
 
@@ -442,18 +457,22 @@ def t(n: float) -> int:
 
 
 def build_foyer() -> Room:
-    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅。"""
+    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅；
+    上墙电梯右侧玻璃门通往楼上「我的房间」（房间下方出口出来即回到这扇门下）。"""
     room = Room("foyer", "入口厅", 20, 13, floor_tex(4, 8), wall_tex(1, 26))
     exit_x0, exit_x1 = t(9), t(11)
     room.bottom_openings.append((exit_x0, exit_x1))
+    room_door_x = t(12)
+    room.top_openings.append((room_door_x + 4, room_door_x + 28))
     room.draw_shell()
     w, h = room.w, room.h
 
     # 墙面挂饰
     room.decal("string_lights", t(1.5), 18)
     room.decal("cork_board", t(5.5), 22)
-    room.decal("painting_forest", t(12) + 5, 24)
-    room.decal("painting_aqua", t(14) + 2, 24)
+    # 两幅挂画让出电梯右侧的门位：森林挂到软木板左侧，海景挂到门与彩灯之间
+    room.decal("painting_forest", 62, 24)
+    room.decal("painting_aqua", 234, 24)
     room.decal("string_lights", t(16.5), 18)
     # 地毯：中央迎宾毯 + 等候区 + 出口地垫
     room.rug((t(6), t(5.5), t(14), t(9.5)), floor_tex(8, 20), edge=(40, 36, 70), inner=(150, 140, 200))
@@ -491,10 +510,17 @@ def build_foyer() -> Room:
     room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "大厅", "tone": "muted"})
     room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "hall", "spawn": "fromFoyer"})
 
+    # 上墙玻璃门：通往「我的房间」，门上标牌 + 门内向上箭头，走近自动开门
+    room.door_recess(room_door_x)
+    room.doors.append({"key": "door_glass", "x": room_door_x, "y": 0, "radius": 40})
+    room.portals.append({"rect": [room_door_x + 6, 22, 20, 20], "to": "room", "spawn": "fromFoyer"})
+    room.signs.append({"x": room_door_x + 16, "y": 8, "text": "我的房间", "tone": "muted"})
+    room.anim("arrow_up", room_door_x + 8, 50, depth=h + 100)
 
     room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
     # 回到入口厅时站在出口标牌与箭头之外，避免标牌压在角色头上
     room.spawns["fromHall"] = {"x": t(10), "y": h - 62, "dir": "up"}
+    room.spawns["fromRoom"] = {"x": room_door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
 
@@ -514,39 +540,32 @@ def workstation(room: Room, x: int, y: int, accessory: str) -> None:
 
 
 def build_hall() -> Room:
-    """大厅：上墙中间玻璃门回入口厅，其左侧同款玻璃门通往「我的房间」；左上 4 工位，右上 ASR / OCR 两台机器，
-    右侧圆桌聊天角（聊天室），左下休息区，右下游戏角。"""
+    """大厅：上墙中间玻璃门入口；左上 4 工位，右上 ASR / OCR 两台机器，右侧圆桌聊天角（聊天室），左下休息区，右下游戏角。"""
     room = Room("hall", "大厅", 36, 24, floor_tex(4, 12), wall_tex(23, 24))
     door_x = t(17)
-    room_door_x = door_x - 44
     room.top_openings.append((door_x + 4, door_x + 28))
-    room.top_openings.append((room_door_x + 4, room_door_x + 28))
     room.draw_shell()
     w, h = room.w, room.h
 
     # ---- 上墙挂饰
     room.decal("window_curtain", t(3.5), 18)
     room.decal("world_map", t(7), 16)
-    # 窗与软木板略微左移，给「我的房间」门让位
-    room.decal("window_curtain", t(10) - 4, 18)
-    room.decal("cork_board", t(12) + 2, 22)
+    room.decal("window_curtain", t(10), 18)
+    room.decal("cork_board", t(13), 22)
 
     # ---- 入口：玻璃双开门 + 红色迎宾长毯 + 两侧绿植
+    room.door_recess(door_x)
     room.doors.append({"key": "door_glass", "x": door_x, "y": 0, "radius": 40})
     room.portals.append({"rect": [door_x + 6, 22, 20, 20], "to": "foyer", "spawn": "fromHall"})
     room.rug((door_x + 2, 48, door_x + 30, t(13)), floor_tex(4, 14), edge=(70, 30, 30), inner=(214, 160, 90))
+    room.prop("plant_tall2", door_x - 18, 16, foot=12)
     room.prop("plant_tall2", door_x + 34, 16, foot=12)
-
-    # 「我的房间」门：与入口同款玻璃双开门，走近自动开门；门上标牌 + 门内向上箭头
-    room.doors.append({"key": "door_glass", "x": room_door_x, "y": 0, "radius": 40})
-    room.portals.append({"rect": [room_door_x + 6, 22, 20, 20], "to": "room", "spawn": "fromHall"})
-    room.signs.append({"x": room_door_x + 16, "y": 8, "text": "我的房间", "tone": "muted"})
-    room.anim("arrow_up", room_door_x + 8, 50, depth=h + 100)
     room.anim("arrow_up", door_x + 8, 50, depth=h + 100)
     room.signs.append({"x": door_x + 16, "y": 8, "text": "入口厅", "tone": "muted"})
 
     # ---- 左上：工位区（浅灰地毯 + 2x2 工位）
     room.prop("bookshelf", t(1), 16, foot=16)
+    room.prop("plant_tall", t(14.5), 16, foot=12)
     room.rug((t(2), t(5), t(15), t(14.5)), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
     workstation(room, t(3), t(6.5), "lamp_desk_blue")
     workstation(room, t(9), t(6.5), "plant_desk")
@@ -631,13 +650,12 @@ def build_hall() -> Room:
 
     room.prop("plant_big", t(1), t(13) - 6, foot=14)
     room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 96, "dir": "down"}
-    room.spawns["fromRoom"] = {"x": room_door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
 
 
 def build_room() -> Room:
-    """我的房间：大厅玻璃门旁的小卧室。下墙中间开口出去，从大厅上墙「我的房间」玻璃门下出现；
+    """我的房间：入口厅楼上的小卧室。下墙中间开口出去，从入口厅上墙的玻璃门下出现；
     衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
     room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
     exit_x0, exit_x1 = t(5), t(7)
@@ -673,10 +691,10 @@ def build_room() -> Room:
     # 出口：门口地垫 + 「入口厅」标牌与向下箭头
     room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
     room.anim("arrow_down", (exit_x0 + exit_x1) // 2 - 8, h - 50, depth=h + 100)
-    room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "大厅", "tone": "muted"})
-    room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "hall", "spawn": "fromRoom"})
-    # 进门后站在「大厅」标牌上方，标牌与箭头不压在角色身上
-    room.spawns["fromHall"] = {"x": (exit_x0 + exit_x1) // 2, "y": h - 62, "dir": "up"}
+    room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "入口厅", "tone": "muted"})
+    room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "foyer", "spawn": "fromRoom"})
+    # 进门后站在「入口厅」标牌上方，标牌与箭头不压在角色身上
+    room.spawns["fromFoyer"] = {"x": (exit_x0 + exit_x1) // 2, "y": h - 62, "dir": "up"}
     room.build_walls()
     return room
 
@@ -828,12 +846,12 @@ def main() -> None:
     room = build_room()
     hall = build_hall()
 
-    # 世界排布：上一行左为我的房间、右为入口厅，大厅在入口厅正下方（我的房间从大厅上墙的门进出）。
+    # 世界排布：自上而下 我的房间 → 入口厅 → 大厅，水平居中对齐。
     # 房间之间留足间距：小房间在大屏上居中显示时，相机视野会超出房间，不能看到相邻房间。
     gap = 256
-    room_off = (0, 0)
-    foyer_off = (room.w + gap, 0)
-    hall_off = (foyer_off[0] + (foyer.w - hall.w) // 2, max(room.h, foyer.h) + gap)
+    foyer_off = (0, room.h + gap)
+    room_off = ((foyer.w - room.w) // 2, 0)
+    hall_off = ((foyer.w - hall.w) // 2, foyer_off[1] + foyer.h + gap)
     placed = [(room, room_off), (foyer, foyer_off), (hall, hall_off)]
     shift_x = -min(off[0] for _, off in placed)
     placed = [(r, (x + shift_x, y)) for r, (x, y) in placed]
