@@ -11,21 +11,25 @@ export interface NavItem {
 }
 
 export interface NavGroup {
+  /** 本地布局使用的稳定标识，排序与折叠状态都按它保存 */
+  id: string;
   label: string;
   items: NavItem[];
 }
 
 export const navigation: NavGroup[] = [
-  { label: "总览", items: [{ href: "/", label: "Overview", title: "总览", icon: "overview" }] },
+  { id: "overview", label: "总览", items: [{ href: "/", label: "Overview", title: "总览", icon: "overview" }] },
   {
+    id: "chatworld",
     label: "聊天大厅",
     items: [
       { href: "/chat-lobby", label: "聊天大厅", icon: "lobby" },
       { href: "/chat", label: "聊天室", icon: "chat" },
     ],
   },
-  { label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
+  { id: "prompts", label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
   {
+    id: "models",
     label: "模型管理",
     items: [
       { href: "/llama/models", label: "推理服务", icon: "models" },
@@ -38,6 +42,7 @@ export const navigation: NavGroup[] = [
   },
   // 远程服务器分组暂时从侧栏隐藏，页面与组件代码保留，取消注释即可恢复
   // {
+  //   id: "server",
   //   label: "远程服务器",
   //   items: [
   //     { href: "/server/connections", label: "服务器连接", icon: "connections" },
@@ -45,6 +50,7 @@ export const navigation: NavGroup[] = [
   //   ],
   // },
   {
+    id: "settings",
     label: "设置",
     items: [
       { href: "/settings", label: "AI 能力", icon: "settings" },

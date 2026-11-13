@@ -132,12 +132,14 @@ code { color: var(--color-text-secondary); font-size: 13px; overflow-wrap: anywh
 .sidebar.is-collapsed .sidebar-head { flex-direction: column; gap: var(--space-4); }
 .sidebar.is-collapsed .brand-lockup { justify-content: center; }
 .sidebar.is-collapsed .brand-lockup > div,
+.sidebar.is-collapsed .nav-group-head,
 .sidebar.is-collapsed .nav-group-label,
 .sidebar.is-collapsed .nav-item-label,
 .sidebar.is-collapsed .nav-item > span:not(.nav-icon),
 .sidebar.is-collapsed .sidebar-version { display: none; }
 .sidebar.is-collapsed .sidebar-nav { gap: var(--space-5); margin-top: var(--space-6); }
 .sidebar.is-collapsed .nav-group { justify-items: center; gap: var(--space-2); }
+.sidebar.is-collapsed .nav-group-items { display: grid; justify-items: center; gap: var(--space-2); }
 .sidebar.is-collapsed .nav-group + .nav-group { padding-top: var(--space-5); border-top: 1px solid var(--color-divider); }
 .sidebar.is-collapsed .nav-item,
 .sidebar.is-collapsed .sidebar-toggle {
@@ -170,9 +172,57 @@ code { color: var(--color-text-secondary); font-size: 13px; overflow-wrap: anywh
   letter-spacing: -0.1em;
 }
 
-.sidebar-nav { flex: 1 0 auto; display: grid; align-content: start; gap: var(--space-6); margin-top: var(--space-10); }
-.nav-group { display: grid; gap: var(--space-1); }
-.nav-group-label { margin: 0 0 var(--space-1); padding: 0 var(--space-2); color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+.sidebar-nav { flex: 1 0 auto; display: grid; align-content: start; gap: var(--space-4); margin-top: var(--space-10); }
+.nav-group { position: relative; display: grid; gap: var(--space-1); }
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: background-color 160ms ease;
+}
+.nav-group-head:hover { background: var(--color-surface-soft); }
+.nav-group-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-group-toggle:hover { color: var(--color-text-secondary); }
+.nav-group-chevron { flex: 0 0 auto; width: 14px; height: 14px; transition: transform 160ms ease; }
+.nav-group.is-collapsed .nav-group-chevron { transform: rotate(-90deg); }
+.nav-group-label { margin: 0; padding: 0; overflow: hidden; color: inherit; font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.nav-group-grip {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--color-text-muted);
+  opacity: 0.35;
+  cursor: grab;
+  transition: opacity 160ms ease, color 160ms ease;
+}
+.nav-group-head:hover .nav-group-grip,
+.nav-group:focus-within .nav-group-grip { opacity: 0.8; color: var(--color-text-secondary); }
+.nav-group-grip:active { cursor: grabbing; }
+.nav-group-grip svg { width: 14px; height: 14px; }
+.nav-group-items { display: grid; gap: var(--space-1); }
+.nav-group.is-dragging { opacity: 0.45; }
+.nav-group.is-drop-target .nav-group-head { background: var(--color-surface-hover); }
+.nav-group.is-drop-target .nav-group-toggle { color: var(--color-text-primary); }
 .nav-item {
   display: flex;
   align-items: center;
@@ -187,6 +237,8 @@ code { color: var(--color-text-secondary); font-size: 13px; overflow-wrap: anywh
 }
 .nav-item:hover { background: var(--color-surface-soft); color: var(--color-text-primary); }
 .nav-item.is-active { border-color: var(--color-border); background: var(--color-surface-hover); color: var(--color-text-primary); }
+.nav-item.is-dragging { opacity: 0.45; }
+.nav-item.is-drop-target { border-top-color: var(--color-brand); }
 .nav-icon { display: inline-flex; width: 18px; align-items: center; justify-content: center; color: var(--color-text-muted); }
 .nav-icon svg, .service-icon svg { width: 18px; height: 18px; }
 .nav-item.is-active .nav-icon { color: var(--color-brand); }

@@ -10,6 +10,7 @@ import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
 import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } from "../chatworld/room/chat-watcher";
 import { DocumentTitle } from "./document-title";
+import { SidebarNav } from "./sidebar-nav";
 
 /** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */
 const COLLAPSE_STORAGE_KEY = "hannishub_sidebar_collapsed";
@@ -151,27 +152,13 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
             <Icon name={navigationOpen ? "panelCollapse" : "panelExpand"} />
           </button>
         </div>
-        <nav className="sidebar-nav" aria-label="主导航">
-          {navigation.map(group => ({ ...group, items: group.items.filter(item => !item.adminOnly || auth.terminal) })).filter(group => group.items.length).map(group => (
-            <div className="nav-group" key={group.label}>
-              <p className="nav-group-label">{group.label}</p>
-              {group.items.map(item => (
-                <Link
-                  className={`nav-item${isActivePath(pathname, item.href) ? " is-active" : ""}`}
-                  href={item.href}
-                  key={item.href}
-                  onClick={closeDrawer}
-                  title={item.label}
-                  aria-label={item.label}
-                >
-                  <span className="nav-icon"><Icon name={item.icon} /></span>
-                  <span className="nav-item-label">{item.label}</span>
-                  {item.href === "/chat" && unread > 0 ? <span className="nav-badge" aria-label={`${unread} 条未读`}>{unread > 99 ? "99+" : unread}</span> : null}
-                </Link>
-              ))}
-            </div>
-          ))}
-        </nav>
+        <SidebarNav
+          pathname={pathname}
+          terminalAllowed={!!auth.terminal}
+          unread={unread}
+          iconMode={collapsed}
+          onNavigate={closeDrawer}
+        />
         <div className="sidebar-footer">
           <div className="sidebar-status"><span className="status-dot" />FastAPI 在线</div>
           <span className="sidebar-version">HannisHub workspace</span>
