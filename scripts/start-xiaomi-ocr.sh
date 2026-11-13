@@ -22,7 +22,7 @@ cleanup() {
   wait || true
 }
 trap cleanup EXIT TERM INT
-/home/lihan/run/llama.cpp/build/bin/llama-server -m /home/lihan/models/Xiaomi-OCR-0/Xiaomi-OCR-0.BF16.gguf --mmproj /home/lihan/models/Xiaomi-OCR-0/Xiaomi-OCR-0.mmproj-bf16.gguf --host 127.0.0.1 --port 8080 --alias xiaomi-ocr-0 -ngl 99 -c 16384 &
+/home/lihan/run/llama.cpp/build/bin/llama-server -m /home/lihan/models/Xiaomi-OCR-0/Xiaomi-OCR-0.BF16.gguf --mmproj /home/lihan/models/Xiaomi-OCR-0/Xiaomi-OCR-0.mmproj-bf16.gguf --host 127.0.0.1 --port 8080 --alias xiaomi-ocr-0 -ngl 99 -c 65536 &
 server_pid=$!
 for ((i=0; i<120; i++)); do
   if curl -fsS http://127.0.0.1:8080/v1/models >/dev/null 2>&1; then break; fi

@@ -292,8 +292,14 @@ async def _run_pdf(client: httpx.AsyncClient, base: str, username: str, record_i
         if state == "error" and not markdown:
             raise RuntimeError(str(job.get("error") or "PDF 识别失败"))
         if state == "error":
-            # 部分页失败时保留已有结果，并在记录中提示。
-            _update(username, record_id, {"warning": str(job.get("error") or "部分页面识别失败")})
+            pages = [item for item in job.get("page_log") or [] if isinstance(item, dict)]
+            failed = [item for item in pages if not item.get("ok")]
+            if pages and len(failed) == len(pages):
+                # 全部页面失败时结果只有错误注释，直接标记失败并给出首个原因。
+                raise RuntimeError(f"全部 {len(pages)} 页识别失败：{failed[0].get('error') or '未知错误'}")
+            # 部分页失败时保留已有结果，并在记录中提示失败页码。
+            numbers = "、".join(str(item.get("page")) for item in failed[:20])
+            _update(username, record_id, {"warning": f"第 {numbers} 页识别失败，其余页面已保留" if failed else str(job.get("error") or "部分页面识别失败")})
         return markdown
 
 

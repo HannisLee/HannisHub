@@ -818,10 +818,11 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 ### Xiaomi OCR 工作台
 
 - 注册 OCR 命令 `scripts/start-xiaomi-ocr.sh --port 8787`，由受管进程同时启动本机 llama-server（127.0.0.1:8080）与官方 Demo（127.0.0.1:8787），停止时一并结束子进程；端口被占用时启动失败并记录日志。
+- llama-server 使用 `-c 65536`：服务端 `n_parallel` 自动为 4 且 KV 缓存在各槽间共享，PDF 默认 4 页并发、每页 150 DPI 图像约 4.1k 提示 token 加最多 4096 输出，16384 会导致「Context size has been exceeded」，65536 可同时容纳 4 页。
 - 模型和视觉投影器存于 `/home/lihan/models/Xiaomi-OCR-0/`，官方仓库存于 `/home/lihan/run/Xiaomi-OCR-0/`。整页、公式和问答使用官方服务层；区域解析需要另装可选依赖。
 - 通过推理服务的 Open 独立打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。
 
 - 统一前端 `/llama/ocr` 不再嵌入官方工作台，改为 `frontend/components/llama/ocr-panel.tsx` 自研页面，保留官方交互结构：顶部任务切换（文档解析 / 字段提取 / 图像问答，后两者分别显示字段与问题输入框）与「上传文件 / 开始解析」按钮，下方左右两栏「01 原始文档 / 02 识别结果」。左栏未选文件时为拖入上传区，并以标签展示支持格式（PNG / JPG / JPEG / WEBP / BMP / PDF，单文件 ≤ 50 MB）；选中后预览图片或 PDF，点击图片或「开始解析」提交。右栏提供 预览 / 原文 / JSON 视图与复制、下载（.md / .json）。已移除官方页面的 OCR 服务卡片、首屏标语、样例区与底部社区区块；服务状态与「启动服务」按钮移到页头右侧。
 - 结果预览由 `ocr-result.tsx` 渲染：支持标题、段落、列表、管道表格、`$$` 公式块、PDF 分页标记，模型输出的 HTML 表格经 DOMParser 只提取单元格文本与合并属性后用 React 渲染，不注入原始 HTML；字段提取的 JSON 结果格式化显示。
-- 识别由 Hub 后端 `ocr_records.py` 在后台调用受管 OCR 实例（`llama_manager.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注警告。全局最多 2 个任务并发，关闭页面不影响识别。
+- 识别由 Hub 后端 `ocr_records.py` 在后台调用受管 OCR 实例（`llama_manager.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注失败页码；全部页面失败时记录标记为失败并显示首个原因。全局最多 2 个任务并发，关闭页面不影响识别。
 - 识别记录按登录用户隔离，保存在 `data/ocr_records/<用户名 SHA-256 前 32 位>/`：`records.json` 为索引，`<记录 ID>/source.<扩展名>` 为原始文件、`result.md` 为结果；每个账号最多 500 条。Hub 重启时把未完成的记录标记为「服务重启导致任务中断」。页面在有进行中的记录时每 2 秒刷新列表，可查看、打开原文件、重命名与删除（进行中的记录不可删除）。上传、完成与失败写入 `uvicorn.error` 日志。
