@@ -3,6 +3,7 @@ import type { ApiErrorShape } from "./types";
 export const API_PATHS = {
   hub: "/api",
   fileManager: "/api/file-manager",
+  ocr: "/api/ocr",
   aiSettings: "/api/ai-settings",
   chatRoom: "/api/chat-room",
   users: "/api/users",

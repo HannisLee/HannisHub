@@ -85,7 +85,7 @@ HannisHub/
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
   - 图片与文件：点回形针选择、拖入聊天区域或在输入框粘贴即可发送，每个文件一条消息，单个不超过 50 MB。本地立即显示（图片显示本地预览）并显示上传进度，上传完成后随消息发送；失败可重试或删除。PNG / JPEG / GIF / WebP 显示为缩略图（按原始比例预留尺寸，点击查看大图），其余类型显示为带文件名、大小与下载按钮的文件卡片。附件保存在 `data/chat_room_files/`，上传超过 24 小时仍未被消息引用的文件在下次上传时清理
 - `/chat-lobby`：聊天大厅，内置 2D 像素风办公室单人场景（Phaser 3）。3/4 俯视视角，32×22 格、16px Tile，整数倍缩放（按宽度适配 2×～3×）保持像素清晰。含 6 个工位（2 排×3 列，桌+显示器+椅背）、门窗、白板、书架、文件柜、饮水机、绿植与沙发休息区。WASD/方向键四方向行走与静止动画，墙壁与家具具备碰撞体积，家具与角色按底边 y 排序处理前后遮挡；触屏设备显示方向垫。相机在视野装得下整个房间时居中静止，否则平滑跟随角色。本轮仅单人场景与走动，不含多人同步、聊天、坐下等交互。游戏逻辑独立于 UI 组件，位于 `frontend/game/lobby/`，素材统一存放在 `frontend/public/chat-lobby/`（来源与许可证见该目录 `CREDITS.md`）
-- `/llama/ocr`：OCR 识别页面，提供小米 OCR 服务默认启动与完整工作台。
+- `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面。该分组当前从侧栏隐藏，页面、组件与接口全部保留，直接访问 URL 仍可使用；“服务器文件”页仍依赖已保存的 SSH 连接
@@ -183,6 +183,12 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/file-manager/favorites` | 收藏目录，提交 `root` 顶层目录索引、`path` 相对路径和可选 `name`；验证目录存在且不能越界 |
 | PATCH | `/api/file-manager/favorites/{favorite_id}` | 修改收藏显示名称，提交 `name`；长度为 1 到 80 个可见字符 |
 | DELETE | `/api/file-manager/favorites/{favorite_id}` | 移除目录收藏 |
+| GET | `/api/ocr/records` | 读取当前登录用户的 OCR 识别记录（按创建时间倒序） |
+| POST | `/api/ocr/records?task=<document\|kie\|vqa>&fields=<字段>&question=<问题>` | 以原始请求体上传 PNG/JPG/JPEG/WEBP/BMP/PDF（≤ 50 MB），URL 编码文件名放在 `x-file-name` 请求头；PDF 仅支持 `document`，`vqa` 必须带问题。创建记录并在后台识别，立即返回记录 |
+| GET | `/api/ocr/records/{record_id}/text` | 读取当前用户一条已完成记录的识别结果；未完成返回 409 |
+| GET | `/api/ocr/records/{record_id}/source` | 内联返回当前用户记录的原始文件，供页面预览 |
+| PATCH | `/api/ocr/records/{record_id}` | 重命名记录，提交 `name`（1–160 个字符） |
+| DELETE | `/api/ocr/records/{record_id}` | 删除已结束的记录及其原始文件与结果；进行中返回 409 |
 | GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
 | GET | `/api/file-manager/resource?root=<index>&path=<relative_path>` | 内联返回受限目录内的原始资源，供 Markdown 相对图片与附件链接加载 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 兼容旧版点云文件地址；新预览器直接使用文件管理下载接口，仍拒绝越界路径 |
@@ -815,4 +821,7 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 模型和视觉投影器存于 `/home/lihan/models/Xiaomi-OCR-0/`，官方仓库存于 `/home/lihan/run/Xiaomi-OCR-0/`。整页、公式和问答使用官方服务层；区域解析需要另装可选依赖。
 - 通过推理服务的 Open 独立打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。
 
-- 统一前端 `/llama/ocr` 提供服务状态与默认启动，轮询健康检查；完整官方工作台通过登录保护的受管服务代理嵌入，并使用 HannisHub 设计变量。文档、字段提取、问答、PDF、区域模式提示、样例、设置及结果视图继续调用官方工作台接口。
+- 统一前端 `/llama/ocr` 不再嵌入官方工作台，改为 `frontend/components/llama/ocr-panel.tsx` 自研页面，保留官方交互结构：顶部任务切换（文档解析 / 字段提取 / 图像问答，后两者分别显示字段与问题输入框）与「上传文件 / 开始解析」按钮，下方左右两栏「01 原始文档 / 02 识别结果」。左栏未选文件时为拖入上传区，并以标签展示支持格式（PNG / JPG / JPEG / WEBP / BMP / PDF，单文件 ≤ 50 MB）；选中后预览图片或 PDF，点击图片或「开始解析」提交。右栏提供 预览 / 原文 / JSON 视图与复制、下载（.md / .json）。已移除官方页面的 OCR 服务卡片、首屏标语、样例区与底部社区区块；服务状态与「启动服务」按钮移到页头右侧。
+- 结果预览由 `ocr-result.tsx` 渲染：支持标题、段落、列表、管道表格、`$$` 公式块、PDF 分页标记，模型输出的 HTML 表格经 DOMParser 只提取单元格文本与合并属性后用 React 渲染，不注入原始 HTML；字段提取的 JSON 结果格式化显示。
+- 识别由 Hub 后端 `ocr_records.py` 在后台调用受管 OCR 实例（`llama_manager.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注警告。全局最多 2 个任务并发，关闭页面不影响识别。
+- 识别记录按登录用户隔离，保存在 `data/ocr_records/<用户名 SHA-256 前 32 位>/`：`records.json` 为索引，`<记录 ID>/source.<扩展名>` 为原始文件、`result.md` 为结果；每个账号最多 500 条。Hub 重启时把未完成的记录标记为「服务重启导致任务中断」。页面在有进行中的记录时每 2 秒刷新列表，可查看、打开原文件、重命名与删除（进行中的记录不可删除）。上传、完成与失败写入 `uvicorn.error` 日志。

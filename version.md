@@ -1111,3 +1111,6 @@
 - 前端新增 `frontend/lib/file-manager-upload.ts`：大于 8 MB 的文件按 8 MB 分片、4 片并发上传，单片失败自动重试 3 次（网络错误、超时、5xx、408、429），最终失败时通知服务端清理并记录原因；进度按已传字节实时汇总。小文件仍走原单请求接口。`uploadBinary` 新增可选 `method` 参数。
 - 同步更新 `spec.md`。已用临时目录验证乱序并发分片、缺片拒绝合并、短片拒绝、同名冲突、取消清理及单文件中断日志；`typecheck`/`lint`/`build` 通过。
 - 全站滚动条统一为暖黑风格：`globals.css` 为 `html` 设置 `color-scheme: dark`（原生滚动条与表单控件不再显示浅色），并全局设置细滚动条、`--color-control-border` 暖灰滑块、透明轨道与角落，悬停加深为 `--color-text-muted`；标准 `scrollbar-*` 属性覆盖 Firefox/新版 Chromium，`::-webkit-scrollbar` 作为 Safari 回退。删除提示词列表、聊天消息与表情面板中重复的局部滚动条规则。
+- OCR 识别页重构为自研工作台，不再嵌入小米官方页面：保留官方的任务切换（文档解析 / 字段提取 / 图像问答）、「上传文件 / 开始解析」与「01 原始文档 / 02 识别结果」双栏交互及 预览 / 原文 / JSON 视图、复制、下载；删除顶部「OCR 服务」卡片（状态与启动按钮移到页头）、「看懂每一页，读出更多可能」标语、「试试这些文档」样例区和底部「科技不是高高在上」社区区块；左栏购物小票样例改为拖入上传区，并以标签展示支持格式 PNG / JPG / JPEG / WEBP / BMP / PDF。
+- 新增按账号独立的 OCR 识别记录：后端 `ocr_records.py` 接收上传后在后台调用受管 OCR 服务（图片走 `/api/ocr`，PDF 走 `/api/book` 并轮询页进度），原始文件与结果保存在 `data/ocr_records/<用户哈希>/`；新增 `GET/POST /api/ocr/records`、`GET .../{id}/text`、`GET .../{id}/source`、`PATCH`/`DELETE .../{id}` 接口，`llama_manager` 新增 `get_running_ocr_service()`。页面下方新增「识别记录」列表，可查看、打开原文件、重命名、删除，进行中的记录实时显示进度；Hub 重启时未完成记录标记为中断。
+- 新增 `frontend/components/llama/ocr-result.tsx` 安全渲染识别结果（标题、列表、表格、公式、分页标记；HTML 表格经 DOMParser 提取文本后渲染，不注入原始 HTML）。同步更新 `spec.md`。已用模拟 OCR 服务验证图片、PDF 轮询、格式与参数校验、账号隔离、重命名、删除与重启恢复，并用真实服务核对输出格式；`typecheck`/`lint`/`build` 通过。

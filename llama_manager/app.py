@@ -1860,6 +1860,16 @@ def _get_asr_service_item() -> dict:
         }
 
 
+def get_running_ocr_service() -> dict:
+    """返回运行中的小米 OCR 受管实例，供 Hub 的 OCR 识别记录模块调用其接口。"""
+    with _process_lock:
+        _sync_current_from_managed()
+        for pid, item in _managed_processes.items():
+            if item.get("service_id") == "xiaomi_ocr_0" and _is_process_running(item.get("process")) and item.get("port"):
+                return {"pid": pid, "port": item.get("port")}
+    raise HTTPException(status_code=503, detail="OCR 服务未运行，请先启动 Xiaomi OCR 0")
+
+
 def get_running_asr_service() -> dict:
     """返回唯一运行中的 ASR 实例信息，供同进程的提示词模块复用。"""
     return _get_asr_service_item()

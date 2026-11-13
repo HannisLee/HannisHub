@@ -34,6 +34,7 @@ from auth import (
 )
 import ai_settings
 import chat_room
+import ocr_records
 from compression import SelectiveGZipMiddleware
 import llama_manager.app as llama_manager_app
 from file_manager import (
@@ -71,6 +72,8 @@ prompt_service_app.audio_service.configure_local_asr(
     llama_manager_app.get_running_asr_service,
     llama_manager_app.transcribe_with_managed_asr,
 )
+# OCR 识别记录由 Hub 后台调用受管小米 OCR 服务。
+ocr_records.configure(llama_manager_app.get_running_ocr_service)
 SERVICES: list[dict[str, str]] = [
     {
         "id": "llama-manager",
@@ -116,6 +119,7 @@ async def lifespan(_: FastAPI):
     await server_manager_app.start_scheduler()
     await prompt_service_app.audio_service.start()
     await llama_manager_app.recover_interrupted_asr_tasks()
+    ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(llama_manager_app.auto_start_watchdog())
     try:
         yield
@@ -551,6 +555,53 @@ async def file_manager_upload_complete(request: Request, upload_id: str):
 async def file_manager_upload_abort(request: Request, upload_id: str, reason: str = Query("", max_length=200)):
     """取消分片上传并删除临时文件。"""
     return JSONResponse(await run_in_threadpool(abort_chunked_upload, upload_id, request, reason))
+
+
+@app.get("/api/ocr/records")
+async def get_ocr_records(request: Request):
+    """读取当前用户的 OCR 识别记录。"""
+    username = ocr_records.request_username(request)
+    return JSONResponse({"records": await run_in_threadpool(ocr_records.list_records, username)})
+
+
+@app.post("/api/ocr/records")
+async def create_ocr_record(
+    request: Request,
+    task: str = Query("document", max_length=16),
+    fields: str = Query("", max_length=ocr_records.MAX_FIELDS_LENGTH),
+    question: str = Query("", max_length=ocr_records.MAX_QUESTION_LENGTH),
+):
+    """以原始请求体上传图片或 PDF（文件名放在 x-file-name 头），创建记录并在后台识别。"""
+    return JSONResponse({"record": await ocr_records.create_record(request, task, fields, question)})
+
+
+@app.get("/api/ocr/records/{record_id}/text")
+async def get_ocr_record_text(request: Request, record_id: str):
+    """读取一条已完成记录的识别结果。"""
+    username = ocr_records.request_username(request)
+    return JSONResponse(await run_in_threadpool(ocr_records.read_text, username, record_id))
+
+
+@app.get("/api/ocr/records/{record_id}/source")
+async def get_ocr_record_source(request: Request, record_id: str):
+    """内联返回记录的原始文件，供页面预览。"""
+    username = ocr_records.request_username(request)
+    path, media_type, filename = await run_in_threadpool(ocr_records.source_path, username, record_id)
+    return FileResponse(path, media_type=media_type, filename=filename, content_disposition_type="inline")
+
+
+@app.patch("/api/ocr/records/{record_id}")
+async def rename_ocr_record(request: Request, record_id: str, payload: dict[str, Any] = Body(...)):
+    """重命名当前用户的识别记录。"""
+    username = ocr_records.request_username(request)
+    return JSONResponse({"record": await run_in_threadpool(ocr_records.rename_record, username, record_id, payload.get("name"))})
+
+
+@app.delete("/api/ocr/records/{record_id}")
+async def delete_ocr_record(request: Request, record_id: str):
+    """删除已结束的识别记录及其文件。"""
+    username = ocr_records.request_username(request)
+    return JSONResponse({"record": await run_in_threadpool(ocr_records.delete_record, username, record_id)})
 
 
 @app.get("/api/file-manager/download")

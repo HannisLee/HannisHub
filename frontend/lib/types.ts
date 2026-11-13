@@ -516,3 +516,27 @@ export interface HubUser {
   /** 是否为当前登录账号 */
   is_self: boolean;
 }
+
+export type OcrTask = "document" | "kie" | "vqa";
+
+export interface OcrRecord {
+  id: string;
+  name: string;
+  filename: string;
+  extension: string;
+  kind: "image" | "pdf";
+  size: number;
+  task: OcrTask;
+  fields?: string;
+  question?: string;
+  status: "queued" | "running" | "completed" | "error";
+  progress?: number;
+  progress_detail?: string;
+  error?: string | null;
+  warning?: string;
+  pages?: number | null;
+  chars?: number;
+  latency_ms?: number | null;
+  created_at: string;
+  updated_at?: string;
+}
