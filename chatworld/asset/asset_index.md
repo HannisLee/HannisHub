@@ -137,17 +137,21 @@
 
 ## 7. 聊天大厅已使用的资产
 
-实际运行的派生文件位于 `frontend/public/chat-lobby/modern/`（Next.js 静态资源必须放在 `frontend/public/`，已入库），来源如下：
+聊天大厅（入口厅 + 大厅）的派生素材全部由 **`scripts/build_chat_lobby_assets.py`** 从本目录生成，输出到 `frontend/public/chat-lobby/club/`（Next.js 静态资源必须放在 `frontend/public/`，已入库）。
+布局（家具坐标、碰撞盒、门、传送门、机器交互区）也在该脚本中维护，改完重新运行即可：
+
+```bash
+python3 scripts/build_chat_lobby_assets.py --preview /tmp/lobby_preview.png   # 需要 Pillow
+```
 
 | 派生文件 | 来源 |
 |---|---|
-| `tiles_sheet.png`（25 块地板/墙壳） | `6_Home_Designs/Condominium_Designs/16x16/Condominium_Design_layer_1.png` |
-| `objects/*.png` 家具单件 | `1_Interiors/16x16/Theme_Sorter_Singles/` 的 Living Room / Conference Hall / Japanese Interiors |
-| `objects/rug.png` | Japanese Interiors 榻榻米单件改色扩宽 |
-| `objects/tv.png`、`clock.png`、`cat.png`、`door.png` | `3_Animated_objects/16x16/spritesheets/`（`old_tv`、`cuckoo_clock`、`cat`、`door_*`） |
-| `player.png` | `2_Characters/Character_Generator/0_Premade_Characters/16x16/Premade_Character_12.png` 重排 |
+| `foyer.png` / `hall.png` 房间背景 | 地板 `Room_Builder_subfiles/Room_Builder_Floors_16x16.png`、墙面 `Room_Builder_Walls_16x16.png`；墙顶收边与阴影为脚本程序化绘制；挂饰与地毯取自 `Theme_Sorter/1_Generic_16x16.png` 及各主题单件 |
+| `objects.png` + `objects.json` 家具图集 | `Theme_Sorter_Singles/` 的 Living Room、Basement、Classroom and Library、Conference Hall、Television and Film Studio，以及 Generic 总表裁剪（办公椅、长椅） |
+| `anims/*.png` 动画帧条 | `3_Animated_objects/16x16/spritesheets/`（玻璃门、电梯、接待员、滚动屏显示器、音箱、机柜、文档屏、咖啡、猫、鱼缸、布谷鸟钟）；`wave_screen` 截取自 X 光机监视器波形；`arrow_down` 由 `4_User_Interface_Elements` 的 GIF 转为帧条 |
+| `player.png` | `2_Characters/Character_Generator/0_Premade_Characters/16x16/Premade_Character_12.png` 重排（沿用旧版，不由脚本生成） |
 
-详细切帧参数见 `frontend/public/chat-lobby/CREDITS.md`。新增素材时同样只把派生文件放进 `frontend/public/chat-lobby/`，并在 CREDITS.md 登记。
+详细说明见 `frontend/public/chat-lobby/CREDITS.md`。新增素材时同样只把派生文件放进 `frontend/public/chat-lobby/`，并在 CREDITS.md 登记。
 
 ## 8. 速查命令
 

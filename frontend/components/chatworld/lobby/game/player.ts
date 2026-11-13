@@ -1,9 +1,5 @@
 import Phaser from "phaser";
-
-export interface TouchState {
-  x: number;
-  y: number;
-}
+import type { Facing, LobbyBridge } from "./layout";
 
 const SPEED = 88;
 
@@ -12,11 +8,14 @@ const SPEED = 88;
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
-  private touch: TouchState;
+  private bridge: LobbyBridge;
+  private facing: Facing = "down";
+  /** 冻结时忽略输入（房间切换、面板打开） */
+  frozen = false;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, touch: TouchState) {
+  constructor(scene: Phaser.Scene, x: number, y: number, bridge: LobbyBridge) {
     super(scene, x, y, "player", 0);
-    this.touch = touch;
+    this.bridge = bridge;
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
@@ -26,13 +25,13 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     body.setSize(10, 6);
     body.setOffset(3, 26);
 
-    const keyboard = scene.input.keyboard;
-    this.cursors = keyboard!.createCursorKeys();
+    const keyboard = scene.input.keyboard!;
+    this.cursors = keyboard.createCursorKeys();
     this.wasd = {
-      up: keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      down: keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      left: keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      right: keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
 
     this.createAnimations(scene);
@@ -57,11 +56,27 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     make("walk-right", 7, 10);
   }
 
+  /** 传送到指定位置并设定朝向（房间切换用），同时清零速度避免带入惯性 */
+  teleport(x: number, y: number, dir: Facing) {
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.reset(x, y);
+    this.facing = dir;
+    this.anims.play(`idle-${dir}`, true);
+    this.setDepth(y);
+  }
+
   update() {
-    const left = this.cursors.left.isDown || this.wasd.left.isDown || this.touch.x < 0;
-    const right = this.cursors.right.isDown || this.wasd.right.isDown || this.touch.x > 0;
-    const up = this.cursors.up.isDown || this.wasd.up.isDown || this.touch.y < 0;
-    const down = this.cursors.down.isDown || this.wasd.down.isDown || this.touch.y > 0;
+    if (this.frozen) {
+      this.setVelocity(0, 0);
+      const idle = `idle-${this.facing}`;
+      if (this.anims.currentAnim?.key !== idle) this.anims.play(idle, true);
+      return;
+    }
+    const touch = this.bridge.touch;
+    const left = this.cursors.left.isDown || this.wasd.left.isDown || touch.x < 0;
+    const right = this.cursors.right.isDown || this.wasd.right.isDown || touch.x > 0;
+    const up = this.cursors.up.isDown || this.wasd.up.isDown || touch.y < 0;
+    const down = this.cursors.down.isDown || this.wasd.down.isDown || touch.y > 0;
 
     let dx = (right ? 1 : 0) - (left ? 1 : 0);
     let dy = (down ? 1 : 0) - (up ? 1 : 0);
@@ -73,13 +88,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     const moving = dx !== 0 || dy !== 0;
     // 朝向优先级：水平 > 垂直，斜向移动显示侧向动画
-    let dir: "down" | "up" | "left" | "right";
-    if (dx < 0) dir = "left";
-    else if (dx > 0) dir = "right";
-    else if (dy < 0) dir = "up";
-    else dir = "down";
+    if (dx < 0) this.facing = "left";
+    else if (dx > 0) this.facing = "right";
+    else if (dy < 0) this.facing = "up";
+    else if (dy > 0) this.facing = "down";
 
-    const target = `${moving ? "walk" : "idle"}-${dir}`;
+    const target = `${moving ? "walk" : "idle"}-${this.facing}`;
     if (this.anims.currentAnim?.key !== target) this.anims.play(target, true);
 
     this.setDepth(this.y);

@@ -2,33 +2,34 @@
 
 本目录素材仅供 HannisHub「聊天大厅」场景使用，来源与授权如下。
 
-## 室内与人物素材（modern/）
+## 室内与人物素材（club/）
 
 - 来源：Limezu — Modern Interiors（付费完整版，用户已购买）
   https://limezu.itch.io/moderninteriors
-- 许可：见 `modern/LICENSE.txt`。允许在商业与非商业项目中使用与修改；
+- 许可：见 `club/LICENSE.txt`。允许在商业与非商业项目中使用与修改；
   不得将素材单独转售或再分发；**要求署名（limezu.itch.io）**。
-  本项目将其作为内置场景资源使用，保留原始许可证并在页面素材说明中署名。
-- 原始包内容（16x16 / 32x32 / 48x48 三档分辨率、角色生成器、动画物件、户型参考图）
-  未整体入库，仅提取本场景所需部分，避免仓库体积膨胀。
-  原始包完整解压在本机 `chatworld/asset/modern_interiors/`（不入库），下文来源路径均相对该目录；速查索引见 `chatworld/asset/asset_index.md`。
-- 派生文件（本项目自原始包提取/拼接/改色，仍受上述许可约束）：
-  - `modern/tiles_sheet.png`：25 块 16x16 地板/墙壳砖横向图集，供 Phaser tilemap 使用。
-    索引顺序（0 起）：0 地板、1 地板变体、2 墙顶、3 墙面、4/5 墙顶左右角、6/7 墙面左右斜角、
-    8/11 侧墙上段外/外右、9/10 侧墙上段透视斜肩左/右、12/15 侧墙中段外左/外右、
-    13/14 侧墙中段斜肩左/右、16/19 侧墙下段外左/外右、17/18 侧墙下段斜肩左/右、
-    20/21 侧墙中段左/右、22/24 底边左右角、23 底边。
-    全部裁剪自包内官方预拼房间 `6_Home_Designs/Condominium_Designs/16x16/Condominium_Design_layer_1.png`
-    的同套砖块，保证透视斜肩与收边连贯（直接拼 Walls/borders 表易错接）。
-  - `modern/objects/*.png`：家具单件（沙发、单人椅、茶几、书柜、储物柜、电脑桌、椅子、
-    电视柜、饮水机、挂画、绿植、落地灯），取自 `Theme_Sorter_Singles` 的
-    Living Room / Conference Hall / Japanese Interiors 主题。
-  - `modern/objects/rug.png`：以 Japanese Interiors 榻榻米单件为底，按亮度映射改色为暖陶土色
-    区域毯，并在中段插入 16 列同纹样扩为 48x32（边框仍只在四周）。
-  - `modern/objects/tv.png`、`clock.png`、`cat.png`、`door.png`：动画物件 spritesheet，
-    取自 `3_Animated_objects/16x16/spritesheets`（旧电视、布谷鸟钟、猫、木门）。
-    原生帧宽：电视 32x32（6 帧）、布谷鸟钟 16x32（10 帧）、猫 48x16（12 帧）、门 16x32（5 帧）。
-  - `modern/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止与行走动画，
+  本项目将其作为内置场景资源使用，保留原始许可证，并在聊天大厅页面底部署名。
+- 原始包（16x16 / 32x32 / 48x48 三档分辨率、角色生成器、动画物件、户型参考图）未整体入库，
+  仅提取本场景所需部分。原始包完整解压在本机 `chatworld/asset/modern_interiors/`（不入库），
+  速查索引见 `chatworld/asset/asset_index.md`。
+- 派生文件（本项目自原始包裁剪 / 拼接 / 烘焙，仍受上述许可约束），除 `player.png` 外
+  全部由 `scripts/build_chat_lobby_assets.py` 生成，来源路径相对原始包目录：
+  - `club/foyer.png`、`club/hall.png`：入口厅与大厅背景。地板取自
+    `1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png`，墙面取自
+    `Room_Builder_Walls_16x16.png`；墙顶收边、墙脚阴影与区域地毯边框为脚本绘制；
+    窗帘窗、挂画、地图、软木板、彩灯串、小地毯烘焙其中（`Theme_Sorter/1_Generic_16x16.png`
+    与各主题 `Theme_Sorter_Singles`）。
+  - `club/objects.png` + `club/objects.json`：家具图集（Phaser JSON Hash），单件取自
+    `Theme_Sorter_Singles` 的 Living Room、Basement、Classroom and Library、Conference Hall、
+    Television and Film Studio，办公椅与长椅裁剪自 Generic 总表。
+  - `club/anims/*.png`：动画帧条，取自 `3_Animated_objects/16x16/spritesheets`：
+    玻璃双开门 32x48（8 帧）、电梯 32x32（14 帧）、接待员 16x32（7 帧）、
+    滚动屏显示器 16x32（12 帧）、音箱 16x48、机柜 16x48、文档屏 32x32（5 帧）、
+    咖啡 16x32（6 帧）、猫 48x16（12 帧）、鱼缸 32x32（8 帧）、布谷鸟钟 16x32（10 帧）；
+    `wave_screen` 为 X 光机监视器波形区域逐帧截取（16x16，14 帧）；
+    `arrow_down` 由 `4_User_Interface_Elements/Animated_Spritesheets/UI_arrow_pointing_down_16x16.gif` 转为帧条。
+  - `club/layout.json`：房间布局数据（非图像）。
+  - `club/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止与行走动画，
     重排为 6 帧 × 8 行（16x32 帧）：静止 南/北/左/右 + 行走 南/北/左/右。
 
 ## 署名

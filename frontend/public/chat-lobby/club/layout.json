@@ -1,0 +1,1202 @@
+{
+ "version": 1,
+ "tile": 16,
+ "world": {
+  "width": 576,
+  "height": 656
+ },
+ "start": {
+  "room": "foyer",
+  "spawn": "start"
+ },
+ "anims": {
+  "door_glass": {
+   "file": "anims/door_glass.png",
+   "frameWidth": 32,
+   "frameHeight": 48,
+   "frameRate": 14
+  },
+  "elevator": {
+   "file": "anims/elevator.png",
+   "frameWidth": 32,
+   "frameHeight": 32,
+   "frameRate": 10
+  },
+  "receptionist": {
+   "file": "anims/receptionist.png",
+   "frameWidth": 16,
+   "frameHeight": 32,
+   "frameRate": 5
+  },
+  "monitor": {
+   "file": "anims/monitor.png",
+   "frameWidth": 16,
+   "frameHeight": 32,
+   "frameRate": 4
+  },
+  "speaker": {
+   "file": "anims/speaker.png",
+   "frameWidth": 16,
+   "frameHeight": 48,
+   "frameRate": 6
+  },
+  "server": {
+   "file": "anims/server.png",
+   "frameWidth": 16,
+   "frameHeight": 48,
+   "frameRate": 3
+  },
+  "doc_screen": {
+   "file": "anims/doc_screen.png",
+   "frameWidth": 32,
+   "frameHeight": 32,
+   "frameRate": 3
+  },
+  "coffee": {
+   "file": "anims/coffee.png",
+   "frameWidth": 16,
+   "frameHeight": 32,
+   "frameRate": 6
+  },
+  "cat": {
+   "file": "anims/cat.png",
+   "frameWidth": 48,
+   "frameHeight": 16,
+   "frameRate": 6
+  },
+  "fishtank": {
+   "file": "anims/fishtank.png",
+   "frameWidth": 32,
+   "frameHeight": 32,
+   "frameRate": 6
+  },
+  "clock": {
+   "file": "anims/clock.png",
+   "frameWidth": 16,
+   "frameHeight": 32,
+   "frameRate": 2
+  },
+  "arrow_down": {
+   "file": "anims/arrow_down.png",
+   "frameWidth": 16,
+   "frameHeight": 16,
+   "frameRate": 8
+  },
+  "wave_screen": {
+   "file": "anims/wave_screen.png",
+   "frameWidth": 16,
+   "frameHeight": 16,
+   "frameRate": 8
+  }
+ },
+ "rooms": [
+  {
+   "id": "foyer",
+   "name": "入口厅",
+   "x": 128,
+   "y": 0,
+   "width": 320,
+   "height": 208,
+   "background": "foyer.png",
+   "walls": [
+    [
+     0,
+     0,
+     320,
+     48
+    ],
+    [
+     0,
+     48,
+     16,
+     160
+    ],
+    [
+     304,
+     48,
+     16,
+     160
+    ],
+    [
+     0,
+     192,
+     144,
+     16
+    ],
+    [
+     176,
+     192,
+     144,
+     16
+    ]
+   ],
+   "props": [
+    {
+     "key": "reception_left",
+     "x": 24,
+     "y": 48,
+     "solid": [
+      25,
+      76,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "reception_mid",
+     "x": 56,
+     "y": 48,
+     "solid": [
+      57,
+      76,
+      14,
+      20
+     ]
+    },
+    {
+     "key": "reception_right",
+     "x": 72,
+     "y": 48,
+     "solid": [
+      73,
+      76,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "plant_tall",
+     "x": 16,
+     "y": 16,
+     "solid": [
+      17,
+      52,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 264,
+     "y": 16,
+     "solid": [
+      265,
+      34,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "armchair_blue",
+     "x": 216,
+     "y": 88,
+     "solid": [
+      217,
+      106,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "armchair_yellow",
+     "x": 256,
+     "y": 88,
+     "solid": [
+      257,
+      106,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "table_round",
+     "x": 236,
+     "y": 116,
+     "solid": [
+      237,
+      132,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 288,
+     "y": 104,
+     "solid": [
+      289,
+      144,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "bench",
+     "x": 24,
+     "y": 152,
+     "solid": [
+      25,
+      160,
+      28,
+      10
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 16,
+     "y": 156,
+     "solid": [
+      17,
+      190,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "plant_pot",
+     "x": 124,
+     "y": 162,
+     "solid": [
+      125,
+      184,
+      14,
+      10
+     ]
+    },
+    {
+     "key": "plant_pot",
+     "x": 180,
+     "y": 162,
+     "solid": [
+      181,
+      184,
+      14,
+      10
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 272,
+     "y": 156,
+     "solid": [
+      273,
+      190,
+      30,
+      14
+     ]
+    }
+   ],
+   "anims": [
+    {
+     "key": "elevator",
+     "x": 144,
+     "y": 16,
+     "depth": 20,
+     "frames": "once"
+    },
+    {
+     "key": "receptionist",
+     "x": 56,
+     "y": 48
+    },
+    {
+     "key": "clock",
+     "x": 112,
+     "y": 16,
+     "depth": 20
+    },
+    {
+     "key": "arrow_down",
+     "x": 152,
+     "y": 158,
+     "depth": 308
+    }
+   ],
+   "portals": [
+    {
+     "rect": [
+      144,
+      198,
+      32,
+      10
+     ],
+     "to": "hall",
+     "spawn": "fromFoyer"
+    }
+   ],
+   "spawns": {
+    "start": {
+     "x": 160,
+     "y": 58,
+     "dir": "down"
+    },
+    "fromHall": {
+     "x": 160,
+     "y": 184,
+     "dir": "up"
+    }
+   },
+   "machines": [],
+   "doors": [],
+   "signs": [
+    {
+     "x": 160,
+     "y": 10,
+     "text": "HannisHub",
+     "tone": "brand"
+    },
+    {
+     "x": 160,
+     "y": 154,
+     "text": "大厅",
+     "tone": "muted"
+    }
+   ]
+  },
+  {
+   "id": "hall",
+   "name": "大厅",
+   "x": 0,
+   "y": 272,
+   "width": 576,
+   "height": 384,
+   "background": "hall.png",
+   "walls": [
+    [
+     0,
+     0,
+     276,
+     48
+    ],
+    [
+     276,
+     0,
+     24,
+     20
+    ],
+    [
+     300,
+     0,
+     276,
+     48
+    ],
+    [
+     0,
+     48,
+     16,
+     336
+    ],
+    [
+     560,
+     48,
+     16,
+     336
+    ],
+    [
+     0,
+     368,
+     576,
+     16
+    ]
+   ],
+   "props": [
+    {
+     "key": "plant_tall2",
+     "x": 254,
+     "y": 16,
+     "solid": [
+      255,
+      52,
+      14,
+      12
+     ]
+    },
+    {
+     "key": "plant_tall2",
+     "x": 306,
+     "y": 16,
+     "solid": [
+      307,
+      52,
+      14,
+      12
+     ]
+    },
+    {
+     "key": "bookshelf",
+     "x": 16,
+     "y": 16,
+     "solid": [
+      17,
+      48,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "plant_tall",
+     "x": 232,
+     "y": 16,
+     "solid": [
+      233,
+      52,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "desk",
+     "x": 48,
+     "y": 104,
+     "solid": [
+      49,
+      116,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "desk_plain",
+     "x": 80,
+     "y": 104,
+     "solid": [
+      81,
+      116,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "lamp_desk_blue",
+     "x": 92,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "chair_task",
+     "x": 72,
+     "y": 122,
+     "solid": [
+      75,
+      146,
+      10,
+      6
+     ]
+    },
+    {
+     "key": "desk",
+     "x": 144,
+     "y": 104,
+     "solid": [
+      145,
+      116,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "desk_plain",
+     "x": 176,
+     "y": 104,
+     "solid": [
+      177,
+      116,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "plant_desk",
+     "x": 188,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "chair_task",
+     "x": 168,
+     "y": 122,
+     "solid": [
+      171,
+      146,
+      10,
+      6
+     ]
+    },
+    {
+     "key": "desk",
+     "x": 48,
+     "y": 168,
+     "solid": [
+      49,
+      180,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "desk_plain",
+     "x": 80,
+     "y": 168,
+     "solid": [
+      81,
+      180,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "chair_task",
+     "x": 72,
+     "y": 186,
+     "solid": [
+      75,
+      210,
+      10,
+      6
+     ]
+    },
+    {
+     "key": "desk",
+     "x": 144,
+     "y": 168,
+     "solid": [
+      145,
+      180,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "desk_plain",
+     "x": 176,
+     "y": 168,
+     "solid": [
+      177,
+      180,
+      30,
+      20
+     ]
+    },
+    {
+     "key": "lamp_desk_cream",
+     "x": 188,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "chair_task",
+     "x": 168,
+     "y": 186,
+     "solid": [
+      171,
+      210,
+      10,
+      6
+     ]
+    },
+    {
+     "key": "plant_pot",
+     "x": 120,
+     "y": 132,
+     "solid": [
+      121,
+      154,
+      14,
+      10
+     ]
+    },
+    {
+     "key": "audio_desk",
+     "x": 344,
+     "y": 16,
+     "solid": [
+      345,
+      48,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "mic",
+     "x": 362,
+     "y": 38
+    },
+    {
+     "key": "kiosk",
+     "x": 444,
+     "y": 16,
+     "solid": [
+      445,
+      32,
+      14,
+      16
+     ]
+    },
+    {
+     "key": "copier",
+     "x": 496,
+     "y": 16,
+     "solid": [
+      497,
+      32,
+      14,
+      16
+     ]
+    },
+    {
+     "key": "trash",
+     "x": 512,
+     "y": 30,
+     "solid": [
+      513,
+      54,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "plant_palm",
+     "x": 536,
+     "y": 14,
+     "solid": [
+      537,
+      32,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "bar_left",
+     "x": 368,
+     "y": 136,
+     "solid": [
+      369,
+      166,
+      30,
+      18
+     ]
+    },
+    {
+     "key": "bar_mid",
+     "x": 400,
+     "y": 136,
+     "solid": [
+      401,
+      166,
+      14,
+      18
+     ]
+    },
+    {
+     "key": "bar_mid",
+     "x": 416,
+     "y": 136,
+     "solid": [
+      417,
+      166,
+      14,
+      18
+     ]
+    },
+    {
+     "key": "bar_mid",
+     "x": 432,
+     "y": 136,
+     "solid": [
+      433,
+      166,
+      14,
+      18
+     ]
+    },
+    {
+     "key": "bar_right",
+     "x": 448,
+     "y": 136,
+     "solid": [
+      449,
+      166,
+      14,
+      18
+     ]
+    },
+    {
+     "key": "stool_blue",
+     "x": 374,
+     "y": 170,
+     "solid": [
+      375,
+      194,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "stool_wood",
+     "x": 392,
+     "y": 170,
+     "solid": [
+      393,
+      194,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "stool_yellow",
+     "x": 410,
+     "y": 170,
+     "solid": [
+      411,
+      194,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "stool_wood",
+     "x": 428,
+     "y": 170,
+     "solid": [
+      429,
+      194,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "stool_blue",
+     "x": 446,
+     "y": 170,
+     "solid": [
+      447,
+      194,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 520,
+     "y": 176,
+     "solid": [
+      521,
+      210,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "armchair_red",
+     "x": 48,
+     "y": 280,
+     "solid": [
+      49,
+      298,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "table_round",
+     "x": 88,
+     "y": 288,
+     "solid": [
+      89,
+      304,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "armchair_blue",
+     "x": 128,
+     "y": 280,
+     "solid": [
+      129,
+      298,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "armchair_yellow",
+     "x": 68,
+     "y": 320,
+     "solid": [
+      69,
+      338,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "armchair_white",
+     "x": 108,
+     "y": 320,
+     "solid": [
+      109,
+      338,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 20,
+     "y": 240,
+     "solid": [
+      21,
+      280,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "lamp_floor",
+     "x": 176,
+     "y": 240,
+     "solid": [
+      177,
+      280,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 176,
+     "y": 312,
+     "solid": [
+      177,
+      346,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "bookshelf_wide",
+     "x": 16,
+     "y": 304,
+     "solid": [
+      17,
+      336,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "bar_shelf",
+     "x": 240,
+     "y": 240,
+     "solid": [
+      241,
+      272,
+      30,
+      16
+     ]
+    },
+    {
+     "key": "sideboard",
+     "x": 272,
+     "y": 256,
+     "solid": [
+      273,
+      274,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "egg_yellow",
+     "x": 248,
+     "y": 312,
+     "solid": [
+      249,
+      332,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "table_round_dark",
+     "x": 280,
+     "y": 312,
+     "solid": [
+      281,
+      330,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "egg_red",
+     "x": 312,
+     "y": 312,
+     "solid": [
+      313,
+      332,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "arcade_a",
+     "x": 368,
+     "y": 226,
+     "solid": [
+      369,
+      260,
+      14,
+      14
+     ]
+    },
+    {
+     "key": "arcade_b",
+     "x": 384,
+     "y": 226,
+     "solid": [
+      385,
+      260,
+      14,
+      14
+     ]
+    },
+    {
+     "key": "pool_table",
+     "x": 432,
+     "y": 272,
+     "solid": [
+      433,
+      290,
+      30,
+      30
+     ]
+    },
+    {
+     "key": "pinball",
+     "x": 496,
+     "y": 226,
+     "solid": [
+      497,
+      260,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "egg_blue",
+     "x": 368,
+     "y": 312,
+     "solid": [
+      369,
+      332,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "egg_white",
+     "x": 504,
+     "y": 312,
+     "solid": [
+      505,
+      332,
+      30,
+      12
+     ]
+    },
+    {
+     "key": "lamp_floor_red",
+     "x": 544,
+     "y": 304,
+     "solid": [
+      545,
+      344,
+      14,
+      8
+     ]
+    },
+    {
+     "key": "plant_big",
+     "x": 16,
+     "y": 202,
+     "solid": [
+      17,
+      236,
+      30,
+      14
+     ]
+    }
+   ],
+   "anims": [
+    {
+     "key": "monitor",
+     "x": 60,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "monitor",
+     "x": 76,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "monitor",
+     "x": 156,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "monitor",
+     "x": 172,
+     "y": 90,
+     "depth": 137
+    },
+    {
+     "key": "monitor",
+     "x": 60,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "monitor",
+     "x": 76,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "coffee",
+     "x": 92,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "monitor",
+     "x": 156,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "monitor",
+     "x": 172,
+     "y": 154,
+     "depth": 201
+    },
+    {
+     "key": "speaker",
+     "x": 328,
+     "y": 16
+    },
+    {
+     "key": "speaker",
+     "x": 376,
+     "y": 16
+    },
+    {
+     "key": "server",
+     "x": 392,
+     "y": 16
+    },
+    {
+     "key": "wave_screen",
+     "x": 410,
+     "y": 22,
+     "depth": 10
+    },
+    {
+     "key": "doc_screen",
+     "x": 462,
+     "y": 14,
+     "depth": 10
+    },
+    {
+     "key": "coffee",
+     "x": 378,
+     "y": 130,
+     "depth": 185
+    },
+    {
+     "key": "fishtank",
+     "x": 520,
+     "y": 144,
+     "solid": [
+      521,
+      162,
+      30,
+      14
+     ]
+    },
+    {
+     "key": "cat",
+     "x": 152,
+     "y": 334,
+     "depth": 350
+    },
+    {
+     "key": "coffee",
+     "x": 280,
+     "y": 244,
+     "depth": 289
+    }
+   ],
+   "portals": [
+    {
+     "rect": [
+      278,
+      22,
+      20,
+      20
+     ],
+     "to": "foyer",
+     "spawn": "fromHall"
+    }
+   ],
+   "spawns": {
+    "fromFoyer": {
+     "x": 288,
+     "y": 72,
+     "dir": "down"
+    }
+   },
+   "machines": [
+    {
+     "id": "asr",
+     "title": "ASR 语音转写",
+     "hint": "上传音频，转写为文字",
+     "zone": [
+      322,
+      58,
+      92,
+      46
+     ],
+     "signX": 368,
+     "signY": 8
+    },
+    {
+     "id": "ocr",
+     "title": "OCR 文字识别",
+     "hint": "解析文档、提取字段、图像问答",
+     "zone": [
+      434,
+      58,
+      92,
+      46
+     ],
+     "signX": 480,
+     "signY": 8
+    }
+   ],
+   "doors": [
+    {
+     "key": "door_glass",
+     "x": 272,
+     "y": 0,
+     "radius": 40
+    }
+   ],
+   "signs": []
+  }
+ ]
+}

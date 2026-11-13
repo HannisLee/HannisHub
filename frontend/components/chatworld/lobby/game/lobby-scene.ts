@@ -1,130 +1,341 @@
 import Phaser from "phaser";
 import {
-  ANIMATED_OBJECTS, buildTileGrid, FURNITURE, OBJECT_KEYS, SPAWN, TILE, WALL_TILES, WORLD_H, WORLD_W,
-} from "./room-map";
-import { Player, type TouchState } from "./player";
+  ASSET_BASE, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
+  type PortalDef, type Rect, type RoomDef,
+} from "./layout";
+import { Player } from "./player";
 
-export interface LobbySceneOptions {
-  touch: TouchState;
-  onProgress?: (value: number) => void;
-  onReady?: () => void;
-  onError?: (message: string) => void;
+/** 世界坐标下的房间：在布局数据基础上附加偏移后的矩形，便于判定 */
+interface RuntimeRoom {
+  def: RoomDef;
+  portals: { def: PortalDef; rect: Phaser.Geom.Rectangle }[];
+  machines: { def: MachineDef; rect: Phaser.Geom.Rectangle }[];
+  doors: { def: DoorDef; sprite: Phaser.GameObjects.Sprite; cx: number; cy: number; open: boolean }[];
+  onceAnims: Phaser.GameObjects.Sprite[];
 }
 
-const ASSET_BASE = "/chat-lobby/modern";
+const FADE_MS = 220;
+const CAMERA_MARGIN = 12;
+const LABEL_FONT = '"Anthropic Sans", Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
+/** 文字纹理放大倍数：世界坐标 1px 在屏幕上会被放大 2–4 倍，文字需更高分辨率才清晰 */
+const TEXT_RESOLUTION = 6;
 
-/** 聊天大厅主场景：加载付费素材、铺设客厅、放置家具与碰撞、驱动角色/动画物件与相机。 */
+const COLORS = {
+  surface: 0x1f1e1d,
+  border: 0x454440,
+  text: "#FAF9F5",
+  muted: "#B0AEA5",
+  brand: 0xd97757,
+};
+
+/** 焦点在可输入元素上时（输入框、文本域、可编辑区域）不应拦截按键 */
+function isTyping(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
+}
+
+/** 聊天大厅主场景：读取 layout.json 搭建入口厅与大厅，处理碰撞、门、房间切换与机器交互。 */
 export class LobbyScene extends Phaser.Scene {
-  private opts: LobbySceneOptions;
+  private bridge: LobbyBridge;
+  private events_: LobbyEvents;
+  private layout!: LobbyLayout;
   private player!: Player;
+  private rooms = new Map<string, RuntimeRoom>();
+  private current!: RuntimeRoom;
+  private nearby: MachineDef | null = null;
+  private keyE!: Phaser.Input.Keyboard.Key;
+  private keySpace!: Phaser.Input.Keyboard.Key;
+  private prompt!: Phaser.GameObjects.Container;
+  private transitioning = false;
+  private paused = false;
   private failed = false;
 
-  constructor(opts: LobbySceneOptions) {
+  constructor(bridge: LobbyBridge, events: LobbyEvents) {
     super("lobby");
-    this.opts = opts;
+    this.bridge = bridge;
+    this.events_ = events;
   }
 
   preload() {
-    this.load.on("progress", (value: number) => this.opts.onProgress?.(value));
+    this.load.on("progress", (value: number) => this.events_.onProgress?.(value));
     this.load.on("loaderror", (file: Phaser.Loader.File) => {
       this.failed = true;
-      this.opts.onError?.(`素材加载失败：${file.key}`);
+      this.events_.onError?.(`素材加载失败：${file.key}`);
     });
 
-    this.load.image("room-tiles", `${ASSET_BASE}/tiles_sheet.png`);
+    // 先读布局，再按布局追加房间背景与动画帧条
+    this.load.json("layout", `${ASSET_BASE}/layout.json`);
+    this.load.once("filecomplete-json-layout", (_key: string, _type: string, data: LobbyLayout) => {
+      for (const room of data.rooms) this.load.image(`bg-${room.id}`, `${ASSET_BASE}/${room.background}`);
+      for (const [key, sheet] of Object.entries(data.anims)) {
+        this.load.spritesheet(key, `${ASSET_BASE}/${sheet.file}`, {
+          frameWidth: sheet.frameWidth,
+          frameHeight: sheet.frameHeight,
+        });
+      }
+    });
+    this.load.atlas("objects", `${ASSET_BASE}/objects.png`, `${ASSET_BASE}/objects.json`);
     this.load.spritesheet("player", `${ASSET_BASE}/player.png`, { frameWidth: 16, frameHeight: 32 });
-    for (const key of OBJECT_KEYS) {
-      this.load.image(key, `${ASSET_BASE}/objects/${key}.png`);
-    }
-    for (const obj of ANIMATED_OBJECTS) {
-      this.load.spritesheet(obj.key, `${ASSET_BASE}/objects/${obj.key}.png`, {
-        frameWidth: obj.frameWidth,
-        frameHeight: obj.frameHeight,
-      });
-    }
-    this.load.spritesheet("door", `${ASSET_BASE}/objects/door.png`, { frameWidth: 16, frameHeight: 32 });
   }
 
   create() {
     if (this.failed) return;
+    this.layout = this.cache.json.get("layout") as LobbyLayout;
+    const { width, height } = this.layout.world;
+    this.physics.world.setBounds(0, 0, width, height);
 
-    // 地板与墙砖
-    const map = this.make.tilemap({ data: buildTileGrid(), tileWidth: TILE, tileHeight: TILE });
-    const tileset = map.addTilesetImage("room-tiles", "room-tiles", TILE, TILE, 0, 0, 0);
-    const layer = map.createLayer(0, tileset!, 0, 0);
-    if (!layer) return;
-    layer.setDepth(0);
-    layer.setCollision(WALL_TILES);
+    this.createAnimations();
+    const solids = this.physics.add.staticGroup();
+    for (const room of this.layout.rooms) this.rooms.set(room.id, this.buildRoom(room, solids));
 
-    // 家具：视觉 sprite 按底边深度排序，碰撞用独立静态 zone
-    const solids: Phaser.GameObjects.Zone[] = [];
-    for (const def of FURNITURE) {
-      const bottom = def.y + def.h;
-      const sprite = this.add.image(def.x + def.w / 2, bottom, def.key).setOrigin(0.5, 1);
-      sprite.setDepth(def.depth ?? bottom);
-      if (def.solid) {
-        const { w, h, ox, oy } = def.solid;
-        const zone = this.add.zone(def.x + ox + w / 2, def.y + oy + h / 2, w, h);
-        this.physics.add.existing(zone, true);
-        solids.push(zone);
-      }
-    }
-
-    // 门与挂钟贴墙（低深度），电视落在柜面上、猫睡在中央区域毯上，参与前后遮挡
-    this.add.image(16 * TILE + 8, 2 * TILE, "door", 0).setOrigin(0.5, 1).setDepth(2);
-    this.addAnimated("clock", 12 * TILE + 8, 2 * TILE, 2);
-    this.addAnimated("tv", 24 * TILE + 16, 18 * TILE + 20, 18 * TILE + 32 + 1);
-    this.addAnimated("cat", 14 * TILE + 16, 10 * TILE + 22, 10 * TILE + 22);
-
-    this.player = new Player(this, SPAWN.x, SPAWN.y, this.opts.touch);
-    this.physics.add.collider(this.player, layer);
+    const start = this.rooms.get(this.layout.start.room)!;
+    const spawn = start.def.spawns[this.layout.start.spawn];
+    this.player = new Player(this, start.def.x + spawn.x, start.def.y + spawn.y, this.bridge);
     this.physics.add.collider(this.player, solids);
 
-    this.cameras.main.setBackgroundColor("#141413");
-    this.applyCameraSize();
-    this.scale.on("resize", this.applyCameraSize, this);
+    const keyboard = this.input.keyboard!;
+    this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.prompt = this.createPrompt();
 
-    this.opts.onReady?.();
+    this.cameras.main.setBackgroundColor("#141413");
+    this.enterRoom(start);
+    this.scale.on("resize", this.applyCamera, this);
+
+    // 初次进入：电梯开合一次，营造「刚到达」的感觉
+    this.time.delayedCall(250, () => start.onceAnims.forEach(sprite => sprite.play(`anim-${sprite.texture.key}`)));
+    this.cameras.main.fadeIn(400, 20, 20, 19);
+    this.events_.onReady?.();
   }
 
-  /** 创建循环动画物件：帧数由贴图尺寸推导，避免与素材帧数硬耦合。 */
-  private addAnimated(key: string, x: number, y: number, depth: number) {
-    const def = ANIMATED_OBJECTS.find(o => o.key === key)!;
-    const texture = this.textures.get(key);
-    const frameCount = Math.floor(texture.getSourceImage().width / def.frameWidth);
-    const animKey = `anim-${key}`;
-    if (!this.anims.exists(animKey)) {
+  /** 为每个动画帧条创建循环动画；门额外拆出开门 / 关门两段 */
+  private createAnimations() {
+    for (const [key, sheet] of Object.entries(this.layout.anims)) {
+      const animKey = `anim-${key}`;
+      if (this.anims.exists(animKey)) continue;
       this.anims.create({
         key: animKey,
-        frames: Array.from({ length: frameCount }, (_, i) => ({ key, frame: i })),
-        frameRate: def.frameRate,
-        repeat: -1,
+        frames: this.anims.generateFrameNumbers(key),
+        frameRate: sheet.frameRate,
+        repeat: key === "elevator" ? 0 : -1,
       });
+      if (key === "door_glass") {
+        // 帧 0 关闭 → 帧 4 全开；帧 5–7 为回关过程，最后回到帧 0
+        this.anims.create({ key: "door-open", frames: this.anims.generateFrameNumbers(key, { start: 0, end: 4 }), frameRate: sheet.frameRate });
+        this.anims.create({ key: "door-close", frames: this.anims.generateFrameNumbers(key, { frames: [5, 6, 7, 0] }), frameRate: sheet.frameRate });
+      }
     }
-    this.add.sprite(x, y, key).setOrigin(0.5, 1).setDepth(depth).play(animKey);
   }
 
-  /** 整数倍缩放保持像素清晰：优先按宽度适配让整个房间横向完整可见（大屏 3×、常规 2×），
-   *  视野装得下整个房间时居中静止，否则跟随角色。 */
-  private applyCameraSize() {
+  private buildRoom(def: RoomDef, solids: Phaser.Physics.Arcade.StaticGroup): RuntimeRoom {
+    const ox = def.x;
+    const oy = def.y;
+    const addSolid = ([x, y, w, h]: Rect) => {
+      const zone = this.add.zone(ox + x + w / 2, oy + y + h / 2, w, h);
+      solids.add(zone);
+    };
+
+    this.add.image(ox, oy, `bg-${def.id}`).setOrigin(0).setDepth(-10000);
+    def.walls.forEach(addSolid);
+
+    for (const prop of def.props) {
+      const image = this.add.image(ox + prop.x, oy + prop.y, "objects", prop.key).setOrigin(0);
+      image.setDepth(oy + (prop.depth ?? prop.y + image.height));
+      if (prop.solid) addSolid(prop.solid);
+    }
+
+    const onceAnims: Phaser.GameObjects.Sprite[] = [];
+    for (const anim of def.anims) {
+      const sprite = this.add.sprite(ox + anim.x, oy + anim.y, anim.key, 0).setOrigin(0);
+      sprite.setDepth(oy + (anim.depth ?? anim.y + sprite.height));
+      if (anim.frames === "once") onceAnims.push(sprite);
+      else {
+        // 随机起始帧，避免同款物件（显示器、音箱）同步闪动
+        const count = this.anims.get(`anim-${anim.key}`).frames.length;
+        sprite.play({ key: `anim-${anim.key}`, startFrame: Phaser.Math.Between(0, count - 1) });
+      }
+      if (anim.solid) addSolid(anim.solid);
+    }
+
+    const doors = def.doors.map(door => {
+      const sprite = this.add.sprite(ox + door.x, oy + door.y, door.key, 0).setOrigin(0);
+      sprite.setDepth(oy + door.y + sprite.height);
+      return { def: door, sprite, cx: ox + door.x + sprite.width / 2, cy: oy + door.y + sprite.height, open: false };
+    });
+
+    for (const sign of def.signs) this.createSign(ox + sign.x, oy + sign.y, sign.text, sign.tone === "brand");
+    for (const machine of def.machines) this.createMachineSign(ox + machine.signX, oy + machine.signY, machine);
+
+    const toRect = ([x, y, w, h]: Rect) => new Phaser.Geom.Rectangle(ox + x, oy + y, w, h);
+    return {
+      def,
+      portals: def.portals.map(portal => ({ def: portal, rect: toRect(portal.rect) })),
+      machines: def.machines.map(machine => ({ def: machine, rect: toRect(machine.zone) })),
+      doors,
+      onceAnims,
+    };
+  }
+
+  private makeText(text: string, size: number, color: string, weight = 500) {
+    const label = this.add.text(0, 0, text, {
+      fontFamily: LABEL_FONT,
+      fontSize: `${size}px`,
+      fontStyle: String(weight),
+      color,
+      resolution: TEXT_RESOLUTION,
+    });
+    label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+    return label.setOrigin(0.5, 0.5);
+  }
+
+  /** 墙上的小型标牌（如入口厅品牌、出口方向） */
+  private createSign(x: number, y: number, text: string, brand: boolean) {
+    const label = this.makeText(text, brand ? 6 : 5.5, brand ? COLORS.text : COLORS.muted);
+    const w = Math.ceil(label.width) + 10;
+    const h = 10;
+    const g = this.add.graphics();
+    g.fillStyle(COLORS.surface, 0.92).fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.lineStyle(0.5, brand ? COLORS.brand : COLORS.border, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    this.add.container(x, y, [g, label]).setDepth(50000);
+  }
+
+  /** 机器上方的悬浮铭牌：品牌色指示点 + 名称，轻微上下浮动 */
+  private createMachineSign(x: number, y: number, machine: MachineDef) {
+    const label = this.makeText(machine.title, 6.5, COLORS.text);
+    const w = Math.ceil(label.width) + 18;
+    const h = 12;
+    const g = this.add.graphics();
+    g.fillStyle(COLORS.surface, 0.94).fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.lineStyle(0.5, COLORS.border, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.fillStyle(COLORS.brand, 1).fillCircle(-w / 2 + 7, 0, 1.6);
+    label.setX(4);
+    const sign = this.add.container(x, y, [g, label]).setDepth(50000);
+    this.tweens.add({ targets: sign, y: y - 1.5, duration: 1400, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+  }
+
+  /** 靠近机器时在角色头顶显示的「E」按键提示 */
+  private createPrompt() {
+    const size = 10;
+    const g = this.add.graphics();
+    g.fillStyle(0xfaf9f5, 1).fillRoundedRect(-size / 2, -size / 2, size, size, 2.5);
+    g.fillStyle(0x8f8e89, 1).fillRect(-size / 2 + 1.5, size / 2 - 0.5, size - 3, 1);
+    const label = this.makeText("E", 7, "#1C1B19", 600);
+    const container = this.add.container(0, 0, [g, label]).setDepth(60000).setVisible(false);
+    this.tweens.add({ targets: label, scale: 0.9, duration: 600, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    return container;
+  }
+
+  private enterRoom(room: RuntimeRoom) {
+    this.current = room;
+    this.applyCamera();
+    this.events_.onRoomChange?.({ id: room.def.id, name: room.def.name });
+    this.setNearby(null);
+  }
+
+  /** 整数倍缩放保持像素清晰：房间能完整放下时居中静止，否则跟随角色；相机限定在当前房间内 */
+  private applyCamera() {
+    if (!this.current || !this.player) return;
     const cam = this.cameras.main;
+    const room = this.current.def;
     const { width, height } = this.scale;
-    const zoom = Math.max(2, Math.min(3, Math.floor(width / WORLD_W)));
+    const fit = Math.floor(Math.min(width / room.width, height / room.height));
+    const zoom = Phaser.Math.Clamp(fit, 2, 4);
     cam.setZoom(zoom);
     const viewW = width / zoom;
     const viewH = height / zoom;
-    if (viewW >= WORLD_W && viewH >= WORLD_H) {
-      cam.stopFollow();
-      cam.setBounds(0, 0, Math.max(WORLD_W, viewW), Math.max(WORLD_H, viewH));
-      cam.centerOn(WORLD_W / 2, WORLD_H / 2);
+    // 房间四周留出少量暗色边距，避免贴顶的铭牌被舞台边缘裁切
+    const roomW = room.width + CAMERA_MARGIN * 2;
+    const roomH = room.height + CAMERA_MARGIN * 2;
+    const padX = Math.max(0, (viewW - roomW) / 2);
+    const padY = Math.max(0, (viewH - roomH) / 2);
+    cam.setBounds(
+      room.x - CAMERA_MARGIN - padX, room.y - CAMERA_MARGIN - padY,
+      Math.max(roomW, viewW), Math.max(roomH, viewH),
+    );
+    cam.startFollow(this.player, true, 0.14, 0.14, 0, 8);
+    cam.centerOn(this.player.x, this.player.y);
+  }
+
+  private travel(portal: PortalDef) {
+    const target = this.rooms.get(portal.to);
+    if (!target || this.transitioning) return;
+    this.transitioning = true;
+    this.player.frozen = true;
+    const cam = this.cameras.main;
+    cam.fadeOut(FADE_MS, 20, 20, 19);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      const spawn = target.def.spawns[portal.spawn];
+      this.player.teleport(target.def.x + spawn.x, target.def.y + spawn.y, spawn.dir);
+      this.enterRoom(target);
+      cam.fadeIn(FADE_MS + 60, 20, 20, 19);
+      this.time.delayedCall(FADE_MS, () => {
+        this.transitioning = false;
+        this.player.frozen = this.paused;
+      });
+    });
+  }
+
+  private setNearby(machine: MachineDef | null) {
+    if (this.nearby?.id === machine?.id) return;
+    this.nearby = machine;
+    this.prompt.setVisible(Boolean(machine));
+    this.events_.onNearby?.(machine ? { id: machine.id, title: machine.title, hint: machine.hint } : null);
+  }
+
+  /** React 打开机器面板或页面输入框获得焦点时暂停：冻结角色并停止拦截按键，
+   *  让输入框可以正常输入 WASD/E/空格 */
+  private syncPause() {
+    const shouldPause = this.bridge.paused || isTyping();
+    if (shouldPause === this.paused) return;
+    this.paused = shouldPause;
+    const keyboard = this.input.keyboard!;
+    if (this.paused) {
+      keyboard.enabled = false;
+      keyboard.disableGlobalCapture();
+      this.player.frozen = true;
     } else {
-      cam.setBounds(0, 0, WORLD_W, WORLD_H);
-      cam.startFollow(this.player, true, 0.12, 0.12);
+      keyboard.resetKeys();
+      keyboard.enabled = true;
+      keyboard.enableGlobalCapture();
+      if (!this.transitioning) this.player.frozen = false;
     }
   }
 
   update() {
-    if (this.failed) return;
+    if (this.failed || !this.player) return;
+    this.syncPause();
     this.player.update();
+
+    const feetX = this.player.x;
+    const feetY = this.player.y;
+
+    // 门：角色靠近自动打开，离开后关闭
+    for (const door of this.current.doors) {
+      const near = Phaser.Math.Distance.Between(feetX, feetY, door.cx, door.cy) < door.def.radius;
+      if (near !== door.open) {
+        door.open = near;
+        door.sprite.play(near ? "door-open" : "door-close");
+      }
+    }
+
+    if (this.transitioning || this.paused) return;
+
+    const portal = this.current.portals.find(p => p.rect.contains(feetX, feetY));
+    if (portal) {
+      this.travel(portal.def);
+      return;
+    }
+
+    const machine = this.current.machines.find(m => m.rect.contains(feetX, feetY))?.def ?? null;
+    this.setNearby(machine);
+    if (machine) {
+      this.prompt.setPosition(this.player.x, this.player.y - 40);
+      const pressed = Phaser.Input.Keyboard.JustDown(this.keyE) || Phaser.Input.Keyboard.JustDown(this.keySpace);
+      if (pressed || this.bridge.interactQueued) {
+        this.events_.onInteract?.({ id: machine.id, title: machine.title, hint: machine.hint });
+      }
+    }
+    this.bridge.interactQueued = false;
   }
 }

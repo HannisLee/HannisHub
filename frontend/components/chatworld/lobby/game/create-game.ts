@@ -1,12 +1,13 @@
 import Phaser from "phaser";
-import { LobbyScene, type LobbySceneOptions } from "./lobby-scene";
+import type { LobbyBridge, LobbyEvents } from "./layout";
+import { LobbyScene } from "./lobby-scene";
 
 export interface LobbyGameHandle {
   destroy: () => void;
 }
 
 /** 在指定容器内创建 Phaser 游戏实例；返回销毁句柄供 React 卸载时清理。 */
-export function createLobbyGame(parent: HTMLElement, opts: LobbySceneOptions): LobbyGameHandle {
+export function createLobbyGame(parent: HTMLElement, bridge: LobbyBridge, events: LobbyEvents): LobbyGameHandle {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -16,7 +17,7 @@ export function createLobbyGame(parent: HTMLElement, opts: LobbySceneOptions): L
     audio: { noAudio: true },
     scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
     physics: { default: "arcade", arcade: { gravity: { x: 0, y: 0 }, debug: false } },
-    scene: [new LobbyScene(opts)],
+    scene: [new LobbyScene(bridge, events)],
   });
   return {
     destroy() {
