@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
+import { setChatEmbedded } from "../../../lib/chat-notify";
 import type { MachineInfo } from "./game/layout";
 
 function PanelLoading() {
@@ -12,11 +13,22 @@ function PanelLoading() {
 
 const AsrPanel = dynamic(() => import("../../llama/asr-panel").then(m => m.AsrPanel), { ssr: false, loading: PanelLoading });
 const OcrPanel = dynamic(() => import("../../llama/ocr-panel").then(m => m.OcrPanel), { ssr: false, loading: PanelLoading });
+const ChatRoom = dynamic(() => import("../room/chat-room").then(m => m.ChatRoom), { ssr: false, loading: PanelLoading });
 
-/** 大厅机器 → 对应的功能面板与独立页面地址 */
-const MACHINES: Record<string, { Panel: ComponentType; href: string }> = {
+/** 内嵌聊天室：打开期间暂停页面级的后台新消息检查，避免对正在看的消息弹提示、响提示音 */
+function ChatPanel() {
+  useEffect(() => {
+    setChatEmbedded(true);
+    return () => setChatEmbedded(false);
+  }, []);
+  return <ChatRoom />;
+}
+
+/** 大厅机器 → 对应的功能面板与独立页面地址；fill 表示面板铺满对话框（自带滚动区） */
+const MACHINES: Record<string, { Panel: ComponentType; href: string; fill?: boolean }> = {
   asr: { Panel: AsrPanel, href: "/llama/asr" },
   ocr: { Panel: OcrPanel, href: "/llama/ocr" },
+  chat: { Panel: ChatPanel, href: "/chat", fill: true },
 };
 
 interface MachineDialogProps {
@@ -24,14 +36,15 @@ interface MachineDialogProps {
   onClose: () => void;
 }
 
-/** 机器交互面板：全屏遮罩上的大尺寸对话框，内嵌 ASR / OCR 原有页面组件。Esc 或点击遮罩关闭。 */
+/** 机器交互面板：全屏遮罩上的大尺寸对话框，内嵌 ASR / OCR / 聊天室原有页面组件。Esc 或点击遮罩关闭；
+ *  面板内部已处理的 Esc（如关闭表情面板、大图预览）不会连带关闭对话框。 */
 export function MachineDialog({ machine, onClose }: MachineDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const entry = MACHINES[machine.id];
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
     };
     window.addEventListener("keydown", onKey);
     const previous = document.body.style.overflow;
@@ -44,7 +57,7 @@ export function MachineDialog({ machine, onClose }: MachineDialogProps) {
   }, [onClose]);
 
   if (!entry) return null;
-  const { Panel, href } = entry;
+  const { Panel, href, fill } = entry;
 
   return createPortal(
     <div className="lobby-machine-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -63,7 +76,7 @@ export function MachineDialog({ machine, onClose }: MachineDialogProps) {
             </button>
           </div>
         </header>
-        <div className="lobby-machine-body">
+        <div className={`lobby-machine-body${fill ? " is-fill" : ""}`}>
           <Panel />
         </div>
       </section>

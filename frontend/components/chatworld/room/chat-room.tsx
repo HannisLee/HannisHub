@@ -438,7 +438,9 @@ export function ChatRoom() {
   useEffect(() => {
     if (receiptOpen === null) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setReceiptOpen(null);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setReceiptOpen(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -459,7 +461,9 @@ export function ChatRoom() {
       if (emojiRef.current && !emojiRef.current.contains(event.target as Node)) setEmojiOpen(false);
     }
     function onKey(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setEmojiOpen(false);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEmojiOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -473,7 +477,9 @@ export function ChatRoom() {
   useEffect(() => {
     if (!lightbox) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setLightbox(null);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setLightbox(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

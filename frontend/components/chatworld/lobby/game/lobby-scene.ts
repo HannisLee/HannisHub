@@ -120,8 +120,10 @@ export class LobbyScene extends Phaser.Scene {
     this.events_.onReady?.();
   }
 
-  /** 为每个动画帧条创建循环动画；自动门（玻璃门、电梯）额外按布局给出的帧序拆出开门 / 关门两段 */
+  /** 为每个动画帧条创建动画；自动门（玻璃门）额外按布局给出的帧序拆出开门 / 关门两段 */
   private createAnimations() {
+    // 只在特定时机播放一次的帧条（如电梯开合）不循环
+    const playOnce = new Set(this.layout.rooms.flatMap(room => room.anims.filter(a => a.frames === "once").map(a => a.key)));
     for (const [key, sheet] of Object.entries(this.layout.anims)) {
       const animKey = `anim-${key}`;
       if (this.anims.exists(animKey)) continue;
@@ -129,7 +131,7 @@ export class LobbyScene extends Phaser.Scene {
         key: animKey,
         frames: this.anims.generateFrameNumbers(key),
         frameRate: sheet.frameRate,
-        repeat: sheet.door ? 0 : -1,
+        repeat: sheet.door || playOnce.has(key) ? 0 : -1,
       });
       if (sheet.door) {
         this.anims.create({ key: `${key}-open`, frames: this.anims.generateFrameNumbers(key, { frames: sheet.door.open }), frameRate: sheet.frameRate });

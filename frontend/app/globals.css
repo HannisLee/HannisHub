@@ -1086,6 +1086,12 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .lobby-machine-body { flex: 1 1 auto; overflow-y: auto; padding: var(--space-8) var(--space-10) var(--space-12); overscroll-behavior: contain; }
 .lobby-machine-body .page-header { margin-bottom: var(--space-8); }
 .lobby-machine-loading { display: grid; min-height: 240px; place-items: center; }
+/* 铺满型面板（聊天室）：由面板自身管理滚动，对话框标题栏已显示名称，隐藏面板内重复标题 */
+.lobby-machine-body.is-fill { display: flex; padding: 0; overflow: hidden; }
+.lobby-machine-body.is-fill > * { flex: 1 1 auto; min-width: 0; }
+.lobby-machine-body.is-fill .chat-main { height: auto; min-height: 0; border: 0; border-radius: 0; background: var(--color-bg); }
+.lobby-machine-body.is-fill .chat-main-title { display: none; }
+.lobby-machine-body.is-fill .chat-main-head { justify-content: flex-end; }
 /* 我的房间：形象与名字面板 */
 .lobby-machine.lobby-avatar { width: min(1040px, 100%); height: min(92vh, 760px); }
 .lobby-avatar-body { display: grid; flex: 1 1 auto; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; }
@@ -1201,6 +1207,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
   .lobby-machine-bar { padding-left: var(--space-4); }
   .lobby-machine-hint, .lobby-machine-link { display: none; }
   .lobby-machine-body { padding: var(--space-6) var(--space-4) var(--space-10); }
+  .lobby-machine-body.is-fill { padding: 0; }
   .lobby-machine.lobby-avatar { height: 100%; }
   .lobby-avatar-body { grid-template-columns: 1fr; overflow-y: auto; }
   .lobby-avatar-side { border-right: 0; border-bottom: 1px solid var(--color-divider); overflow: visible; }

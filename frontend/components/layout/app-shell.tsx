@@ -77,10 +77,10 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
   }, [pathname]);
   const pageTitle = navTitle(current);
 
-  // 聊天室新消息提醒：聊天室页面由聊天组件自己处理，其他页面在后台检查
+  // 聊天室新消息提醒：聊天室页面与内嵌聊天面板由聊天组件自己处理，其他情况在后台检查
   const onChatPage = pathname === "/chat" || pathname === "/chat/";
-  const { unread } = useChatNotify();
-  useChatWatcher(!!auth?.authenticated && !onChatPage);
+  const { unread, embedded } = useChatNotify();
+  useChatWatcher(!!auth?.authenticated && !onChatPage && !embedded);
   useChatNotifyEffects(unread);
 
   useEffect(() => {

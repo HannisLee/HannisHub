@@ -14,8 +14,6 @@
   速查索引见 `chatworld/asset/asset_index.md`。
 - 派生文件（本项目自原始包裁剪 / 拼接 / 烘焙，仍受上述许可约束），除 `player.png` 外
   全部由 `scripts/build_chat_lobby_assets.py` 生成，来源路径相对原始包目录：
-  - `club/street.png`：街道背景。外立面墙面取自 `Room_Builder_Walls_16x16.png`，人行道与沥青取自
-    `Room_Builder_Floors_16x16.png`；屋檐、窗户、橱窗、路缘、中线与斑马线为脚本绘制。
   - `club/room.png`：我的房间背景（Room_Builder 木地板与墙面，烘焙 Generic 窗帘窗与地毯）。
   - `club/avatar/*.png` + `club/avatar/parts.json`：角色生成器分层部件，取自
     `2_Characters/Character_Generator/` 的 Bodies、Eyes、Outfits、Hairstyles、Accessories（16x16 档），
@@ -34,7 +32,8 @@
     滚动屏显示器 16x32（12 帧）、音箱 16x48、机柜 16x48、文档屏 32x32（5 帧）、
     咖啡 16x32（6 帧）、猫 48x16（12 帧）、鱼缸 32x32（8 帧）、布谷鸟钟 16x32（10 帧）；
     `wave_screen` 为 X 光机监视器波形区域逐帧截取（16x16，14 帧）；
-    `arrow_down` 由 `4_User_Interface_Elements/Animated_Spritesheets/UI_arrow_pointing_down_16x16.gif` 转为帧条。
+    `arrow_down`、`arrow_up` 由 `4_User_Interface_Elements/Animated_Spritesheets/UI_arrow_pointing_down_16x16.gif`、
+    `UI_arrow_pointing_up.gif` 转为帧条，`arrow_left` 由 `arrow_down` 逐帧旋转 90° 得到。
   - `club/layout.json`：房间布局数据（非图像）。
   - `club/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止与行走动画，
     重排为 6 帧 × 8 行（16x32 帧）：静止 南/北/左/右 + 行走 南/北/左/右。

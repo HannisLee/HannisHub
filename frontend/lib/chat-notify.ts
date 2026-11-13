@@ -21,9 +21,11 @@ interface NotifyState {
   unread: number;
   toast: ChatToast | null;
   soundEnabled: boolean;
+  /** 聊天室正以内嵌面板形式打开（如聊天大厅圆桌）：此时由聊天组件自己处理已读，后台检查暂停 */
+  embedded: boolean;
 }
 
-let state: NotifyState = { unread: 0, toast: null, soundEnabled: true };
+let state: NotifyState = { unread: 0, toast: null, soundEnabled: true, embedded: false };
 let soundLoaded = false;
 const listeners = new Set<() => void>();
 
@@ -45,7 +47,7 @@ export function getChatNotifySnapshot(): NotifyState {
   return state;
 }
 
-const SERVER_SNAPSHOT: NotifyState = { unread: 0, toast: null, soundEnabled: true };
+const SERVER_SNAPSHOT: NotifyState = { unread: 0, toast: null, soundEnabled: true, embedded: false };
 export function getChatNotifyServerSnapshot(): NotifyState {
   return SERVER_SNAPSHOT;
 }
@@ -79,6 +81,13 @@ export function getLastRead(): number {
 export function markChatRead(messageId: number) {
   if (messageId > getLastRead()) storageSet(LAST_READ_KEY, String(messageId));
   if (state.unread !== 0) emit({ unread: 0 });
+}
+
+/** 内嵌聊天室打开 / 关闭；打开时收起已有提示条 */
+export function setChatEmbedded(open: boolean) {
+  if (state.embedded === open) return;
+  if (open) window.clearTimeout(toastTimer);
+  emit(open ? { embedded: true, toast: null } : { embedded: false });
 }
 
 export function setChatUnread(count: number) {

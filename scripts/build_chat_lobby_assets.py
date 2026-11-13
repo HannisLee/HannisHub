@@ -4,7 +4,7 @@
 从本机付费素材包 chatworld/asset/modern_interiors/（Limezu Modern Interiors，不入库）提取派生素材，
 输出到 frontend/public/chat-lobby/club/：
 
-- street.png / foyer.png / room.png / hall.png：各场景的烘焙背景（地板、墙面、墙顶收边、区域地毯、墙面挂饰）
+- foyer.png / room.png / hall.png：各房间的烘焙背景（地板、墙面、墙顶收边、区域地毯、墙面挂饰）
 - objects.png + objects.json：可遮挡家具的图集（Phaser JSON Hash 格式）
 - anims/*.png：动画物件帧条
 - avatar/*.png + avatar/parts.json：角色生成器分层部件（身体、眼睛、服装、发型、配饰），前端运行时叠层合成
@@ -168,10 +168,7 @@ def build_objects() -> None:
     o["pinball"] = single("basement", 221)
     o["pool_table"] = single("basement", 76)
     o["bench"] = flood(GENERIC, 8, 264)
-    # 吧台：左端 + 中段 + 右端，配高脚凳
-    o["bar_left"] = single("basement", 85)
-    o["bar_mid"] = single("basement", 86)
-    o["bar_right"] = single("basement", 87)
+    # 高脚凳（大厅圆桌聊天角）
     o["stool_blue"] = single("basement", 103)
     o["stool_yellow"] = single("basement", 105)
     o["stool_wood"] = single("basement", 113)
@@ -219,6 +216,14 @@ def gif_strip(rel: str) -> Image.Image:
     return strip
 
 
+def rotate_frames(strip: Image.Image, size: int, method: Image.Transpose) -> Image.Image:
+    """帧条逐帧旋转（帧为正方形）。"""
+    out = Image.new("RGBA", strip.size)
+    for i in range(strip.width // size):
+        out.paste(strip.crop((i * size, 0, (i + 1) * size, size)).transpose(method), (i * size, 0))
+    return out
+
+
 def build_anims() -> None:
     a = ANIMS
 
@@ -230,9 +235,7 @@ def build_anims() -> None:
 
     add("door_glass", load(ANIM_DIR + "animated_door_glass_double.png"), 32, 48, 14,
         door={"open": [0, 1, 2, 3, 4], "close": [5, 6, 7, 0]})
-    # 电梯：帧 0 关闭，1–7 打开并停在全开，8–13 关闭
-    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10,
-        door={"open": list(range(0, 8)), "close": list(range(8, 14)) + [0]})
+    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10)
     add("receptionist", load(ANIM_DIR + "animated_receptionist.png"), 16, 32, 5)
     add("monitor", load(ANIM_DIR + "animated_control_room_facebook_scrolling.png"), 16, 32, 4)
     add("speaker", load(ANIM_DIR + "animated_amplifier_big.png"), 16, 48, 6)
@@ -242,7 +245,11 @@ def build_anims() -> None:
     add("cat", load(ANIM_DIR + "animated_cat.png"), 48, 16, 6)
     add("fishtank", load(ANIM_DIR + "animated_fishtank_orange.png"), 32, 32, 6)
     add("clock", load(ANIM_DIR + "animated_cuckoo_clock.png"), 16, 32, 2)
-    add("arrow_down", gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif"), 16, 16, 8)
+    arrow_down = gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif")
+    add("arrow_down", arrow_down, 16, 16, 8)
+    # 出口指引的其他方向：向上用官方素材，向左由向下箭头逐帧旋转（90° 旋转对像素图无损）
+    add("arrow_left", rotate_frames(arrow_down, 16, Image.Transpose.ROTATE_270), 16, 16, 8)
+    add("arrow_up", gif_strip(UI_DIR + "UI_arrow_pointing_up.gif"), 16, 16, 8)
     # 声纹屏：截取 X 光机监视器的波形区域（14 帧），作为 ASR 录音台的挂墙示波器
     xray = load(ANIM_DIR + "animated_hospital_xraymachine.png")
     frames = xray.width // 72
@@ -356,6 +363,23 @@ class Room:
             d.rectangle((x0 + 2, y0 + 2, x1 - 3, y1 - 3), outline=(*inner, 255))
         shade(self.bg, (x0 + 1, y1, x1, y1 + 1), 50)
 
+    def rug_round(self, box: tuple[int, int, int, int], tex: Image.Image, edge=(54, 46, 58), inner=None) -> None:
+        """程序化椭圆地毯：椭圆蒙版内平铺纹理 + 深色描边 + 可选内圈线，底边下方 1px 投影。"""
+        x0, y0, x1, y1 = box
+        w, h = x1 - x0, y1 - y0
+        shadow = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(shadow).ellipse((0, 0, w - 1, h - 1), fill=50)
+        self.bg.paste(Image.new("RGBA", (w, h), (*SHADOW, 255)), (x0 + 1, y0 + 1), shadow)
+        region = Image.new("RGBA", (w, h))
+        tile_fill(region, tex, (0, 0, w, h))
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, w - 1, h - 1), fill=255)
+        self.bg.paste(region, (x0, y0), mask)
+        d = ImageDraw.Draw(self.bg)
+        d.ellipse((x0, y0, x1 - 1, y1 - 1), outline=(*edge, 255))
+        if inner:
+            d.ellipse((x0 + 3, y0 + 3, x1 - 4, y1 - 4), outline=(*inner, 255))
+
     def decal(self, key: str, x: int, y: int) -> None:
         self.bg.alpha_composite(DECALS[key], (x, y))
 
@@ -425,15 +449,12 @@ def t(n: float) -> int:
 
 
 def build_foyer() -> Room:
-    """入口厅：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅；
-    走进电梯下楼到街道，左墙开口通往隔壁「我的房间」。"""
+    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅，左墙开口通往隔壁「我的房间」。"""
     room = Room("foyer", "入口厅", 20, 13, floor_tex(4, 8), wall_tex(1, 26))
     exit_x0, exit_x1 = t(9), t(11)
     room.bottom_openings.append((exit_x0, exit_x1))
     side_y0, side_y1 = t(6), t(8)
     room.left_openings.append((side_y0, side_y1))
-    # 电梯门洞：墙体碰撞只挡住电梯最里侧，角色可以走进电梯
-    room.top_openings.append((t(9) + 6, t(11) - 6))
     room.draw_shell()
     w, h = room.w, room.h
 
@@ -448,9 +469,8 @@ def build_foyer() -> Room:
     room.decal("rug_red_gold", t(13.5) + 2, t(7) - 4)
     room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
 
-    # 电梯（上墙中央）：靠近自动开门，走进去即下楼到街道；固定深度 20，角色进入时画在门上
-    room.doors.append({"key": "elevator", "x": t(9), "y": 16, "radius": 30, "depth": 20})
-    room.portals.append({"rect": [t(9) + 8, 22, 16, 12], "to": "street", "spawn": "fromFoyer"})
+    # 电梯（上墙中央），进入场景时开合一次
+    room.anim("elevator", t(9), 16, depth=20, frames="once")
     room.signs.append({"x": t(10), "y": 10, "text": "HannisHub", "tone": "brand"})
 
     # 前台：L 形柜台 + 接待员
@@ -483,11 +503,11 @@ def build_foyer() -> Room:
     # 左墙门洞：通往隔壁「我的房间」，门口地垫 + 标牌
     room.rug((16, side_y0 + 3, 40, side_y1 - 3), floor_tex(12, 26), edge=(60, 40, 30))
     room.signs.append({"x": 34, "y": side_y0 - 8, "text": "我的房间", "tone": "muted"})
+    room.anim("arrow_left", 20, side_y0 + 8, depth=h + 100)
     room.portals.append({"rect": [0, side_y0, 6, side_y1 - side_y0], "to": "room", "spawn": "fromFoyer"})
 
     room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
     room.spawns["fromHall"] = {"x": t(10), "y": h - 24, "dir": "up"}
-    room.spawns["fromStreet"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
     room.spawns["fromRoom"] = {"x": 26, "y": (side_y0 + side_y1) // 2 + 4, "dir": "right"}
     room.build_walls()
     return room
@@ -508,7 +528,7 @@ def workstation(room: Room, x: int, y: int, accessory: str) -> None:
 
 
 def build_hall() -> Room:
-    """大厅：上墙中间玻璃门入口；左上 4 工位，右上 ASR / OCR 两台机器，左下休息区，右侧吧台与游戏角。"""
+    """大厅：上墙中间玻璃门入口；左上 4 工位，右上 ASR / OCR 两台机器，右侧圆桌聊天角（聊天室），左下休息区，右下游戏角。"""
     room = Room("hall", "大厅", 36, 24, floor_tex(4, 12), wall_tex(23, 24))
     door_x = t(17)
     room.top_openings.append((door_x + 4, door_x + 28))
@@ -527,6 +547,8 @@ def build_hall() -> Room:
     room.rug((door_x + 2, 48, door_x + 30, t(13)), floor_tex(4, 14), edge=(70, 30, 30), inner=(214, 160, 90))
     room.prop("plant_tall2", door_x - 18, 16, foot=12)
     room.prop("plant_tall2", door_x + 34, 16, foot=12)
+    room.anim("arrow_up", door_x + 8, 50, depth=h + 100)
+    room.signs.append({"x": door_x + 16, "y": 8, "text": "入口厅", "tone": "muted"})
 
     # ---- 左上：工位区（浅灰地毯 + 2x2 工位）
     room.prop("bookshelf", t(1), 16, foot=16)
@@ -566,15 +588,19 @@ def build_hall() -> Room:
     })
     room.prop("plant_palm", t(33.5), 14, foot=14)
 
-    # ---- 右侧中部：吧台 + 高脚凳，右墙边鱼缸
-    bar_x, bar_y = t(23), t(8.5)
-    room.prop("bar_left", bar_x, bar_y, foot=18)
-    for i in range(3):
-        room.prop("bar_mid", bar_x + 32 + i * 16, bar_y, foot=18)
-    room.prop("bar_right", bar_x + 80, bar_y, foot=18)
-    room.anim("coffee", bar_x + 10, bar_y - 6, depth=bar_y + 49)
-    for i, stool in enumerate(("stool_blue", "stool_wood", "stool_yellow", "stool_wood", "stool_blue")):
-        room.prop(stool, bar_x + 6 + i * 18, bar_y + 34, foot=8)
+    # ---- 右侧中部：圆桌聊天角（椭圆地毯 + 木圆桌 + 四张高脚凳），站上地毯按 E 打开聊天室；右墙边鱼缸
+    cx, cy = t(26.5), t(10.5)
+    room.rug_round((cx - 58, cy - 40, cx + 58, cy + 40), floor_tex(8, 8), edge=(110, 54, 40), inner=(217, 119, 87))
+    room.prop("table_round", cx - 16, cy - 16, foot=16)
+    room.anim("coffee", cx - 8, cy - 26, depth=cy + 17)
+    room.prop("stool_blue", cx - 8, cy - 44, foot=8)
+    room.prop("stool_yellow", cx - 44, cy - 20, foot=8)
+    room.prop("stool_wood", cx + 28, cy - 20, foot=8)
+    room.prop("stool_blue", cx - 8, cy + 10, foot=8)
+    room.machines.append({
+        "id": "chat", "title": "聊天室", "hint": "和大家一起聊天",
+        "zone": [cx - 50, cy - 32, 100, 64], "signX": cx, "signY": cy - 52,
+    })
     room.anim("fishtank", t(32.5), t(9), solid=[t(32.5) + 1, t(9) + 18, 30, 14])
     room.prop("plant_big", t(32.5), t(11), foot=14)
 
@@ -610,16 +636,17 @@ def build_hall() -> Room:
     room.prop("lamp_floor_red", t(34), t(19), foot=8)
 
     room.prop("plant_big", t(1), t(13) - 6, foot=14)
-    room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 72, "dir": "down"}
+    room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
 
 
 def build_room() -> Room:
-    """我的房间：入口厅左侧隔壁的小卧室。右墙门洞回入口厅；衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
+    """我的房间：入口厅左侧隔壁的小卧室。下墙中间开口出去直接回到入口厅；
+    衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
     room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
-    door_y0, door_y1 = t(6), t(8)
-    room.right_openings.append((door_y0, door_y1))
+    exit_x0, exit_x1 = t(5), t(7)
+    room.bottom_openings.append((exit_x0, exit_x1))
     room.draw_shell()
     w, h = room.w, room.h
 
@@ -640,114 +667,21 @@ def build_room() -> Room:
     })
     room.prop("plant_pot", 158, 34, foot=8)
 
-    # 下半：书架、落地灯、地毯上的扶手椅与小圆桌，猫
+    # 左下：书架与落地灯；右下：地毯上的扶手椅与小圆桌，桌边睡猫
     room.prop("bookshelf", 16, 90, foot=16)
     room.prop("lamp_floor", 50, 92, foot=8)
-    room.decal("rug_beige", 74, 104)
-    room.prop("armchair_blue", 70, 90, foot=14)
-    room.prop("table_round", 102, 98, foot=16)
-    room.anim("cat", 120, 126, depth=142)
+    room.decal("rug_beige", 122, 102)
+    room.prop("armchair_blue", 116, 84, foot=14)
+    room.prop("table_round", 144, 94, foot=16)
+    room.anim("cat", 124, 128, depth=144)
 
-    room.portals.append({"rect": [w - 6, door_y0, 6, door_y1 - door_y0], "to": "foyer", "spawn": "fromRoom"})
-    room.spawns["fromFoyer"] = {"x": w - 26, "y": (door_y0 + door_y1) // 2 + 4, "dir": "left"}
+    # 出口：门口地垫 + 「入口厅」标牌与向下箭头
+    room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
+    room.anim("arrow_down", (exit_x0 + exit_x1) // 2 - 8, h - 50, depth=h + 100)
+    room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "入口厅", "tone": "muted"})
+    room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "foyer", "spawn": "fromRoom"})
+    room.spawns["fromFoyer"] = {"x": (exit_x0 + exit_x1) // 2, "y": h - 24, "dir": "up"}
     room.build_walls()
-    return room
-
-
-ROAD = (58, 58, 64, 255)
-
-
-def build_street() -> Room:
-    """街道：公司大楼外立面（玻璃门进入后乘电梯上楼到入口厅）、人行道、马路与对面人行道。
-    素材包只有室内素材，外立面、路面、路缘与斑马线均由室内地砖墙面程序化拼接。"""
-    room = Room("street", "街道", 30, 18, floor_tex(12, 24), wall_tex(1, 16))
-    w, h = room.w, room.h
-    bg = room.bg
-    d = ImageDraw.Draw(bg)
-    facade_y = 112           # 外立面底边
-    curb_y = 176             # 上侧路缘
-    road_y1 = 240            # 下侧路缘
-    door_x = t(14)
-
-    # ---- 大楼：屋檐（俯视墙顶）+ 三层外立面
-    d.rectangle((0, 0, w - 1, 15), fill=OUTLINE)
-    d.rectangle((0, 1, w - 1, 13), fill=CAP)
-    d.rectangle((0, 14, w - 1, 15), fill=OUTLINE)
-    tile_fill(bg, room.wall, (0, 16, w, facade_y))
-    shade(bg, (0, 16, w, 18), 70)
-    # 二、三层办公窗：深色窗框 + 蓝灰玻璃 + 高光斜线 + 窗台
-    for x in list(range(t(1), t(13), t(2))) + list(range(t(17), t(29), t(2))):
-        for y in (22, 54):
-            d.rectangle((x + 4, y, x + 27, y + 19), fill=OUTLINE)
-            d.rectangle((x + 5, y + 1, x + 26, y + 18), fill=(120, 156, 180, 255))
-            d.rectangle((x + 5, y + 1, x + 26, y + 5), fill=(170, 200, 216, 255))
-            d.line((x + 15, y + 1, x + 15, y + 18), fill=OUTLINE)
-            d.line((x + 8, y + 14, x + 12, y + 9), fill=(214, 232, 240, 255))
-            d.rectangle((x + 3, y + 20, x + 28, y + 21), fill=(200, 194, 182, 255))
-    # 一层两侧大玻璃橱窗
-    for x0 in (t(9.5), t(16.5)):
-        d.rectangle((x0, 78, x0 + 63, 107), fill=OUTLINE)
-        d.rectangle((x0 + 1, 79, x0 + 62, 106), fill=(150, 186, 204, 255))
-        d.rectangle((x0 + 1, 79, x0 + 62, 84), fill=(196, 222, 232, 255))
-        d.line((x0 + 31, 79, x0 + 31, 106), fill=OUTLINE)
-        d.line((x0 + 6, 98, x0 + 14, 88), fill=(230, 242, 246, 255))
-        d.line((x0 + 38, 98, x0 + 46, 88), fill=(230, 242, 246, 255))
-    # 墙脚阴影
-    for i, a in enumerate((90, 50, 24)):
-        shade(bg, (0, facade_y + i, w, facade_y + i + 1), a)
-
-    # ---- 人行道铺满立面以下区域，随后在其上叠马路
-    tile_fill(bg, room.floor, (0, facade_y, w, h))
-    for i, a in enumerate((90, 50, 24)):
-        shade(bg, (0, facade_y + i, w, facade_y + i + 1), a)
-    # 门前地垫
-    room.rug((door_x - 6, facade_y, door_x + 38, facade_y + 14), floor_tex(12, 26), edge=(60, 40, 30))
-
-    # ---- 马路：沥青 + 路缘 + 中线虚线 + 门前斑马线
-    tile_fill(bg, floor_tex(12, 16), (0, curb_y, w, road_y1))
-    shade(bg, (0, curb_y, w, road_y1), 60, (30, 30, 40))
-    for y0 in (curb_y, road_y1 - 3):
-        d.rectangle((0, y0, w - 1, y0 + 2), fill=(176, 172, 162, 255))
-        d.line((0, y0 + 3 if y0 == curb_y else y0 - 1, w - 1, y0 + 3 if y0 == curb_y else y0 - 1), fill=(40, 38, 44, 255))
-    mid = (curb_y + road_y1) // 2
-    for x in range(4, w, 32):
-        d.rectangle((x, mid - 1, x + 15, mid), fill=(226, 190, 90, 255))
-    for x in range(door_x - 8, door_x + 44, 8):
-        d.rectangle((x, curb_y + 8, x + 4, road_y1 - 9), fill=(222, 220, 212, 255))
-
-    # ---- 左右两端向舞台背景渐隐，暗示街道继续延伸
-    for i in range(24):
-        a = int(230 * (1 - i / 24))
-        shade(bg, (i, facade_y, i + 1, h), a, (20, 20, 19))
-        shade(bg, (w - 1 - i, facade_y, w - i, h), a, (20, 20, 19))
-
-    # ---- 大楼入口：玻璃双开门 + 招牌 + 门两侧绿植
-    room.doors.append({"key": "door_glass", "x": door_x, "y": facade_y - 48, "radius": 40})
-    room.portals.append({"rect": [door_x + 6, facade_y - 26, 20, 12], "to": "foyer", "spawn": "fromStreet"})
-    room.signs.append({"x": door_x + 16, "y": facade_y - 56, "text": "HannisHub", "tone": "brand"})
-    room.prop("plant_tall2", door_x - 16, facade_y - 30, foot=12)
-    room.prop("plant_tall2", door_x + 34, facade_y - 30, foot=12)
-
-    # ---- 人行道街景：路灯、长椅、盆栽树、垃圾桶
-    for x in (t(3), t(10), t(19), t(26)):
-        room.prop("lamp_floor", x, curb_y - 40, foot=8)
-    room.prop("bench", t(5), curb_y - 26, foot=10)
-    room.prop("bench", t(21), curb_y - 26, foot=10)
-    room.prop("plant_big", t(8), facade_y - 4, foot=14)
-    room.prop("plant_big", t(20), facade_y - 4, foot=14)
-    room.prop("trash", t(12), curb_y - 24, foot=8)
-    room.prop("trash", t(24), curb_y - 24, foot=8)
-    # 对面人行道：一排绿植
-    for x in range(t(2), w - t(2), t(4)):
-        room.prop("plant_palm", x, road_y1 - 10, foot=12)
-
-    # ---- 碰撞：外立面（门洞只挡住门里侧）、左右边界、下边界
-    gx0, gx1 = door_x + 4, door_x + 28
-    room.walls += [
-        [0, 0, gx0, facade_y], [gx0, 0, gx1 - gx0, facade_y - 34], [gx1, 0, w - gx1, facade_y],
-        [0, facade_y, 4, h - facade_y], [w - 4, facade_y, 4, h - facade_y], [0, h - 4, w, 4],
-    ]
-    room.spawns["fromFoyer"] = {"x": door_x + 16, "y": facade_y + 18, "dir": "down"}
     return room
 
 
@@ -885,19 +819,17 @@ def main() -> None:
     build_objects()
     build_decals()
     build_anims()
-    street = build_street()
     foyer = build_foyer()
     room = build_room()
     hall = build_hall()
 
-    # 世界排布：街道在最上方，下一行左侧是我的房间、右侧是入口厅，大厅在入口厅正下方。
+    # 世界排布：上一行左侧是我的房间、右侧是入口厅，大厅在入口厅正下方。
     # 房间之间留足间距：小房间在大屏上居中显示时，相机视野会超出房间，不能看到相邻房间。
     gap = 256
-    room_off = (0, street.h + gap)
-    foyer_off = (room.w + gap, street.h + gap)
-    hall_off = (foyer_off[0] + (foyer.w - hall.w) // 2, foyer_off[1] + foyer.h + gap)
-    street_off = (foyer_off[0] + (foyer.w - street.w) // 2, 0)
-    placed = [(street, street_off), (room, room_off), (foyer, foyer_off), (hall, hall_off)]
+    room_off = (0, 0)
+    foyer_off = (room.w + gap, 0)
+    hall_off = (foyer_off[0] + (foyer.w - hall.w) // 2, foyer.h + gap)
+    placed = [(room, room_off), (foyer, foyer_off), (hall, hall_off)]
     shift_x = -min(off[0] for _, off in placed)
     placed = [(r, (x + shift_x, y)) for r, (x, y) in placed]
     world = (max(x + r.w for r, (x, _) in placed), max(y + r.h for r, (_, y) in placed))
