@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
-import { isActivePath, navigation, navTitle } from "../../lib/navigation";
+import { canVisitPage, isActivePath, navigation, navTitle } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
@@ -105,6 +105,10 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
     return () => window.removeEventListener("hannishub:unauthorized", redirect);
   }, [router]);
 
+  useEffect(() => {
+    if (auth?.authenticated && !canVisitPage(auth.username, pathname)) router.replace("/chat");
+  }, [auth, pathname, router]);
+
   /** 桌面端切换侧栏的展开/收起，移动端切换抽屉 */
   const toggleNavigation = useCallback(() => {
     if (isMobileViewport()) {
@@ -126,6 +130,10 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
     return <div className="app-loading-screen"><DocumentTitle title="载入中" /><span className="loading-line" />正在载入 HannisHub…</div>;
   }
 
+  if (!canVisitPage(auth.username, pathname)) {
+    return <div className="app-loading-screen"><DocumentTitle title="载入中" />正在前往聊天室…</div>;
+  }
+
   // 移动端侧栏始终是抽屉形态，收起形态只在桌面端生效
   const collapsed = sidebarCollapsed && !isMobile;
   const navigationOpen = isMobile ? mobileDrawerOpen : !collapsed;
@@ -137,7 +145,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
       <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
         <div className="sidebar-head">
           <div className="brand-lockup">
-            <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
+            <Link href={auth.username === "lihan" ? "/" : "/chat"} className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
             <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
           </div>
           <button
@@ -154,7 +162,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
         </div>
         <SidebarNav
           pathname={pathname}
-          terminalAllowed={!!auth.terminal}
+          username={auth.username}
           unread={unread}
           iconMode={collapsed}
           onNavigate={closeDrawer}

@@ -97,7 +97,7 @@ def get_auth_config() -> dict[str, Any]:
 
 # ---------- 多用户 ----------
 # auth.users 为用户列表：{username, password_hash, created_at, session_version}。
-# 所有用户权限相同；session_version 在重置密码时递增，使该用户已有会话失效。
+# session_version 在重置密码时递增，使该用户已有会话失效。
 
 USERNAME_MIN_CHARS = 3
 USERNAME_MAX_CHARS = 64
@@ -300,15 +300,8 @@ def update_settings_section(name: str, value: Any) -> None:
 
 
 def is_terminal_admin(username: str | None) -> bool:
-    """网页终端只对管理员开放：settings.json 的 terminal.admins，缺省为最早创建的用户。"""
-    if not username or username not in _user_map():
-        return False
-    section = _read_settings_unlocked().get("terminal")
-    admins = section.get("admins") if isinstance(section, dict) else None
-    if isinstance(admins, list):
-        return username in {str(item) for item in admins}
-    users = sorted(_user_map().values(), key=lambda user: float(user.get("created_at") or 0))
-    return bool(users) and str(users[0].get("username")) == username
+    """网页终端仅对 lihan 管理员开放。"""
+    return username == "lihan" and username in _user_map()
 
 
 def current_username(session: dict[str, Any]) -> str | None:
@@ -384,7 +377,12 @@ class AuthMiddleware:
             return
 
         session = scope.get("session") or {}
-        if current_username(session):
+        username = current_username(session)
+        if username:
+            # 用户管理接口可重置其他账号密码，必须在服务端限制管理员。
+            if (path == "/api/users" or path.startswith("/api/users/")) and username != "lihan":
+                await JSONResponse({"detail": "仅管理员可管理用户"}, status_code=403)(scope, receive, send)
+                return
             await self.app(scope, receive, send)
             return
 

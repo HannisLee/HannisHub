@@ -1177,3 +1177,7 @@
 - 新增 `frontend/lib/nav-layout.ts` 管理本地布局，使用键 `hannishub_nav_layout` 保存 `groupOrder`、`itemOrder` 与 `collapsedGroups`，与后端导航定义完全解耦；未记录的新分组或新条目自动追加，清除该键即可恢复默认布局。
 - 侧栏整体收起为图标列时忽略分组折叠并暂停拖动排序，避免无分组标题时无法展开；移动端抽屉内仍可折叠分组。
 - 抽出 `frontend/components/layout/sidebar-nav.tsx` 承载导航渲染、折叠与拖拽逻辑；同步 spec.md。验证：`typecheck`、`lint`、`build` 通过；Playwright 实测折叠/展开跨刷新持久化、分组拖动排序、组内条目拖动排序与刷新后恢复，无控制台错误。
+
+### v0.2.93 — 2026-11-13
+- 固定 `lihan` 为管理员，其他用户侧栏只显示聊天室、ASR 和 OCR；访问其他统一前端页面时跳转至聊天室。
+- 终端与用户管理接口仅向管理员开放，同步更新权限说明。

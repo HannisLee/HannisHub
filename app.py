@@ -788,7 +788,7 @@ async def users_list(request: Request):
 
 @app.post("/api/users")
 async def users_create(payload: dict[str, Any] = Body(...)):
-    """新增用户；所有用户权限相同。"""
+    """新增用户；仅管理员可用。"""
     try:
         user = create_user(str(payload.get("username") or ""), str(payload.get("password") or ""))
     except ValueError as exc:

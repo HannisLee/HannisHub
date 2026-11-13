@@ -6,7 +6,7 @@ export interface NavItem {
   /** 浏览器标签页标题，未设置时回退到 label */
   title?: string;
   icon: IconName;
-  /** 仅管理员可见（目前用于网页终端） */
+  /** 仅管理员可见 */
   adminOnly?: boolean;
 }
 
@@ -76,4 +76,9 @@ export function isActivePath(pathname: string, href: string): boolean {
   if (href === "/settings") return pathname === "/settings" || pathname === "/settings/";
   if (href === "/files/point-clouds" && pathname === "/point-clouds") return true;
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** 普通用户只能使用聊天室、ASR 和 OCR 页面。 */
+export function canVisitPage(username: string | null | undefined, pathname: string): boolean {
+  return username === "lihan" || ["/chat", "/llama/asr", "/llama/ocr"].some(path => pathname === path || pathname === `${path}/`);
 }

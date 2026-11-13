@@ -93,7 +93,7 @@ HannisHub/
 
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：用户登录页；首次启动且没有任何用户时切换为管理员初始化表单
-- `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；所有用户权限相同
+- `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；仅管理员 `lihan` 可管理用户
 - `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口，设置中可修改昵称和头像（昵称首字母、12 个预设 emoji 或上传图片，图片在浏览器内居中裁剪并压缩为 96×96 JPEG）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入时自动以本地昵称或登录账号名建立资料。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
   - 乐观发送：按回车后消息立即以半透明显示在本地并清空输入框，后台按输入顺序逐条发送；请求携带客户端生成的 `nonce`，成功或被轮询确认后替换为服务端消息；15 秒超时或失败时标红并提供“重试 / 删除”。服务端对同一浏览器的同一 `nonce` 只保存一次，重试不会产生重复消息
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
@@ -158,9 +158,9 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 后端 `server/terminal_manager.py` 在 Hub 进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
 - WebSocket 协议：服务端→客户端二进制帧为终端原始输出（连接后先发送回滚缓冲），文本帧为 JSON 控制消息 `{"type":"exit"|"released"|"closed"}`；客户端→服务端为 JSON `{"type":"input","data"}` 与 `{"type":"resize","cols","rows"}`。多端连接时 PTY 尺寸取最近一次调整的客户端。关闭码：4000 已释放、4401 未登录、4403 无权限或 Origin 不符、4404 终端不存在。
 - 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 6 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在内存，Hub 停止时全部结束；同时最多 10 个。
-- 权限：仅管理员可用——根 `settings.json` 的 `terminal.admins` 用户名列表，未配置时为最早创建的用户。`/api/auth/status` 返回 `terminal` 布尔值，侧栏「设置」分组据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
+- 权限：仅管理员可用——固定用户名 `lihan`。`/api/auth/status` 返回 `terminal` 布尔值，侧栏「设置」分组据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
 - `AuthMiddleware` 对 WebSocket 握手同样校验会话，未登录直接拒绝（此前 WebSocket 请求不经过登录校验）。
-- 配置（根 `settings.json`，均可省略）：`"terminal": {"admins": ["用户名"], "idle_timeout_hours": 6, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
+- 配置（根 `settings.json`，均可省略）：`"terminal": {"idle_timeout_hours": 6, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
 
 ### Hub API
 
@@ -244,7 +244,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 登录与会话
 
-- 支持多用户，所有用户权限相同；用户列表保存在根目录 `settings.json` 的 `auth.users`
+- 支持多用户，仅 `lihan` 是管理员；普通用户仅能看到聊天室、ASR 和 OCR，访问其他统一前端页面时跳转到聊天室。用户管理接口与终端仅管理员可用，其他业务 API 沿用登录校验；用户列表保存在根目录 `settings.json` 的 `auth.users`
 - 旧版单管理员字段 `auth.username` / `auth.password_hash` 在启动时自动迁移为第一个用户
 - 每个用户有 `session_version`，会话中同时记录用户名与版本；重置密码时版本递增，删除用户或版本不一致时会话立即失效。中间件按 `settings.json` 修改时间缓存用户表，避免每个请求重复解析
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent } from "react";
 import Link from "next/link";
 import { Icon } from "../ui/icon";
-import { isActivePath, navigation } from "../../lib/navigation";
+import { canVisitPage, isActivePath, navigation } from "../../lib/navigation";
 import {
   isNavGroupCollapsed,
   moveKeyBefore,
@@ -23,14 +23,14 @@ type DragState = { kind: "group"; groupId: string } | { kind: "item"; groupId: s
 
 interface SidebarNavProps {
   pathname: string;
-  terminalAllowed: boolean;
+  username: string | null | undefined;
   unread: number;
   /** 侧栏整体收起为图标列时，忽略分组折叠并关闭拖动排序 */
   iconMode: boolean;
   onNavigate: () => void;
 }
 
-export function SidebarNav({ pathname, terminalAllowed, unread, iconMode, onNavigate }: SidebarNavProps) {
+export function SidebarNav({ pathname, username, unread, iconMode, onNavigate }: SidebarNavProps) {
   const layout = useSyncExternalStore(subscribeNavLayout, readNavLayout, serverSnapshot);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropGroupId, setDropGroupId] = useState<string | null>(null);
@@ -41,9 +41,9 @@ export function SidebarNav({ pathname, terminalAllowed, unread, iconMode, onNavi
   const groups = useMemo(() => orderNavGroups(navigation, layout)
     .map(group => ({
       ...group,
-      items: orderNavItems(group.items, group.id, layout).filter(item => !item.adminOnly || terminalAllowed),
+      items: orderNavItems(group.items, group.id, layout).filter(item => canVisitPage(username, item.href)),
     }))
-    .filter(group => group.items.length), [layout, terminalAllowed]);
+    .filter(group => group.items.length), [layout, username]);
 
   function toggleGroup(event: MouseEvent<HTMLButtonElement>, groupId: string) {
     event.stopPropagation();
