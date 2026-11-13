@@ -17,7 +17,7 @@ type Phase = "loading" | "ready" | "error";
 
 /** 每个房间的一句话引导 */
 const ROOM_GUIDES: Record<string, string> = {
-  foyer: "入口厅 · 下方的门通往大厅，左边的门洞是我的房间",
+  foyer: "入口厅 · 下方出口通往大厅，电梯右侧的玻璃门通往我的房间",
   room: "我的房间 · 站到衣柜前的地台上按 E 换形象、改名字，下方出口回入口厅",
   hall: "大厅 · ASR / OCR 机器前的地台、圆桌地毯上按 E 使用",
 };

@@ -151,7 +151,7 @@ python3 scripts/build_chat_lobby_assets.py --preview /tmp/lobby_preview.png   # 
 | `avatar/{body,eyes,outfit,hair,accessory}.png` + `avatar/parts.json` | `2_Characters/Character_Generator/` 的 `Bodies`、`Eyes`、`Outfits`、`Hairstyles`、`Accessories`（16x16 档，共 432 件）：取第 1 行 idle、第 2 行 walk 重排为 96x256 块，每类一张图集，前端运行时叠层合成 |
 | `foyer.png` / `hall.png` 房间背景 | 地板 `Room_Builder_subfiles/Room_Builder_Floors_16x16.png`、墙面 `Room_Builder_Walls_16x16.png`；墙顶收边与阴影为脚本程序化绘制；挂饰与地毯取自 `Theme_Sorter/1_Generic_16x16.png` 及各主题单件 |
 | `objects.png` + `objects.json` 家具图集 | `Theme_Sorter_Singles/` 的 Living Room、Basement、Classroom and Library、Conference Hall、Television and Film Studio，以及 Generic 总表裁剪（办公椅、长椅、穿衣镜）、Bedroom 总表裁剪（单人床、床头柜、白衣柜） |
-| `anims/*.png` 动画帧条 | `3_Animated_objects/16x16/spritesheets/`（玻璃门、电梯、接待员、滚动屏显示器、音箱、机柜、文档屏、咖啡、猫、鱼缸、布谷鸟钟）；`wave_screen` 截取自 X 光机监视器波形；`arrow_down` / `arrow_up` 由 `4_User_Interface_Elements` 的 GIF 转为帧条，`arrow_left` 由 `arrow_down` 逐帧旋转 |
+| `anims/*.png` 动画帧条 | `3_Animated_objects/16x16/spritesheets/`（玻璃门、电梯、接待员、滚动屏显示器、音箱、机柜、文档屏、咖啡、猫、鱼缸、布谷鸟钟）；`wave_screen` 截取自 X 光机监视器波形；`arrow_down` / `arrow_up` 由 `4_User_Interface_Elements` 的 GIF 转为帧条 |
 | `player.png` | `2_Characters/Character_Generator/0_Premade_Characters/16x16/Premade_Character_12.png` 重排（沿用旧版，不由脚本生成） |
 
 详细说明见 `frontend/public/chat-lobby/CREDITS.md`。新增素材时同样只把派生文件放进 `frontend/public/chat-lobby/`，并在 CREDITS.md 登记。

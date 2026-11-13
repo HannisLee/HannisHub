@@ -33,7 +33,7 @@
     咖啡 16x32（6 帧）、猫 48x16（12 帧）、鱼缸 32x32（8 帧）、布谷鸟钟 16x32（10 帧）；
     `wave_screen` 为 X 光机监视器波形区域逐帧截取（16x16，14 帧）；
     `arrow_down`、`arrow_up` 由 `4_User_Interface_Elements/Animated_Spritesheets/UI_arrow_pointing_down_16x16.gif`、
-    `UI_arrow_pointing_up.gif` 转为帧条，`arrow_left` 由 `arrow_down` 逐帧旋转 90° 得到。
+    `UI_arrow_pointing_up.gif` 转为帧条。
   - `club/layout.json`：房间布局数据（非图像）。
   - `club/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止与行走动画，
     重排为 6 帧 × 8 行（16x32 帧）：静止 南/北/左/右 + 行走 南/北/左/右。

@@ -2,8 +2,8 @@
  "version": 2,
  "tile": 16,
  "world": {
-  "width": 896,
-  "height": 848
+  "width": 576,
+  "height": 1264
  },
  "start": {
   "room": "foyer",
@@ -97,12 +97,6 @@
    "frameHeight": 16,
    "frameRate": 8
   },
-  "arrow_left": {
-   "file": "anims/arrow_left.png",
-   "frameWidth": 16,
-   "frameHeight": 16,
-   "frameRate": 8
-  },
   "arrow_up": {
    "file": "anims/arrow_up.png",
    "frameWidth": 16,
@@ -120,7 +114,7 @@
   {
    "id": "room",
    "name": "我的房间",
-   "x": 0,
+   "x": 192,
    "y": 0,
    "width": 192,
    "height": 160,
@@ -325,8 +319,8 @@
   {
    "id": "foyer",
    "name": "入口厅",
-   "x": 448,
-   "y": 0,
+   "x": 128,
+   "y": 416,
    "width": 320,
    "height": 208,
    "background": "foyer.png",
@@ -334,20 +328,26 @@
     [
      0,
      0,
-     320,
+     196,
+     48
+    ],
+    [
+     196,
+     0,
+     24,
+     20
+    ],
+    [
+     220,
+     0,
+     100,
      48
     ],
     [
      0,
      48,
      16,
-     48
-    ],
-    [
-     0,
-     128,
-     16,
-     80
+     160
     ],
     [
      304,
@@ -550,9 +550,9 @@
      "depth": 308
     },
     {
-     "key": "arrow_left",
-     "x": 20,
-     "y": 104,
+     "key": "arrow_up",
+     "x": 200,
+     "y": 50,
      "depth": 308
     }
    ],
@@ -569,10 +569,10 @@
     },
     {
      "rect": [
-      0,
-      96,
-      6,
-      32
+      198,
+      22,
+      20,
+      20
      ],
      "to": "room",
      "spawn": "fromFoyer"
@@ -590,13 +590,20 @@
      "dir": "up"
     },
     "fromRoom": {
-     "x": 62,
-     "y": 116,
-     "dir": "right"
+     "x": 208,
+     "y": 96,
+     "dir": "down"
     }
    },
    "machines": [],
-   "doors": [],
+   "doors": [
+    {
+     "key": "door_glass",
+     "x": 192,
+     "y": 0,
+     "radius": 40
+    }
+   ],
    "signs": [
     {
      "x": 160,
@@ -611,8 +618,8 @@
      "tone": "muted"
     },
     {
-     "x": 34,
-     "y": 88,
+     "x": 208,
+     "y": 8,
      "text": "我的房间",
      "tone": "muted"
     }
@@ -621,8 +628,8 @@
   {
    "id": "hall",
    "name": "大厅",
-   "x": 320,
-   "y": 464,
+   "x": 0,
+   "y": 880,
    "width": 576,
    "height": 384,
    "background": "hall.png",
@@ -1435,5 +1442,5 @@
    ]
   }
  ],
- "build": "a4e0400ff650"
+ "build": "94d646a96d94"
 }

@@ -220,14 +220,6 @@ def gif_strip(rel: str) -> Image.Image:
     return strip
 
 
-def rotate_frames(strip: Image.Image, size: int, method: Image.Transpose) -> Image.Image:
-    """帧条逐帧旋转（帧为正方形）。"""
-    out = Image.new("RGBA", strip.size)
-    for i in range(strip.width // size):
-        out.paste(strip.crop((i * size, 0, (i + 1) * size, size)).transpose(method), (i * size, 0))
-    return out
-
-
 def build_anims() -> None:
     a = ANIMS
 
@@ -249,10 +241,7 @@ def build_anims() -> None:
     add("cat", load(ANIM_DIR + "animated_cat.png"), 48, 16, 6)
     add("fishtank", load(ANIM_DIR + "animated_fishtank_orange.png"), 32, 32, 6)
     add("clock", load(ANIM_DIR + "animated_cuckoo_clock.png"), 16, 32, 2)
-    arrow_down = gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif")
-    add("arrow_down", arrow_down, 16, 16, 8)
-    # 出口指引的其他方向：向上用官方素材，向左由向下箭头逐帧旋转（90° 旋转对像素图无损）
-    add("arrow_left", rotate_frames(arrow_down, 16, Image.Transpose.ROTATE_270), 16, 16, 8)
+    add("arrow_down", gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif"), 16, 16, 8)
     add("arrow_up", gif_strip(UI_DIR + "UI_arrow_pointing_up.gif"), 16, 16, 8)
     # 声纹屏：截取 X 光机监视器的波形区域（14 帧），作为 ASR 录音台的挂墙示波器
     xray = load(ANIM_DIR + "animated_hospital_xraymachine.png")
@@ -453,20 +442,22 @@ def t(n: float) -> int:
 
 
 def build_foyer() -> Room:
-    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅，左墙开口通往隔壁「我的房间」。"""
+    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅；
+    上墙电梯右侧玻璃门通往楼上「我的房间」（房间下方出口出来即回到这扇门下）。"""
     room = Room("foyer", "入口厅", 20, 13, floor_tex(4, 8), wall_tex(1, 26))
     exit_x0, exit_x1 = t(9), t(11)
     room.bottom_openings.append((exit_x0, exit_x1))
-    side_y0, side_y1 = t(6), t(8)
-    room.left_openings.append((side_y0, side_y1))
+    room_door_x = t(12)
+    room.top_openings.append((room_door_x + 4, room_door_x + 28))
     room.draw_shell()
     w, h = room.w, room.h
 
     # 墙面挂饰
     room.decal("string_lights", t(1.5), 18)
     room.decal("cork_board", t(5.5), 22)
-    room.decal("painting_forest", t(12) + 5, 24)
-    room.decal("painting_aqua", t(14) + 2, 24)
+    # 两幅挂画让出电梯右侧的门位：森林挂到软木板左侧，海景挂到门与彩灯之间
+    room.decal("painting_forest", 62, 24)
+    room.decal("painting_aqua", 234, 24)
     room.decal("string_lights", t(16.5), 18)
     # 地毯：中央迎宾毯 + 等候区 + 出口地垫
     room.rug((t(6), t(5.5), t(14), t(9.5)), floor_tex(8, 20), edge=(40, 36, 70), inner=(150, 140, 200))
@@ -504,16 +495,16 @@ def build_foyer() -> Room:
     room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "大厅", "tone": "muted"})
     room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "hall", "spawn": "fromFoyer"})
 
-    # 左墙门洞：通往隔壁「我的房间」，门口地垫 + 标牌
-    room.rug((16, side_y0 + 3, 40, side_y1 - 3), floor_tex(12, 26), edge=(60, 40, 30))
-    room.signs.append({"x": 34, "y": side_y0 - 8, "text": "我的房间", "tone": "muted"})
-    room.anim("arrow_left", 20, side_y0 + 8, depth=h + 100)
-    room.portals.append({"rect": [0, side_y0, 6, side_y1 - side_y0], "to": "room", "spawn": "fromFoyer"})
+    # 上墙玻璃门：通往「我的房间」，门上标牌 + 门内向上箭头，走近自动开门
+    room.doors.append({"key": "door_glass", "x": room_door_x, "y": 0, "radius": 40})
+    room.portals.append({"rect": [room_door_x + 6, 22, 20, 20], "to": "room", "spawn": "fromFoyer"})
+    room.signs.append({"x": room_door_x + 16, "y": 8, "text": "我的房间", "tone": "muted"})
+    room.anim("arrow_up", room_door_x + 8, 50, depth=h + 100)
 
     room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
     # 回到入口厅时站在出口标牌与箭头之外，避免标牌压在角色头上
     room.spawns["fromHall"] = {"x": t(10), "y": h - 62, "dir": "up"}
-    room.spawns["fromRoom"] = {"x": 62, "y": (side_y0 + side_y1) // 2 + 4, "dir": "right"}
+    room.spawns["fromRoom"] = {"x": room_door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
 
@@ -647,7 +638,7 @@ def build_hall() -> Room:
 
 
 def build_room() -> Room:
-    """我的房间：入口厅左侧隔壁的小卧室。下墙中间开口出去直接回到入口厅；
+    """我的房间：入口厅楼上的小卧室。下墙中间开口出去，从入口厅上墙的玻璃门下出现；
     衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
     room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
     exit_x0, exit_x1 = t(5), t(7)
@@ -838,12 +829,12 @@ def main() -> None:
     room = build_room()
     hall = build_hall()
 
-    # 世界排布：上一行左侧是我的房间、右侧是入口厅，大厅在入口厅正下方。
+    # 世界排布：自上而下 我的房间 → 入口厅 → 大厅，水平居中对齐。
     # 房间之间留足间距：小房间在大屏上居中显示时，相机视野会超出房间，不能看到相邻房间。
     gap = 256
-    room_off = (0, 0)
-    foyer_off = (room.w + gap, 0)
-    hall_off = (foyer_off[0] + (foyer.w - hall.w) // 2, foyer.h + gap)
+    foyer_off = (0, room.h + gap)
+    room_off = ((foyer.w - room.w) // 2, 0)
+    hall_off = ((foyer.w - hall.w) // 2, foyer_off[1] + foyer.h + gap)
     placed = [(room, room_off), (foyer, foyer_off), (hall, hall_off)]
     shift_x = -min(off[0] for _, off in placed)
     placed = [(r, (x + shift_x, y)) for r, (x, y) in placed]
