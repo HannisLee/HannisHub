@@ -1116,3 +1116,4 @@
 - 新增 `frontend/components/llama/ocr-result.tsx` 安全渲染识别结果（标题、列表、表格、公式、分页标记；HTML 表格经 DOMParser 提取文本后渲染，不注入原始 HTML）。同步更新 `spec.md`。已用模拟 OCR 服务验证图片、PDF 轮询、格式与参数校验、账号隔离、重命名、删除与重启恢复，并用真实服务核对输出格式；`typecheck`/`lint`/`build` 通过。
 - 修复 PDF 识别全部页面报「Context size has been exceeded」：OCR llama-server 4 个并发槽共享 16384 上下文，PDF 4 页并发时每页约 4.1k 图像 token 即超限；`scripts/start-xiaomi-ocr.sh` 将 `-c` 提升至 65536（显存增量很小）。`ocr_records.py` 对 PDF 结果区分处理：全部页面失败时记录标记为失败并显示首个原因，部分失败时警告列出失败页码。
 - OCR 页「01 原始文档」右侧新增「清除」按钮，清除已选文件与当前查看的记录、回到拖入上传状态。选中 PDF 时字段提取与图像问答会被禁用（官方 PDF 接口仅支持文档解析），原先只有悬停提示，现在在任务切换旁直接显示原因。删除已合并的 `ocr-refactor` 工作树与分支。
+- OCR 支持 PDF 字段提取与图像问答：PDF 先走原有整页解析链路得到 Markdown，再交给「设置 · AI 能力」当前启用的模型完成字段提取（输出 JSON）或问答；图片三种任务与 PDF 文档解析链路不变。用户先选字段提取 / 问答再上传 PDF 时不再被切回文档解析，记录新增 `pipeline` 字段并在列表标注，中间解析结果保存为 `parsed.md`；文本模型失败时提示到 AI 能力设置检查。已用模拟服务验证两段链路、字段名透传、代码块去除与失败提示。

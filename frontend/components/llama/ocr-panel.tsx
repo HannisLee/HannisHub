@@ -128,7 +128,6 @@ export function OcrPanel() {
     setPendingFile(file);
     setPendingUrl(URL.createObjectURL(file));
     setSelectedId("");
-    if (extensionOf(file.name) === "pdf" && task !== "document") setTask("document");
   }
 
   async function startParse() {
@@ -252,9 +251,9 @@ export function OcrPanel() {
       <Card className="ocr-workspace">
         <div className="ocr-tools">
           <div className="segmented" role="tablist" aria-label="选择任务">
-            {TASKS.map(item => <button key={item.id} type="button" role="tab" aria-selected={task === item.id} disabled={isPdfSelected && item.id !== "document"} title={isPdfSelected && item.id !== "document" ? "PDF 仅支持文档解析" : undefined} onClick={() => setTask(item.id)}><span aria-hidden="true">{item.mark}</span> {item.label}</button>)}
+            {TASKS.map(item => <button key={item.id} type="button" role="tab" aria-selected={task === item.id} onClick={() => setTask(item.id)}><span aria-hidden="true">{item.mark}</span> {item.label}</button>)}
           </div>
-          {isPdfSelected ? <span className="ocr-task-hint">PDF 仅支持文档解析，字段提取与图像问答请上传图片，或点「清除」后重新选择</span> : null}
+          {isPdfSelected && task !== "document" ? <span className="ocr-task-hint">PDF 会先逐页解析为 Markdown，再由「设置 · AI 能力」中当前启用的模型{task === "kie" ? "提取字段" : "回答问题"}</span> : null}
           <div className="ocr-run-actions">
             <Button variant="secondary" onClick={() => inputRef.current?.click()}>↑ 上传文件</Button>
             <Button onClick={() => void startParse()} disabled={!pendingFile || uploadProgress !== null || !ready} title={!ready ? "OCR 服务未就绪" : undefined}>{uploadProgress !== null ? `上传中 ${uploadProgress}%` : "开始解析 ↗"}</Button>
@@ -333,7 +332,7 @@ export function OcrPanel() {
           <article className={`history-row ocr-record${record.id === selectedId ? " is-selected" : ""}`} key={record.id}>
             <div className="history-main">
               <div className="history-title"><strong title={record.name}>{record.name}</strong><Badge tone={statusTone(record.status)}>{STATUS_LABELS[record.status]}</Badge></div>
-              <span>{formatDate(record.created_at)} · {TASK_LABELS[record.task]} · {record.kind === "pdf" ? "PDF" : "图片"} · {formatBytes(record.size)}{record.status === "completed" ? ` · ${(record.chars || 0).toLocaleString()} 字符` : record.status !== "error" ? ` · ${record.progress_detail || ""}` : ""}</span>
+              <span>{formatDate(record.created_at)} · {TASK_LABELS[record.task]}{record.pipeline === "pdf_text" ? "（先解析后文本处理）" : ""} · {record.kind === "pdf" ? "PDF" : "图片"} · {formatBytes(record.size)}{record.status === "completed" ? ` · ${(record.chars || 0).toLocaleString()} 字符` : record.status !== "error" ? ` · ${record.progress_detail || ""}` : ""}</span>
               {record.task === "vqa" && record.question ? <small>问题：{record.question}</small> : null}
               {record.task === "kie" && record.fields ? <small>字段：{record.fields}</small> : null}
               {record.status === "queued" || record.status === "running" ? <ProgressBar value={record.progress || 0} /> : null}

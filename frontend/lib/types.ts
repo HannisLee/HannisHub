@@ -529,6 +529,8 @@ export interface OcrRecord {
   task: OcrTask;
   fields?: string;
   question?: string;
+  /** ocr：直接调用 OCR 服务；pdf_text：PDF 先解析为 Markdown 再交给文本模型做字段提取 / 问答 */
+  pipeline?: "ocr" | "pdf_text";
   status: "queued" | "running" | "completed" | "error";
   progress?: number;
   progress_detail?: string;
