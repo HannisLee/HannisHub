@@ -1164,3 +1164,9 @@
 - 归档调用提示词模块既有接口 `POST /prompt/api/prompts`，数据写入 `prompt_service/settings.json`，与「提示词」页归档列表共用；草稿单独暂存在 `localStorage` 的 `hannishub_prompt_float_draft`，不覆盖提示词页草稿。
 - 复制逻辑抽出到 `frontend/lib/clipboard.ts`，提示词页与浮动组件共用（非安全上下文下回退 `execCommand`）。
 - 样式沿用 design.md tokens：无阴影、1px 边框、品牌色悬停描边。同步 spec.md。验证：`tsc --noEmit`、eslint 通过；未执行 build（避免覆盖线上 `frontend/out`）。
+
+### v0.2.91 — 2026-11-13
+- 侧栏导航重组：原独立的「聊天室」分组取消，聊天室入口移到「聊天大厅」分组内并排在聊天大厅下方。
+- 「提示词」分组上移到「模型管理」之前。
+- 取消「文件管理」与「终端」两个独立分组，其入口（文件游览、服务器文件、文档查看、终端）并入「设置」分组；页面路由、权限与功能保持不变。
+- 同步 spec.md 中的侧栏分组顺序与终端、文件管理入口说明。
