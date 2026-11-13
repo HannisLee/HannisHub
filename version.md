@@ -1134,3 +1134,24 @@
 - 安全修复：`AuthMiddleware` 此前对 WebSocket 请求直接放行，现在握手阶段同样校验登录会话；终端 WebSocket 另校验 Origin 与 Host 一致。
 - 前端新增依赖 `@xterm/xterm`、`@xterm/addon-fit`，新增 `terminal`/`plus`/`close` 图标，导航项支持 `adminOnly`。同步更新 `spec.md`。
 - 验证：不启动 lifespan 的 TestClient 与 8090 临时实例上测试新建、输入输出、双连接镜像、尺寸同步、断开后 shell 存活与回放、重命名、删除后进程结束、`exit` 通知、空闲回收（4 秒时限）、未登录 / 非管理员 / 错误 Origin 被拒；`typecheck`/`lint`/`build` 通过。
+
+### v0.2.87 — 2026-11-13
+- 整理项目目录：根目录只保留入口 `app.py`、`run.sh`、`requirements.txt`、配置文件与项目文档，其余模块按领域放入文件夹。
+- 新增 `core/`：收纳 `auth.py`（登录与会话中间件）与 `compression.py`（选择性 gzip）。
+- 新增 `chatworld/`：后端 `chat_room.py` 移入；前端聊天室与聊天大厅合并到 `frontend/app/(chatworld)/`（路由分组，`/chat`、`/chat-lobby` URL 不变）与 `frontend/components/chatworld/`（`room/` 聊天室、`lobby/` 聊天大厅，原 `frontend/game/lobby/` 移入 `lobby/game/`）。
+- `llama_manager/` 更名为 `model_manager/`，并移入 `ai_settings.py`、`asr_audio.py`、`ocr_records.py`；挂载路径 `/llama-manager` 与前端 `/llama` 保持不变。
+- `file_manager.py`、`terminal_manager.py`、`point_cloud.py` 移入 `server/`。
+- Hub 旧版 `index.html`、`login.html` 移入 `legacy/`；`MEMORY.md` 移入 `docs/`。
+- 移入子目录的模块 `ROOT_DIR` 改为指向项目根目录，`settings.json`、`ai_settings.json`、`data/` 等运行数据位置不变；`run.sh`、`.gitignore` 同步更新为 `model_manager/` 路径；同步更新 spec.md、README.md 与 CLAUDE.md / AGENTS.md。
+- 验证：`import app` 成功、各模块配置与数据路径解析正确；34 个单元测试通过；`tsc --noEmit` 仅剩 `.next/` 旧生成类型的过期报错（下次 build 自动重建）。服务未重启。
+
+### v0.2.88 — 2026-11-13
+- `ChatWorld` 目录统一改为小写：后端 `chatworld/`，前端 `frontend/app/(chatworld)/` 与 `frontend/components/chatworld/`，import 同步更新。
+- 解压付费素材包 Limezu Modern Interiors 整包到 `chatworld/asset/modern_interiors/`（约 626MB、5.5 万文件）：保留官方目录名，去掉外层包装目录；RPG Maker 版本放入 `rpg_maker/`，官方角色生成器放入 `tools/character_generator/`（`linux/` 与 `windows_setup.exe`）。
+- 新增 `chatworld/asset/asset_index.md` 资产速查索引：目录总览、分辨率约定、室内主题与单件数量、角色生成器分层、约 310 种动画物件分组清单、UI 元素、官方预拼房间、聊天大厅已用资产来源与速查命令。
+- `.gitignore` 排除 `chatworld/asset/*`，仅保留 `asset_index.md` 入库（许可证禁止再分发原件）；运行时派生素材仍位于 `frontend/public/chat-lobby/`（Next.js 静态资源要求），`CREDITS.md` 补充原件位置。同步 spec.md、README.md。
+
+### v0.2.89 — 2026-11-13
+- 新增本地选房画廊 `frontend/out/room-gallery/`（源文件 `data/room-gallery/`，均不入库：许可证禁止再分发预览图，且构建输出会在下次前端构建时清除）：收录素材包 `6_Home_Designs` 全部 14 张官方预拼户型预览（×3 最近邻放大）与当前大厅对照图，逐张标注格数、像素、类别、内容说明与选用建议。
+- 画廊交互：类别/换壳首选/仅候选筛选、缩放 ×1 整间适应至 ×6 细节滚动、Tile 网格叠加（格宽随显示比例对齐）、推荐/面积/名称排序、舒适/紧凑密度、候选标记（localStorage 持久化、底部候选栏、清空可撤销）、复制候选清单、导出 Markdown 对比表、灯箱（适应/缩放/前后间/Esc/背景关闭）；桌面/移动/平板 55 项断言全部通过、无控制台与资源错误。
+- 选房建议：整体换壳首选 museum-1（20×17 矩形单厅）、museum-entrance（16×22 纵向门厅）、gym（19×15 中央开阔）；保留现壳借鉴布局 generic-home / japanese-home / condominium；暂不建议 ice-cream / museum-4 / tv-studio / shooting-range / museum-2 / condominium2 / gym2。
