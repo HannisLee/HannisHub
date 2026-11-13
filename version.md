@@ -1110,3 +1110,4 @@
 - 新增分片上传接口：`POST /api/file-manager/uploads` 创建会话并预分配临时文件、`PUT /api/file-manager/uploads/{id}/chunks/{index}` 按偏移写入分片、`POST .../complete` 校验到齐后原子替换、`DELETE /api/file-manager/uploads/{id}` 取消并清理；会话内存保存、6 小时无活动自动清理，仅创建者可用。
 - 前端新增 `frontend/lib/file-manager-upload.ts`：大于 8 MB 的文件按 8 MB 分片、4 片并发上传，单片失败自动重试 3 次（网络错误、超时、5xx、408、429），最终失败时通知服务端清理并记录原因；进度按已传字节实时汇总。小文件仍走原单请求接口。`uploadBinary` 新增可选 `method` 参数。
 - 同步更新 `spec.md`。已用临时目录验证乱序并发分片、缺片拒绝合并、短片拒绝、同名冲突、取消清理及单文件中断日志；`typecheck`/`lint`/`build` 通过。
+- 全站滚动条统一为暖黑风格：`globals.css` 为 `html` 设置 `color-scheme: dark`（原生滚动条与表单控件不再显示浅色），并全局设置细滚动条、`--color-control-border` 暖灰滑块、透明轨道与角落，悬停加深为 `--color-text-muted`；标准 `scrollbar-*` 属性覆盖 Firefox/新版 Chromium，`::-webkit-scrollbar` 作为 Safari 回退。删除提示词列表、聊天消息与表情面板中重复的局部滚动条规则。

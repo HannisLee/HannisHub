@@ -44,7 +44,15 @@
 
 * { box-sizing: border-box; }
 
-html { min-height: 100%; background: var(--color-bg); }
+html { min-height: 100%; background: var(--color-bg); color-scheme: dark; }
+
+/* 全站统一滚动条：细条、暖灰滑块、透明轨道，与暖黑配色一致。
+   标准属性用于 Firefox 与新版 Chromium；::-webkit-scrollbar 作为 Safari 与旧版 Chromium 的回退。 */
+* { scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: var(--color-control-border); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); background-clip: padding-box; }
 
 body {
   min-width: 320px;
@@ -498,11 +506,6 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .prompt-layout .button-sm { min-height: 30px; padding: 0 var(--space-2); font-size: 12px; }
 .prompt-archive-card { overflow: hidden; }
 .prompt-archive-list { display: grid; height: clamp(560px, 72vh, 820px); align-content: start; gap: var(--space-2); padding-right: var(--space-2); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.prompt-archive-list, .prompt-audio-list { scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
-.prompt-archive-list::-webkit-scrollbar, .prompt-audio-list::-webkit-scrollbar { width: 8px; }
-.prompt-archive-list::-webkit-scrollbar-track, .prompt-audio-list::-webkit-scrollbar-track { background: transparent; }
-.prompt-archive-list::-webkit-scrollbar-thumb, .prompt-audio-list::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: var(--color-control-border); background-clip: padding-box; }
-.prompt-archive-list::-webkit-scrollbar-thumb:hover, .prompt-audio-list::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); background-clip: padding-box; }
 .prompt-item { border: 1px solid var(--color-divider); border-radius: var(--radius-sm); background: var(--color-bg); }
 .prompt-item summary { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) var(--space-3); color: var(--color-text-primary); cursor: pointer; font-size: 13px; list-style: none; }
 .prompt-item summary::-webkit-details-marker { display: none; }
@@ -945,7 +948,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-send-failed { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-error); font-size: 12px; }
 .chat-send-failed button { padding: 0; border: 0; background: transparent; color: var(--color-text-secondary); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .chat-send-failed button:hover { color: var(--color-text-primary); }
-.chat-messages { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: var(--space-4); overflow-y: auto; padding-right: var(--space-2); scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
+.chat-messages { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: var(--space-4); overflow-y: auto; padding-right: var(--space-2); }
 .chat-row { display: flex; align-items: flex-start; gap: var(--space-3); }
 .chat-row-mine { flex-direction: row-reverse; }
 .chat-row-grouped { margin-top: calc(var(--space-3) * -1); }
@@ -977,7 +980,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-emoji-popover { position: absolute; right: 0; bottom: calc(100% + var(--space-2)); z-index: 20; }
 .chat-emoji-picker { display: flex; width: 352px; height: 380px; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .chat-emoji-search { min-height: 34px; font-size: 13px; }
-.chat-emoji-viewport { position: relative; flex: 1 1 auto; outline: none; scrollbar-width: thin; scrollbar-color: var(--color-control-border) transparent; }
+.chat-emoji-viewport { position: relative; flex: 1 1 auto; outline: none; }
 .chat-emoji-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; }
 .chat-emoji-list { padding-bottom: var(--space-2); user-select: none; }
 .chat-emoji-category { padding: var(--space-2) var(--space-1) var(--space-1); background: var(--color-surface); color: var(--color-text-muted); font-size: 12px; }
