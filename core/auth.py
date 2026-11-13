@@ -1,6 +1,7 @@
 """HannisHub 的登录、会话与权限中间件。"""
 
 import json
+import hashlib
 import os
 import secrets
 import threading
@@ -9,7 +10,7 @@ from copy import deepcopy
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi.responses import JSONResponse, RedirectResponse
 from pwdlib import PasswordHash
@@ -327,10 +328,22 @@ def is_login_allowed(identifier: str) -> bool:
         return len(attempts) < MAX_LOGIN_FAILURES
 
 
+def login_account_key(username: str) -> str:
+    """限制账号维度的猜密，不在内存中保留明文账号。"""
+    return "account:" + hashlib.sha256(username.encode("utf-8")).hexdigest()
+
+
 def record_login_failure(identifier: str) -> None:
     """记录一次登录失败，用于简单防暴力破解。"""
     now = time.monotonic()
     with _LOGIN_FAILURES_LOCK:
+        # 清除过期条目并限制不同来源占用的内存。
+        if len(_LOGIN_FAILURES) >= 10000:
+            for key in list(_LOGIN_FAILURES):
+                if not _LOGIN_FAILURES[key] or now - _LOGIN_FAILURES[key][-1] >= LOGIN_FAILURE_WINDOW_SECONDS:
+                    del _LOGIN_FAILURES[key]
+            if len(_LOGIN_FAILURES) >= 10000 and identifier not in _LOGIN_FAILURES:
+                return
         attempts = _LOGIN_FAILURES[identifier]
         attempts.append(now)
         while attempts and now - attempts[0] >= LOGIN_FAILURE_WINDOW_SECONDS:
@@ -351,6 +364,44 @@ def _accepts_html(scope: dict[str, Any]) -> bool:
     return False
 
 
+def _regular_user_allowed(path: str, method: str) -> bool:
+    """普通账号默认拒绝管理接口，只放行页面所需接口。"""
+    if path in {"/chat", "/chat/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/"}:
+        return method in {"GET", "HEAD"}
+    if path.startswith("/emojibase/"):
+        return method in {"GET", "HEAD"}
+    if path in {"/api/auth/logout", "/api/auth/password"}:
+        return method == "POST"
+    if path == "/api/ai-settings":
+        return method == "GET"
+    if path == "/api/chat-room/messages" and method == "DELETE":
+        return False
+    if path.startswith(("/api/chat-room/", "/api/ocr/records/")) or path == "/api/ocr/records":
+        return True
+    if path == "/llama-manager/api/asr" or path.startswith("/llama-manager/api/asr/"):
+        return True
+    if path in {"/llama-manager/api/custom-services", "/llama-manager/api/managed-processes"}:
+        return method == "GET"
+    if path == "/llama-manager/api/start":
+        return method == "POST"
+    if path.startswith("/llama-manager/llama-process/") and path.endswith("/api/health"):
+        return method == "GET"
+    return False
+
+
+def _same_origin(scope: dict[str, Any]) -> bool:
+    """写请求必须携带与服务一致的 Origin 或 Referer。"""
+    headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope.get("headers", [])}
+    source = headers.get("origin") or headers.get("referer") or ""
+    parsed = urlsplit(source)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        return False
+    origin = f"{parsed.scheme}://{parsed.netloc}".lower()
+    expected = f"{scope.get('scheme', 'http')}://{headers.get('host', '')}".lower()
+    allowed = {item.strip().lower() for item in os.environ.get("HANNISHUB_DEV_ORIGINS", "").split(",") if item.strip()}
+    return origin == expected or origin in allowed
+
+
 class AuthMiddleware:
     """统一拦截未登录请求，保护 Hub 页面和所有挂载的子服务。"""
 
@@ -360,7 +411,7 @@ class AuthMiddleware:
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "websocket":
             # WebSocket 同样需要有效会话，未登录在握手阶段直接拒绝
-            if current_username(scope.get("session") or {}):
+            if current_username(scope.get("session") or {}) == "lihan":
                 await self.app(scope, receive, send)
             else:
                 await send({"type": "websocket.close", "code": 4401})
@@ -370,6 +421,9 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
+        if scope.get("method") not in {"GET", "HEAD", "OPTIONS"} and not _same_origin(scope):
+            await JSONResponse({"detail": "请求来源不受信任"}, status_code=403)(scope, receive, send)
+            return
         # 登录页的 Next.js 静态脚本和样式必须在未登录时可读取，
         # 它们不包含业务数据，实际 API 与页面导航仍由下方会话判断保护。
         if path in PUBLIC_PATHS or path.startswith("/_next/"):
@@ -379,9 +433,11 @@ class AuthMiddleware:
         session = scope.get("session") or {}
         username = current_username(session)
         if username:
-            # 用户管理接口可重置其他账号密码，必须在服务端限制管理员。
-            if (path == "/api/users" or path.startswith("/api/users/")) and username != "lihan":
-                await JSONResponse({"detail": "仅管理员可管理用户"}, status_code=403)(scope, receive, send)
+            if username != "lihan" and not _regular_user_allowed(path, scope.get("method", "GET")):
+                if _accepts_html(scope):
+                    await RedirectResponse(url="/chat", status_code=303)(scope, receive, send)
+                else:
+                    await JSONResponse({"detail": "仅管理员可访问"}, status_code=403)(scope, receive, send)
                 return
             await self.app(scope, receive, send)
             return

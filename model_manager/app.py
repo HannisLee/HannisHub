@@ -2755,12 +2755,14 @@ async def get_model_repositories():
 
 
 @app.get("/api/custom-services")
-async def get_custom_services():
+async def get_custom_services(request: Request):
     """读取自定义服务注册表"""
     services = sorted(
         _load_custom_services().values(),
         key=lambda item: item.get("created_at", 0),
     )
+    if request.session.get("user") != "lihan":
+        services = [{key: item.get(key) for key in ("id", "name", "service_category", "gpu_indexes")} for item in services if item.get("service_category") in {"asr", "ocr"}]
     return JSONResponse({"services": services})
 
 
@@ -2858,13 +2860,16 @@ async def stop_gpu_process(body: dict = None):
 
 
 @app.get("/api/managed-processes")
-async def get_managed_processes():
-    """获取当前运行期已知受管进程记录"""
-    return JSONResponse({"processes": _managed_process_records_snapshot()})
+async def get_managed_processes(request: Request):
+    """获取当前运行期已知受管进程记录。"""
+    records = _managed_process_records_snapshot()
+    if request.session.get("user") != "lihan":
+        records = [{key: item.get(key) for key in ("pid", "service_id", "running", "port")} for item in records if item.get("service_category") in {"asr", "ocr"}]
+    return JSONResponse({"processes": records})
 
 
 @app.post("/api/start")
-async def start_server(body: dict = None):
+async def start_server(body: dict = None, request: Request = None):
     """启动一个已注册的本地命令服务。"""
     global _current_process, _current_command, _current_model, _current_port, _current_host
 
@@ -2881,6 +2886,8 @@ async def start_server(body: dict = None):
     custom_service = _load_custom_services().get(service_id)
     if custom_service is None:
         raise HTTPException(status_code=400, detail=f"注册服务不存在: {service_id}")
+    if request is not None and request.session.get("user") != "lihan" and custom_service.get("service_category") not in {"asr", "ocr"}:
+        raise HTTPException(status_code=403, detail="仅管理员可启动该服务")
     _auto_start_paused.discard(service_id)
     command = str(custom_service.get("command") or "").strip()
     _command_tokens(command)
@@ -3428,6 +3435,8 @@ async def proxy_to_managed_llama(pid: int, request: Request, path: str = ""):
         item = _managed_processes.get(pid)
         if item is None:
             raise HTTPException(status_code=404, detail=f"受管进程不存在: {pid}")
+        if request.session.get("user") != "lihan" and (item.get("service_category") != "ocr" or path != "api/health" or request.method != "GET"):
+            raise HTTPException(status_code=403, detail="仅管理员可访问该服务")
         base_url = f"http://127.0.0.1:{item['port']}"
 
     try:

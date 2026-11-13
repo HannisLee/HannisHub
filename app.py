@@ -28,6 +28,7 @@ from core.auth import (
     is_terminal_admin,
     list_users,
     login_session,
+    login_account_key,
     migrate_legacy_admin,
     record_login_failure,
     set_user_password,
@@ -68,6 +69,7 @@ from server.point_cloud import resolve_cloud_file
 import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
+USERNAME_LIMIT = 64
 ROOT_DIR = Path(__file__).resolve().parent
 FRONTEND_OUT_DIR = ROOT_DIR / "frontend" / "out"
 # 提示词语音输入与模型管理运行在同一 Hub 进程中，优先复用受管本机 ASR。
@@ -148,7 +150,7 @@ app.add_middleware(
     session_cookie="hannishub_session",
     max_age=int(_auth_settings.get("session_max_age_seconds", 7 * 24 * 60 * 60)),
     same_site="strict",
-    https_only=False,
+    https_only=os.environ.get("HANNISHUB_HTTPS_ONLY", "").lower() in {"1", "true", "yes"},
 )
 # 最后添加的中间件位于最外层：压缩在认证之后作用于最终响应，覆盖所有挂载的子服务
 app.add_middleware(SelectiveGZipMiddleware)
@@ -726,12 +728,15 @@ async def login(request: Request):
     client_ip = request.client.host if request.client else ""
     if not is_configured():
         raise HTTPException(status_code=400, detail="请先初始化管理员账号")
-    if not is_login_allowed(client_ip):
+    account_key = login_account_key(username[:USERNAME_LIMIT])
+    if not is_login_allowed(client_ip) or not is_login_allowed(account_key):
         raise HTTPException(status_code=429, detail="尝试次数过多，请稍后再试")
     if not authenticate(username, password):
         record_login_failure(client_ip)
+        record_login_failure(account_key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     clear_login_failures(client_ip)
+    clear_login_failures(account_key)
     login_session(request.session, username)
     return JSONResponse({"ok": True, "username": username})
 

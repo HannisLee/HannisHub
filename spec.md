@@ -244,8 +244,11 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 登录与会话
 
-- 支持多用户，仅 `lihan` 是管理员；普通用户仅能看到聊天室、ASR 和 OCR，访问其他统一前端页面时跳转到聊天室。用户管理接口与终端仅管理员可用，其他业务 API 沿用登录校验；用户列表保存在根目录 `settings.json` 的 `auth.users`
+- 支持多用户，仅 `lihan` 是管理员；普通用户仅能看到聊天室、ASR 和 OCR，访问其他统一前端页面时跳转到聊天室。后端默认拒绝普通用户访问管理页面和接口，仅放行聊天室、ASR、OCR 所需接口；普通用户仅能启动已注册的 ASR/OCR 服务，服务和进程列表隐藏命令等管理信息；用户列表保存在根目录 `settings.json` 的 `auth.users`
 - 旧版单管理员字段 `auth.username` / `auth.password_hash` 在启动时自动迁移为第一个用户
+- 登录失败按 IP 和账号分别限速：5 分钟内失败 5 次后暂时拒绝，计数保存在进程内，重启后清空。反向代理须正确配置可信代理地址，避免全部请求共用代理 IP；不应信任客户端自行提供的转发头。
+- 写请求必须提供与请求地址同源的 `Origin` 或 `Referer`；开发环境跨源访问可通过 `HANNISHUB_DEV_ORIGINS` 显式配置。HTTPS 部署可设置 `HANNISHUB_HTTPS_ONLY=1` 为会话 Cookie 启用 Secure；代理须保留 Host 并正确传递 HTTPS 协议。
+- ASR 历史和提炼提示词仍为全体登录用户共享，OCR 记录按账号隔离。
 - 每个用户有 `session_version`，会话中同时记录用户名与版本；重置密码时版本递增，删除用户或版本不一致时会话立即失效。中间件按 `settings.json` 修改时间缓存用户表，避免每个请求重复解析
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
 - 会话使用 Starlette `SessionMiddleware` 与 `itsdangerous` 签名 Cookie
