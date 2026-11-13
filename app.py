@@ -54,6 +54,10 @@ from file_manager import (
     search_ply_by_range,
     pull_project_updates,
     upload_file as upload_file_to_directory,
+    init_chunked_upload,
+    upload_chunk,
+    complete_chunked_upload,
+    abort_chunked_upload,
     sync_roots,
 )
 from point_cloud import resolve_cloud_file
@@ -518,6 +522,35 @@ async def file_manager_upload(
     """以原始请求体上传单个文件到当前受限目录，文件相对路径放在 x-file-path 头。"""
     file_path = unquote(request.headers.get("x-file-path", ""))
     return JSONResponse(await upload_file_to_directory(root, path, file_path, request, overwrite=overwrite))
+
+
+@app.post("/api/file-manager/uploads")
+async def file_manager_upload_init(
+    request: Request,
+    root: int = Query(..., ge=0),
+    path: str = Query("", max_length=4_096),
+    payload: dict[str, Any] = Body(...),
+):
+    """创建分片上传会话，提交 file_path、size、chunk_size 与 overwrite。"""
+    return JSONResponse(await run_in_threadpool(init_chunked_upload, root, path, payload, request))
+
+
+@app.put("/api/file-manager/uploads/{upload_id}/chunks/{index}")
+async def file_manager_upload_chunk(request: Request, upload_id: str, index: int):
+    """以原始请求体写入指定序号的分片。"""
+    return JSONResponse(await upload_chunk(upload_id, index, request))
+
+
+@app.post("/api/file-manager/uploads/{upload_id}/complete")
+async def file_manager_upload_complete(request: Request, upload_id: str):
+    """校验分片完整并合并为目标文件。"""
+    return JSONResponse(await run_in_threadpool(complete_chunked_upload, upload_id, request))
+
+
+@app.delete("/api/file-manager/uploads/{upload_id}")
+async def file_manager_upload_abort(request: Request, upload_id: str, reason: str = Query("", max_length=200)):
+    """取消分片上传并删除临时文件。"""
+    return JSONResponse(await run_in_threadpool(abort_chunked_upload, upload_id, request, reason))
 
 
 @app.get("/api/file-manager/download")

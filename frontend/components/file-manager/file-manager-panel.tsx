@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
+import { UPLOAD_CHUNK_BYTES, uploadFileInChunks } from "../../lib/file-manager-upload";
 import { BROWSER_LOCATION_KEY, readBrowserLocation, fileUploadItems, collectDataTransferFiles, uploadableRelativePath, type FileUploadItem } from "../../lib/file-manager-browser";
 import type {
   FileManagerDirectoryResponse,
@@ -372,13 +373,25 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
         setUploadMessage(`正在上传 ${index + 1} / ${selected.length} 个文件 · 目标：${targetLabel}`);
         updateUpload(id, { status: "正在上传", detail: `0% · ${formatBytes(item.file.size)}` });
         try {
-          const params = new URLSearchParams({ root: String(targetRoot), path: targetPath, overwrite: String(overwrite) });
-          const result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
-            "Content-Type": item.file.type || "application/octet-stream",
-            "x-file-path": encodeURIComponent(item.relativePath),
-          }, progress => {
-            updateUpload(id, { progress, status: progress === 100 ? "等待服务器写入" : "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
-          });
+          let result: FileManagerUploadResponse;
+          if (item.file.size > UPLOAD_CHUNK_BYTES) {
+            // 大文件分片并发上传，避免单个请求体超过反向代理上限。
+            result = await uploadFileInChunks({
+              rootIndex: targetRoot, directory: targetPath, relativePath: item.relativePath, file: item.file, overwrite,
+              onProgress: loaded => {
+                const progress = Math.min(100, Math.round(loaded / item.file.size * 100));
+                updateUpload(id, { progress, status: progress === 100 ? "等待服务器合并" : "分片上传中", detail: `${progress}% · ${formatBytes(loaded)} / ${formatBytes(item.file.size)}` });
+              },
+            });
+          } else {
+            const params = new URLSearchParams({ root: String(targetRoot), path: targetPath, overwrite: String(overwrite) });
+            result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
+              "Content-Type": item.file.type || "application/octet-stream",
+              "x-file-path": encodeURIComponent(item.relativePath),
+            }, progress => {
+              updateUpload(id, { progress, status: progress === 100 ? "等待服务器写入" : "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
+            });
+          }
           successCount += 1;
           updateUpload(id, { progress: 100, status: "已上传", detail: `${formatBytes(result.size ?? item.file.size)} · 已写入` });
         } catch (value) {

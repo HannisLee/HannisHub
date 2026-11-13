@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 import re
 import subprocess
@@ -15,6 +17,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import HTTPException, Request
+from starlette.requests import ClientDisconnect
 
 from auth import get_settings_section, update_settings_section
 
@@ -29,12 +32,39 @@ MAX_MARKDOWN_FILE_BYTES = 3 * 1024 * 1024
 MAX_GIT_PULL_SECONDS = 120
 PROJECT_DOCUMENT_DIRECTORY = Path("LIHAN") / "DOC"
 MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024 * 1024
+MIN_UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024
+UPLOAD_SESSION_TTL_SECONDS = 6 * 60 * 60
 CACHE_TTL_SECONDS = 60 * 60
 SYNC_DIRECTORIES = {
     "RadioGS-perlight": Path("/home/lihan/reproduce/RadioGS-perlight"),
     "RadioGS-stage1": Path("/home/lihan/reproduce/RadioGS-stage1"),
 }
 IGNORED_DIRECTORY_NAMES = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".cache", ".venv", "venv"}
+
+
+@dataclass
+class UploadSession:
+    """分片上传会话：临时文件预分配大小，各分片按偏移并发写入，全部到齐后原子替换。"""
+
+    id: str
+    username: str
+    root: Path
+    root_index: int
+    directory: str
+    full_path: str
+    target: Path
+    temp_path: Path
+    size: int
+    chunk_size: int
+    total_chunks: int
+    overwrite: bool
+    received: set[int]
+    created: float
+    updated: float
+
+
+_UPLOAD_SESSIONS: dict[str, UploadSession] = {}
 
 
 @dataclass(frozen=True)
@@ -54,6 +84,9 @@ _DIRECTORY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord], int
 _PLY_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
 _MARKDOWN_CACHE: dict[tuple[Path, str], tuple[float, list[DirectoryRecord]]] = {}
 _CACHE_LOCK = threading.RLock()
+_UPLOAD_LOCK = threading.Lock()
+# 写入 uvicorn.error，使上传日志与访问日志一起出现在 journalctl 中。
+logger = logging.getLogger("uvicorn.error")
 _SYNC_LOCK = threading.Lock()
 _FAVORITES_LOCK = threading.RLock()
 _DATE_SEARCH_DEFAULTS = (
@@ -701,6 +734,79 @@ async def upload_file(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """把上传内容原子写入当前受限目录，支持保留拖入文件夹的相对结构。"""
+    username = _request_username(request)
+    try:
+        root, safe_directory, full_path, target = _prepare_upload_target(root_index, relative_path, file_path, overwrite)
+    except HTTPException as exc:
+        logger.warning("文件上传被拒绝 user=%s root=%s dir=%r file=%r status=%s detail=%s", username, root_index, relative_path, file_path, exc.status_code, exc.detail)
+        raise
+
+    try:
+        content_length = int(request.headers.get("content-length", "0"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="上传长度格式无效") from exc
+    if content_length > MAX_UPLOAD_FILE_BYTES:
+        logger.warning("文件上传被拒绝 user=%s path=%r 声明大小 %s 超过 4 GB", username, full_path, content_length)
+        raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
+
+    logger.info("文件上传开始 user=%s root=%s path=%r size=%s overwrite=%s", username, root_index, full_path, content_length, overwrite)
+    started = time.monotonic()
+    temp_path = target.with_name(f".{target.name}.{uuid4().hex}.upload")
+    total_size = 0
+    try:
+        with temp_path.open("wb") as output:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_FILE_BYTES:
+                    raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
+                output.write(chunk)
+        if target.exists() and (target.is_symlink() or not target.is_file()):
+            raise HTTPException(status_code=409, detail="上传目标在传输期间发生变化，已取消")
+        os.replace(temp_path, target)
+    except HTTPException as exc:
+        temp_path.unlink(missing_ok=True)
+        logger.warning("文件上传失败 user=%s path=%r 已接收 %s/%s 字节 status=%s detail=%s", username, full_path, total_size, content_length, exc.status_code, exc.detail)
+        raise
+    except ClientDisconnect:
+        temp_path.unlink(missing_ok=True)
+        logger.warning("文件上传中断 user=%s path=%r 客户端或代理断开，已接收 %s/%s 字节，耗时 %.1fs", username, full_path, total_size, content_length, time.monotonic() - started)
+        raise
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        logger.error("文件上传写入失败 user=%s path=%r error=%s", username, full_path, exc)
+        raise HTTPException(status_code=500, detail=f"写入上传文件失败：{exc}") from exc
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        logger.exception("文件上传异常 user=%s path=%r 已接收 %s 字节", username, full_path, total_size)
+        raise
+
+    _invalidate_root_caches(root)
+    logger.info("文件上传完成 user=%s path=%r size=%s 耗时 %.1fs", username, full_path, total_size, time.monotonic() - started)
+    return {
+        "root_index": root_index,
+        "directory": safe_directory,
+        "path": full_path,
+        "name": target.name,
+        "size": total_size,
+        "overwrite": overwrite,
+        "modified": time.time(),
+    }
+
+
+def _request_username(request: Request) -> str:
+    """读取上传请求所属的登录用户，仅用于日志与分片会话归属。"""
+    from auth import current_username
+
+    try:
+        return current_username(request.session) or "-"
+    except (AssertionError, KeyError):
+        return "-"
+
+
+def _prepare_upload_target(root_index: int, relative_path: str, file_path: str, overwrite: bool) -> tuple[Path, str, str, Path]:
+    """校验上传目标：顶层目录、相对路径、父目录创建、链接与同名冲突。"""
     roots = configured_roots()
     if root_index < 0 or root_index >= len(roots):
         raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
@@ -725,48 +831,164 @@ async def upload_file(
             raise HTTPException(status_code=409, detail="上传目标已存在同名文件夹")
         if not overwrite:
             raise HTTPException(status_code=409, detail="目标已有同名文件，可勾选覆盖后重试")
+    return root, safe_directory, full_path, target
 
-    try:
-        content_length = int(request.headers.get("content-length", "0"))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="上传长度格式无效") from exc
-    if content_length > MAX_UPLOAD_FILE_BYTES:
+
+def _cleanup_expired_uploads() -> None:
+    """清理超时未完成的分片会话及其临时文件。"""
+    now = time.time()
+    with _UPLOAD_LOCK:
+        expired = [session for session in _UPLOAD_SESSIONS.values() if now - session.updated > UPLOAD_SESSION_TTL_SECONDS]
+        for session in expired:
+            _UPLOAD_SESSIONS.pop(session.id, None)
+    for session in expired:
+        session.temp_path.unlink(missing_ok=True)
+        logger.warning("分片上传超时清理 user=%s path=%r 已收到 %s/%s 片", session.username, session.full_path, len(session.received), session.total_chunks)
+
+
+def _upload_session(upload_id: str, username: str) -> UploadSession:
+    """查找当前用户的分片会话。"""
+    with _UPLOAD_LOCK:
+        session = _UPLOAD_SESSIONS.get(upload_id)
+    if session is None or session.username != username:
+        raise HTTPException(status_code=404, detail="上传会话不存在或已过期，请重新上传")
+    return session
+
+
+def init_chunked_upload(root_index: int, relative_path: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    """创建分片上传会话：校验目标并预分配临时文件。"""
+    _cleanup_expired_uploads()
+    username = _request_username(request)
+    file_path = payload.get("file_path")
+    size = payload.get("size")
+    chunk_size = payload.get("chunk_size")
+    overwrite = bool(payload.get("overwrite", False))
+    if not isinstance(file_path, str):
+        raise HTTPException(status_code=422, detail="缺少上传文件相对路径")
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        raise HTTPException(status_code=422, detail="上传文件大小无效")
+    if size > MAX_UPLOAD_FILE_BYTES:
+        logger.warning("分片上传被拒绝 user=%s file=%r 大小 %s 超过 4 GB", username, file_path, size)
         raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
+    if not isinstance(chunk_size, int) or isinstance(chunk_size, bool) or not MIN_UPLOAD_CHUNK_BYTES <= chunk_size <= MAX_UPLOAD_CHUNK_BYTES:
+        raise HTTPException(status_code=422, detail="分片大小需在 1 MB 到 64 MB 之间")
+    try:
+        root, safe_directory, full_path, target = _prepare_upload_target(root_index, relative_path, file_path, overwrite)
+    except HTTPException as exc:
+        logger.warning("分片上传被拒绝 user=%s root=%s dir=%r file=%r status=%s detail=%s", username, root_index, relative_path, file_path, exc.status_code, exc.detail)
+        raise
 
-    temp_path = target.with_name(f".{target.name}.{uuid4().hex}.upload")
-    total_size = 0
+    upload_id = uuid4().hex
+    temp_path = target.with_name(f".{target.name}.{upload_id}.upload")
     try:
         with temp_path.open("wb") as output:
-            async for chunk in request.stream():
-                if not chunk:
-                    continue
-                total_size += len(chunk)
-                if total_size > MAX_UPLOAD_FILE_BYTES:
-                    raise HTTPException(status_code=413, detail="单个上传文件不能超过 4 GB")
-                output.write(chunk)
-        if target.exists() and (target.is_symlink() or not target.is_file()):
-            raise HTTPException(status_code=409, detail="上传目标在传输期间发生变化，已取消")
-        os.replace(temp_path, target)
-    except HTTPException:
-        temp_path.unlink(missing_ok=True)
-        raise
+            output.truncate(size)
     except OSError as exc:
         temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"写入上传文件失败：{exc}") from exc
-    except BaseException:
-        temp_path.unlink(missing_ok=True)
-        raise
+        logger.error("分片上传创建临时文件失败 user=%s path=%r error=%s", username, full_path, exc)
+        raise HTTPException(status_code=500, detail=f"创建上传临时文件失败：{exc}") from exc
 
-    _invalidate_root_caches(root)
+    now = time.time()
+    session = UploadSession(upload_id, username, root, root_index, safe_directory, full_path, target, temp_path, size,
+                            chunk_size, max(1, math.ceil(size / chunk_size)), overwrite, set(), now, now)
+    with _UPLOAD_LOCK:
+        _UPLOAD_SESSIONS[upload_id] = session
+    logger.info("分片上传开始 user=%s id=%s root=%s path=%r size=%s chunk=%s 共 %s 片 overwrite=%s",
+                username, upload_id, root_index, full_path, size, chunk_size, session.total_chunks, overwrite)
+    return {"upload_id": upload_id, "chunk_size": chunk_size, "total_chunks": session.total_chunks}
+
+
+async def upload_chunk(upload_id: str, index: int, request: Request) -> dict[str, Any]:
+    """按偏移写入单个分片；重复上传同一片会覆盖，便于前端重试。"""
+    session = _upload_session(upload_id, _request_username(request))
+    if index < 0 or index >= session.total_chunks:
+        raise HTTPException(status_code=422, detail="分片序号超出范围")
+    offset = index * session.chunk_size
+    expected = min(session.chunk_size, session.size - offset)
+    written = 0
+    try:
+        fd = os.open(session.temp_path, os.O_WRONLY)
+    except OSError as exc:
+        logger.error("分片上传打开临时文件失败 id=%s path=%r error=%s", upload_id, session.full_path, exc)
+        raise HTTPException(status_code=404, detail="上传临时文件已丢失，请重新上传") from exc
+    try:
+        async for chunk in request.stream():
+            if not chunk:
+                continue
+            if written + len(chunk) > expected:
+                raise HTTPException(status_code=422, detail="分片长度超过预期")
+            os.pwrite(fd, chunk, offset + written)
+            written += len(chunk)
+        if written != expected:
+            raise HTTPException(status_code=422, detail=f"分片长度不完整：{written}/{expected} 字节")
+    except HTTPException as exc:
+        logger.warning("分片写入失败 id=%s path=%r 第 %s 片 status=%s detail=%s", upload_id, session.full_path, index, exc.status_code, exc.detail)
+        raise
+    except ClientDisconnect:
+        logger.warning("分片传输中断 id=%s path=%r 第 %s 片 已接收 %s/%s 字节", upload_id, session.full_path, index, written, expected)
+        raise
+    except OSError as exc:
+        logger.error("分片写入失败 id=%s path=%r 第 %s 片 error=%s", upload_id, session.full_path, index, exc)
+        raise HTTPException(status_code=500, detail=f"写入上传分片失败：{exc}") from exc
+    finally:
+        os.close(fd)
+    with _UPLOAD_LOCK:
+        session.received.add(index)
+        session.updated = time.time()
+        received = len(session.received)
+    return {"upload_id": upload_id, "index": index, "received": received, "total_chunks": session.total_chunks}
+
+
+def complete_chunked_upload(upload_id: str, request: Request) -> dict[str, Any]:
+    """确认所有分片到齐后，把临时文件原子替换为目标文件。"""
+    session = _upload_session(upload_id, _request_username(request))
+    with _UPLOAD_LOCK:
+        missing = [index for index in range(session.total_chunks) if index not in session.received]
+    if missing:
+        logger.warning("分片上传合并失败 id=%s path=%r 缺少 %s 片（如 %s）", upload_id, session.full_path, len(missing), missing[:5])
+        raise HTTPException(status_code=409, detail=f"仍有 {len(missing)} 个分片未上传")
+    target = session.target
+    try:
+        if target.exists() and (target.is_symlink() or not target.is_file()):
+            raise HTTPException(status_code=409, detail="上传目标在传输期间发生变化，已取消")
+        if target.exists() and not session.overwrite:
+            raise HTTPException(status_code=409, detail="目标已有同名文件，可勾选覆盖后重试")
+        os.replace(session.temp_path, target)
+    except HTTPException as exc:
+        abort_upload_session(session, f"合并被拒绝：{exc.detail}")
+        raise
+    except OSError as exc:
+        abort_upload_session(session, f"合并失败：{exc}")
+        raise HTTPException(status_code=500, detail=f"写入上传文件失败：{exc}") from exc
+    with _UPLOAD_LOCK:
+        _UPLOAD_SESSIONS.pop(upload_id, None)
+    _invalidate_root_caches(session.root)
+    logger.info("分片上传完成 user=%s id=%s path=%r size=%s 共 %s 片 耗时 %.1fs",
+                session.username, upload_id, session.full_path, session.size, session.total_chunks, time.time() - session.created)
     return {
-        "root_index": root_index,
-        "directory": safe_directory,
-        "path": full_path,
+        "root_index": session.root_index,
+        "directory": session.directory,
+        "path": session.full_path,
         "name": target.name,
-        "size": total_size,
-        "overwrite": overwrite,
+        "size": session.size,
+        "overwrite": session.overwrite,
         "modified": time.time(),
     }
+
+
+def abort_upload_session(session: UploadSession, reason: str) -> None:
+    """取消分片会话并删除临时文件。"""
+    with _UPLOAD_LOCK:
+        _UPLOAD_SESSIONS.pop(session.id, None)
+    session.temp_path.unlink(missing_ok=True)
+    logger.warning("分片上传取消 user=%s id=%s path=%r 已收到 %s/%s 片 原因：%s",
+                   session.username, session.id, session.full_path, len(session.received), session.total_chunks, reason)
+
+
+def abort_chunked_upload(upload_id: str, request: Request, reason: str) -> dict[str, Any]:
+    """前端放弃上传时调用，清理临时文件。"""
+    abort_upload_session(_upload_session(upload_id, _request_username(request)), reason[:200] or "前端取消")
+    return {"upload_id": upload_id, "aborted": True}
 
 
 def _favorite_name(value: object) -> str:

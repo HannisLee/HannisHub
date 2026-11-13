@@ -57,10 +57,11 @@ export function uploadBinary<T>(
   headers: Record<string, string>,
   onProgress: (percent: number) => void,
   timeoutMs = 0,
+  method = "POST",
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", path);
+    request.open(method, path);
     request.withCredentials = true;
     request.timeout = timeoutMs;
     for (const [key, value] of Object.entries(headers)) request.setRequestHeader(key, value);
