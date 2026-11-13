@@ -43,6 +43,8 @@ export interface SpawnDef {
   x: number;
   y: number;
   dir: Facing;
+  /** 到达该出生点时，房间里的自动门（电梯）开合一次，营造「刚到达」的感觉 */
+  cycleDoor?: boolean;
 }
 
 export interface MachineDef {

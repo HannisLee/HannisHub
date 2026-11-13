@@ -35,7 +35,28 @@
    "file": "anims/elevator.png",
    "frameWidth": 32,
    "frameHeight": 32,
-   "frameRate": 10
+   "frameRate": 10,
+   "door": {
+    "open": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7
+    ],
+    "close": [
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     0
+    ]
+   }
   },
   "receptionist": {
    "file": "anims/receptionist.png",
@@ -328,19 +349,19 @@
     [
      0,
      0,
-     196,
+     150,
      48
     ],
     [
-     196,
+     150,
      0,
-     24,
+     20,
      20
     ],
     [
-     220,
+     170,
      0,
-     100,
+     150,
      48
     ],
     [
@@ -470,10 +491,10 @@
     },
     {
      "key": "bench",
-     "x": 24,
+     "x": 56,
      "y": 152,
      "solid": [
-      25,
+      57,
       160,
       28,
       10
@@ -481,11 +502,11 @@
     },
     {
      "key": "plant_big",
-     "x": 16,
-     "y": 156,
+     "x": 18,
+     "y": 144,
      "solid": [
-      17,
-      190,
+      19,
+      178,
       30,
       14
      ]
@@ -514,11 +535,11 @@
     },
     {
      "key": "plant_big",
-     "x": 272,
-     "y": 156,
+     "x": 270,
+     "y": 144,
      "solid": [
-      273,
-      190,
+      271,
+      178,
       30,
       14
      ]
@@ -526,11 +547,10 @@
    ],
    "anims": [
     {
-     "key": "elevator",
-     "x": 144,
-     "y": 16,
-     "depth": 20,
-     "frames": "once"
+     "key": "arrow_up",
+     "x": 152,
+     "y": 50,
+     "depth": 308
     },
     {
      "key": "receptionist",
@@ -538,25 +558,23 @@
      "y": 48
     },
     {
-     "key": "clock",
-     "x": 112,
-     "y": 16,
-     "depth": 20
-    },
-    {
      "key": "arrow_down",
      "x": 152,
      "y": 158,
      "depth": 308
-    },
-    {
-     "key": "arrow_up",
-     "x": 200,
-     "y": 50,
-     "depth": 308
     }
    ],
    "portals": [
+    {
+     "rect": [
+      152,
+      22,
+      16,
+      12
+     ],
+     "to": "room",
+     "spawn": "fromFoyer"
+    },
     {
      "rect": [
       144,
@@ -566,42 +584,35 @@
      ],
      "to": "hall",
      "spawn": "fromFoyer"
-    },
-    {
-     "rect": [
-      198,
-      22,
-      20,
-      20
-     ],
-     "to": "room",
-     "spawn": "fromFoyer"
     }
    ],
    "spawns": {
     "start": {
      "x": 160,
-     "y": 58,
-     "dir": "down"
+     "y": 104,
+     "dir": "down",
+     "cycleDoor": true
+    },
+    "fromRoom": {
+     "x": 160,
+     "y": 104,
+     "dir": "down",
+     "cycleDoor": true
     },
     "fromHall": {
      "x": 160,
      "y": 146,
      "dir": "up"
-    },
-    "fromRoom": {
-     "x": 208,
-     "y": 96,
-     "dir": "down"
     }
    },
    "machines": [],
    "doors": [
     {
-     "key": "door_glass",
-     "x": 192,
-     "y": 0,
-     "radius": 40
+     "key": "elevator",
+     "x": 144,
+     "y": 16,
+     "radius": 30,
+     "depth": 20
     }
    ],
    "signs": [
@@ -613,14 +624,14 @@
     },
     {
      "x": 160,
-     "y": 154,
-     "text": "大厅",
+     "y": 72,
+     "text": "我的房间",
      "tone": "muted"
     },
     {
-     "x": 208,
-     "y": 8,
-     "text": "我的房间",
+     "x": 160,
+     "y": 154,
+     "text": "大厅",
      "tone": "muted"
     }
    ]
@@ -1442,5 +1453,5 @@
    ]
   }
  ],
- "build": "18142135cae9"
+ "build": "0781db61f169"
 }

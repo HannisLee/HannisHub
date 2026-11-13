@@ -183,6 +183,22 @@ def build_objects() -> None:
     o["mirror"] = trimmed(GENERIC, (224, 1040, 240, 1084))
 
 
+# 素材包单件自带的默认阴影是不透明的单一颜色，压在地毯上会露出一块灰底；统一换成半透明暗色
+PACK_SHADOW = (167, 151, 150, 255)
+SOFT_SHADOW = (30, 22, 30, 72)
+
+
+def soften_shadows() -> None:
+    for key, img in OBJECTS.items():
+        img = img.copy()
+        px = img.load()
+        for y in range(img.height):
+            for x in range(img.width):
+                if px[x, y] == PACK_SHADOW:
+                    px[x, y] = SOFT_SHADOW
+        OBJECTS[key] = img
+
+
 # 墙面挂饰与地毯（直接烘焙进背景，永远在人物下方）
 DECALS: dict[str, Image.Image] = {}
 
@@ -234,7 +250,9 @@ def build_anims() -> None:
     door = load(ANIM_DIR + "animated_door_glass_double.png").copy()
     door.paste((0, 0, 0, 0), (0, 0, door.width, DOOR_TOP))
     add("door_glass", door, 32, 48, 14, door={"open": [0, 1, 2, 3, 4], "close": [5, 6, 7, 0]})
-    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10)
+    # 电梯：通往楼上「我的房间」的自动门。帧 0 关闭，1–7 打开并停在全开，8–13 关闭
+    add("elevator", load(ANIM_DIR + "animated_elevator_door_entrance_1.png"), 32, 32, 10,
+        door={"open": list(range(0, 8)), "close": list(range(8, 14)) + [0]})
     add("receptionist", load(ANIM_DIR + "animated_receptionist.png"), 16, 32, 5)
     add("monitor", load(ANIM_DIR + "animated_control_room_facebook_scrolling.png"), 16, 32, 4)
     add("speaker", load(ANIM_DIR + "animated_amplifier_big.png"), 16, 48, 6)
@@ -450,6 +468,49 @@ class Room:
         }
 
 
+# ---------------------------------------------------------------- 像素字
+
+# 5x7 点阵（i 为 3 列），只包含墙面标识用到的字母
+PIXEL_GLYPHS = {
+    "H": ["1...1", "1...1", "1...1", "11111", "1...1", "1...1", "1...1"],
+    "a": [".....", ".....", ".111.", "....1", ".1111", "1...1", ".1111"],
+    "n": [".....", ".....", "1111.", "1...1", "1...1", "1...1", "1...1"],
+    "i": [".1.", "...", "11.", ".1.", ".1.", ".1.", "111"],
+    "s": [".....", ".....", ".1111", "1....", ".111.", "....1", "1111."],
+    "u": [".....", ".....", "1...1", "1...1", "1...1", "1...1", ".1111"],
+    "b": ["1....", "1....", "1111.", "1...1", "1...1", "1...1", "1111."],
+}
+BRAND = (217, 119, 87, 255)
+BRAND_LIGHT = (240, 168, 132, 255)
+
+
+def pixel_text(text: str, scale: int = 2) -> Image.Image:
+    """像素风墙面字：品牌色字身 + 顶行高光 + 1px 深色描边 + 右下 1px 投影。"""
+    cols = sum(len(PIXEL_GLYPHS[c][0]) for c in text) + len(text) - 1
+    w, h = cols * scale, 7 * scale
+    body = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(body)
+    x = 0
+    for c in text:
+        glyph = PIXEL_GLYPHS[c]
+        for gy, row in enumerate(glyph):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    above = gy > 0 and gx < len(glyph[gy - 1]) and glyph[gy - 1][gx] == "1"
+                    color = BRAND if above else BRAND_LIGHT
+                    d.rectangle(((x + gx) * scale, gy * scale, (x + gx + 1) * scale - 1, (gy + 1) * scale - 1), fill=color)
+        x += len(glyph[0]) + 1
+    mask = body.getchannel("A")
+    out = Image.new("RGBA", (w + 3, h + 3))
+    shadow = Image.new("RGBA", (w, h), (24, 18, 30, 110))
+    outline = Image.new("RGBA", (w, h), OUTLINE)
+    out.paste(shadow, (2, 2), mask)
+    for dx, dy in ((0, 1), (2, 1), (1, 0), (1, 2)):
+        out.paste(outline, (dx, dy), mask)
+    out.alpha_composite(body, (1, 1))
+    return out
+
+
 # ---------------------------------------------------------------- 布局
 
 def t(n: float) -> int:
@@ -457,31 +518,35 @@ def t(n: float) -> int:
 
 
 def build_foyer() -> Room:
-    """入口厅（电梯厅）：电梯进入，前台接待，右侧等候区，下墙中间开口通往大厅；
-    上墙电梯右侧玻璃门通往楼上「我的房间」（房间下方出口出来即回到这扇门下）。"""
+    """入口厅（电梯厅）：只有两个出入口——上墙「HannisHub」标牌下的电梯通往楼上「我的房间」，
+    下墙中间开口通往大厅。电梯两侧墙面是像素字 Hannis / Hub，前台接待，右侧等候区。"""
     room = Room("foyer", "入口厅", 20, 13, floor_tex(4, 8), wall_tex(1, 26))
     exit_x0, exit_x1 = t(9), t(11)
     room.bottom_openings.append((exit_x0, exit_x1))
-    room_door_x = t(12)
-    room.top_openings.append((room_door_x + 4, room_door_x + 28))
+    # 电梯门洞：墙体碰撞只挡住电梯最里侧，角色可以走进电梯
+    room.top_openings.append((t(9) + 6, t(11) - 6))
     room.draw_shell()
     w, h = room.w, room.h
 
-    # 墙面挂饰
+    # 墙面：两端彩灯串 + 电梯两侧像素字 Hannis | Hub + 海景挂画
     room.decal("string_lights", t(1.5), 18)
-    room.decal("cork_board", t(5.5), 22)
-    # 两幅挂画让出电梯右侧的门位：森林挂到软木板左侧，海景挂到门与彩灯之间
-    room.decal("painting_forest", 62, 24)
-    room.decal("painting_aqua", 234, 24)
     room.decal("string_lights", t(16.5), 18)
+    hannis = pixel_text("Hannis")
+    room.bg.alpha_composite(hannis, (t(9) - 6 - hannis.width, 24))
+    room.bg.alpha_composite(pixel_text("Hub"), (t(11) + 6, 24))
+    room.decal("painting_aqua", t(14) + 2, 24)
     # 地毯：中央迎宾毯 + 等候区 + 出口地垫
     room.rug((t(6), t(5.5), t(14), t(9.5)), floor_tex(8, 20), edge=(40, 36, 70), inner=(150, 140, 200))
     room.decal("rug_red_gold", t(13.5) + 2, t(7) - 4)
     room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
 
-    # 电梯（上墙中央），进入场景时开合一次
-    room.anim("elevator", t(9), 16, depth=20, frames="once")
+    # 电梯（上墙中央）：走近自动开门，走进去上楼到「我的房间」；固定深度 20，角色进入时画在门上。
+    # 到达入口厅（开场、从我的房间下楼）时电梯开合一次
+    room.doors.append({"key": "elevator", "x": t(9), "y": 16, "radius": 30, "depth": 20})
+    room.portals.append({"rect": [t(9) + 8, 22, 16, 12], "to": "room", "spawn": "fromFoyer"})
     room.signs.append({"x": t(10), "y": 10, "text": "HannisHub", "tone": "brand"})
+    room.anim("arrow_up", t(10) - 8, 50, depth=h + 100)
+    room.signs.append({"x": t(10), "y": 72, "text": "我的房间", "tone": "muted"})
 
     # 前台：L 形柜台 + 接待员
     room.prop("reception_left", t(1.5), t(3), foot=20)
@@ -489,7 +554,6 @@ def build_foyer() -> Room:
     room.anim("receptionist", t(3.5), t(3))
     room.prop("reception_right", t(4.5), t(3), foot=20)
     room.prop("plant_tall", t(1), t(1), foot=12)
-    room.anim("clock", t(7), 16, depth=20)
 
     # 右侧等候区
     room.prop("plant_palm", t(16.5), t(1), foot=14)
@@ -498,29 +562,23 @@ def build_foyer() -> Room:
     room.prop("table_round", t(14.75), t(7.25), foot=16)
     room.prop("lamp_floor", t(18), t(6.5), foot=8)
 
-    # 左下角长椅与绿植，出口两侧盆栽
-    room.prop("bench", t(1.5), t(9.5), foot=10)
-    room.prop("plant_big", t(1), t(10) - 4, foot=14)
+    # 左下角长椅与绿植，出口两侧盆栽；两角绿植收进地板范围内（底边不超过下墙）
+    room.prop("bench", t(3.5), t(9.5), foot=10)
+    room.prop("plant_big", 18, h - 16 - 48, foot=14)
     room.prop("plant_pot", exit_x0 - 20, h - 46, foot=10)
     room.prop("plant_pot", exit_x1 + 4, h - 46, foot=10)
-    room.prop("plant_big", t(17), t(10) - 4, foot=14)
+    room.prop("plant_big", w - 16 - 34, h - 16 - 48, foot=14)
 
     # 出口提示箭头与传送门
     room.anim("arrow_down", (exit_x0 + exit_x1) // 2 - 8, h - 50, depth=h + 100)
     room.signs.append({"x": (exit_x0 + exit_x1) // 2, "y": h - 54, "text": "大厅", "tone": "muted"})
     room.portals.append({"rect": [exit_x0, h - 10, exit_x1 - exit_x0, 10], "to": "hall", "spawn": "fromFoyer"})
 
-    # 上墙玻璃门：通往「我的房间」，门上标牌 + 门内向上箭头，走近自动开门
-    room.door_recess(room_door_x)
-    room.doors.append({"key": "door_glass", "x": room_door_x, "y": 0, "radius": 40})
-    room.portals.append({"rect": [room_door_x + 6, 22, 20, 20], "to": "room", "spawn": "fromFoyer"})
-    room.signs.append({"x": room_door_x + 16, "y": 8, "text": "我的房间", "tone": "muted"})
-    room.anim("arrow_up", room_door_x + 8, 50, depth=h + 100)
-
-    room.spawns["start"] = {"x": t(10), "y": t(3) + 10, "dir": "down"}
+    # 出生点放在「我的房间」标牌下方；开场与从楼上下来时电梯开合一次
+    room.spawns["start"] = {"x": t(10), "y": 104, "dir": "down", "cycleDoor": True}
+    room.spawns["fromRoom"] = {"x": t(10), "y": 104, "dir": "down", "cycleDoor": True}
     # 回到入口厅时站在出口标牌与箭头之外，避免标牌压在角色头上
     room.spawns["fromHall"] = {"x": t(10), "y": h - 62, "dir": "up"}
-    room.spawns["fromRoom"] = {"x": room_door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
 
@@ -655,7 +713,7 @@ def build_hall() -> Room:
 
 
 def build_room() -> Room:
-    """我的房间：入口厅楼上的小卧室。下墙中间开口出去，从入口厅上墙的玻璃门下出现；
+    """我的房间：入口厅楼上的小卧室（入口厅乘电梯上来）。下墙中间开口出去，回到入口厅电梯前；
     衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
     room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
     exit_x0, exit_x1 = t(5), t(7)
@@ -840,6 +898,7 @@ def main() -> None:
     if not PACK.exists():
         raise SystemExit(f"找不到素材包目录：{PACK}")
     build_objects()
+    soften_shadows()
     build_decals()
     build_anims()
     foyer = build_foyer()

@@ -20,7 +20,7 @@
     每件只保留静止与行走帧并重排为 96x256 块（与 `player.png` 同布局），按类别拼成图集，前端运行时叠层合成。
   - `club/foyer.png`、`club/hall.png`：入口厅与大厅背景。地板取自
     `1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png`，墙面取自
-    `Room_Builder_Walls_16x16.png`；墙顶收边、墙脚阴影与区域地毯边框为脚本绘制；
+    `Room_Builder_Walls_16x16.png`；墙顶收边、墙脚阴影、区域地毯边框与入口厅墙面像素字「Hannis」「Hub」为脚本绘制；
     窗帘窗、挂画、地图、软木板、彩灯串、小地毯烘焙其中（`Theme_Sorter/1_Generic_16x16.png`
     与各主题 `Theme_Sorter_Singles`）。
   - `club/objects.png` + `club/objects.json`：家具图集（Phaser JSON Hash），单件取自
@@ -28,7 +28,7 @@
     Television and Film Studio，办公椅、长椅与穿衣镜裁剪自 Generic 总表，单人床、床头柜与衣柜裁剪自
     `Theme_Sorter/4_Bedroom_16x16.png`。
   - `club/anims/*.png`：动画帧条，取自 `3_Animated_objects/16x16/spritesheets`：
-    玻璃双开门 32x48（8 帧）、电梯 32x32（14 帧）、接待员 16x32（7 帧）、
+    玻璃双开门 32x48（8 帧）、电梯 32x32（14 帧，作为通往我的房间的自动门）、接待员 16x32（7 帧）、
     滚动屏显示器 16x32（12 帧）、音箱 16x48、机柜 16x48、文档屏 32x32（5 帧）、
     咖啡 16x32（6 帧）、猫 48x16（12 帧）、鱼缸 32x32（8 帧）、布谷鸟钟 16x32（10 帧）；
     `wave_screen` 为 X 光机监视器波形区域逐帧截取（16x16，14 帧）；

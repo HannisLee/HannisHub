@@ -11,7 +11,8 @@ interface RuntimeRoom {
   def: RoomDef;
   portals: { def: PortalDef; rect: Phaser.Geom.Rectangle }[];
   machines: { def: MachineDef; rect: Phaser.Geom.Rectangle }[];
-  doors: { def: DoorDef; sprite: Phaser.GameObjects.Sprite; cx: number; cy: number; open: boolean }[];
+  /** holdUntil：到达时开合一次的门在此时刻之前保持打开，不受距离判定影响 */
+  doors: { def: DoorDef; sprite: Phaser.GameObjects.Sprite; cx: number; cy: number; open: boolean; holdUntil: number }[];
   onceAnims: Phaser.GameObjects.Sprite[];
 }
 
@@ -116,8 +117,9 @@ export class LobbyScene extends Phaser.Scene {
     this.enterRoom(start);
     this.scale.on("resize", this.applyCamera, this);
 
-    // 初次进入：电梯开合一次，营造「刚到达」的感觉
+    // 初次进入：一次性动画播放一遍，出生点要求时电梯开合一次，营造「刚到达」的感觉
     this.time.delayedCall(250, () => start.onceAnims.forEach(sprite => sprite.play(`anim-${sprite.texture.key}`)));
+    if (spawn.cycleDoor) this.time.delayedCall(250, () => this.cycleDoors(start));
     this.cameras.main.fadeIn(400, 20, 20, 19);
     this.events_.onReady?.();
   }
@@ -200,7 +202,7 @@ export class LobbyScene extends Phaser.Scene {
     const doors = def.doors.map(door => {
       const sprite = this.add.sprite(ox + door.x, oy + door.y, door.key, 0).setOrigin(0);
       sprite.setDepth(oy + (door.depth ?? door.y + sprite.height));
-      return { def: door, sprite, cx: ox + door.x + sprite.width / 2, cy: oy + door.y + sprite.height, open: false };
+      return { def: door, sprite, cx: ox + door.x + sprite.width / 2, cy: oy + door.y + sprite.height, open: false, holdUntil: 0 };
     });
 
     for (const sign of def.signs) this.createSign(ox + sign.x, oy + sign.y, sign.text, sign.tone === "brand");
@@ -310,12 +312,25 @@ export class LobbyScene extends Phaser.Scene {
       const spawn = target.def.spawns[portal.spawn];
       this.player.teleport(target.def.x + spawn.x, target.def.y + spawn.y, spawn.dir);
       this.enterRoom(target);
+      if (spawn.cycleDoor) this.cycleDoors(target);
       cam.fadeIn(FADE_MS + 60, 20, 20, 19);
       this.time.delayedCall(FADE_MS, () => {
         this.transitioning = false;
         this.player.frozen = this.paused;
       });
     });
+  }
+
+  /** 让房间里的自动门立刻打开并保持一小会儿，随后由 update 的距离判定自然关上 */
+  private cycleDoors(room: RuntimeRoom) {
+    const holdUntil = this.time.now + 1100;
+    for (const door of room.doors) {
+      door.holdUntil = holdUntil;
+      if (!door.open) {
+        door.open = true;
+        door.sprite.play(`${door.def.key}-open`);
+      }
+    }
   }
 
   private setNearby(machine: MachineDef | null) {
@@ -355,7 +370,8 @@ export class LobbyScene extends Phaser.Scene {
 
     // 门：角色靠近自动打开，离开后关闭
     for (const door of this.current.doors) {
-      const near = Phaser.Math.Distance.Between(feetX, feetY, door.cx, door.cy) < door.def.radius;
+      const near = this.time.now < door.holdUntil
+        || Phaser.Math.Distance.Between(feetX, feetY, door.cx, door.cy) < door.def.radius;
       if (near !== door.open) {
         door.open = near;
         door.sprite.play(`${door.def.key}-${near ? "open" : "close"}`);
