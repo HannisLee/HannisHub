@@ -62,6 +62,17 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     make("walk-right", 7, 10);
   }
 
+  /** 当前朝向（多人同步上报用） */
+  get facingDir(): Facing {
+    return this.facing;
+  }
+
+  /** 本帧是否在走动（多人同步上报用） */
+  get isMoving(): boolean {
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    return body.velocity.x !== 0 || body.velocity.y !== 0;
+  }
+
   private animKey(name: string) {
     return `${this.skin}:${name}`;
   }

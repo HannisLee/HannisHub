@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { fetchLobbyProfile, type LobbyProfile } from "../../../lib/chat-lobby";
+import { useShell } from "../../layout/shell-context";
 import { AvatarDialog } from "./avatar-dialog";
 import { composeAvatarSheet, loadAvatarParts, normalizeAvatar } from "./game/avatar";
 import type { LobbyBridge, LobbyEvents, MachineInfo, RoomInfo } from "./game/layout";
@@ -49,7 +50,11 @@ const bridge: LobbyBridge = {
   avatar: { sheet: null, version: 0 },
   paused: false,
   interactQueued: false,
+  start: null,
 };
+
+/** 整页模式（普通账号）从我的房间出生 */
+const PRIVATE_START = { room: "room", spawn: "fromFoyer" };
 
 /** 把资料中的形象合成为帧表写入桥接对象；无自定义形象或素材加载失败时使用默认角色 */
 async function applyProfileAvatar(profile: LobbyProfile | null) {
@@ -73,6 +78,8 @@ function resetBridge() {
 }
 
 export function ChatLobby() {
+  const shell = useShell();
+  const immersive = shell?.immersive ?? false;
   const [phase, setPhase] = useState<Phase>("loading");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
@@ -91,6 +98,11 @@ export function ChatLobby() {
     resetBridge();
     return resetBridge;
   }, []);
+
+  // 出生点在游戏创建前写入（游戏要等资料加载完成才创建）
+  useEffect(() => {
+    bridge.start = immersive ? PRIVATE_START : null;
+  }, [immersive]);
 
   useEffect(() => {
     let alive = true;
@@ -161,8 +173,8 @@ export function ChatLobby() {
   const ready = phase === "ready";
 
   return (
-    <div className="lobby">
-      <header className="lobby-head">
+    <div className={`lobby${immersive ? " is-immersive" : ""}`}>
+      {immersive ? null : <header className="lobby-head">
         <div>
           <h1 className="lobby-title">聊天大厅</h1>
           <p className="lobby-subtitle">{room ? ROOM_GUIDES[room.id] ?? room.name : "像素俱乐部 · 正在进入"}</p>
@@ -177,7 +189,7 @@ export function ChatLobby() {
             <span className="lobby-hint-text">交互</span>
           </span>
         </div>
-      </header>
+      </header>}
 
       <div className="lobby-stage">
         {profileReady ? <LobbyCanvas key={gameKey} bridge={bridge} events={events} /> : <div className="lobby-canvas-host" />}
@@ -186,6 +198,13 @@ export function ChatLobby() {
           <div className="lobby-room-chip" aria-live="polite">
             <span className="lobby-dot" aria-hidden="true" />
             {room.name}
+          </div>
+        ) : null}
+
+        {immersive && shell ? (
+          <div className="lobby-account">
+            <span className="lobby-account-name">{profile?.name || shell.username}</span>
+            <button type="button" className="lobby-account-logout" onClick={() => void shell.logout()}>退出</button>
           </div>
         ) : null}
 
@@ -226,7 +245,7 @@ export function ChatLobby() {
         ) : null}
       </div>
 
-      <p className="lobby-credit">场景素材 Modern Interiors by <a href="https://limezu.itch.io/moderninteriors" target="_blank" rel="noreferrer">LimeZu</a></p>
+      <p className={`lobby-credit${immersive ? " is-overlay" : ""}`}>场景素材 Modern Interiors by <a href="https://limezu.itch.io/moderninteriors" target="_blank" rel="noreferrer">LimeZu</a></p>
 
       {active && active.id === AVATAR_MACHINE ? (
         <AvatarDialog

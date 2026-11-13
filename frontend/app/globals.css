@@ -1065,6 +1065,15 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 @keyframes lobby-prompt-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .lobby-credit { margin: 0; color: var(--color-text-muted); font-size: 12px; }
 .lobby-credit a { color: var(--color-text-secondary); text-decoration: underline; text-decoration-color: var(--color-control-border); text-underline-offset: 3px; }
+/* 整页模式（普通账号）：没有侧栏与顶栏，舞台铺满整个视口 */
+.immersive-container { position: fixed; inset: 0; background: var(--color-bg); }
+.lobby.is-immersive { height: 100%; gap: 0; }
+.lobby.is-immersive .lobby-stage { height: 100%; min-height: 0; border: 0; border-radius: 0; }
+.lobby-account { position: absolute; top: var(--space-4); right: var(--space-4); z-index: 4; display: inline-flex; align-items: center; gap: var(--space-2); max-width: calc(100% - 160px); padding: 4px 4px 4px var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--color-surface) 88%, transparent); color: var(--color-text-secondary); font-size: 13px; line-height: 1.2; }
+.lobby-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-account-logout { flex: 0 0 auto; min-height: 26px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: transparent; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
+.lobby-account-logout:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.lobby-credit.is-overlay { position: fixed; left: var(--space-4); bottom: var(--space-3); z-index: 4; font-size: 11px; }
 .lobby-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); background: color-mix(in srgb, var(--color-bg) 72%, transparent); color: var(--color-text-secondary); font-size: 14px; }
 .lobby-overlay p { margin: 0; }
 .lobby-error-text { color: var(--color-error); }

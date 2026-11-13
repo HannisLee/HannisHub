@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import chat_room, lobby_profile
+from chatworld import chat_room, lobby_presence, lobby_profile
 from model_manager import ocr_records
 from server import terminal_manager
 from core.compression import SelectiveGZipMiddleware
@@ -653,7 +653,20 @@ async def chat_lobby_profile_save(request: Request, payload: dict[str, Any] = Bo
     username = current_username(request.session)
     if not username:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
-    return JSONResponse(await run_in_threadpool(lobby_profile.save_profile, username, payload))
+    profile = await run_in_threadpool(lobby_profile.save_profile, username, payload)
+    # 在线时通知同场的其他人刷新名字与形象
+    lobby_presence.presence.update_profile(username, profile)
+    return JSONResponse(profile)
+
+
+@app.websocket("/api/chat-lobby/ws")
+async def chat_lobby_socket(websocket: WebSocket):
+    """聊天大厅多人同步通道：上报自己的位置，接收公共房间内其他人的位置、形象与上下线。"""
+    username = current_username(websocket.session)
+    if not username or not _websocket_origin_allowed(websocket):
+        await websocket.close(code=lobby_presence.CLOSE_FORBIDDEN)
+        return
+    await lobby_presence.presence.serve(websocket, username)
 
 
 @app.get("/api/point-clouds/file")

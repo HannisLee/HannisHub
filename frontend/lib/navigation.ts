@@ -78,7 +78,16 @@ export function isActivePath(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** 普通用户只能使用聊天室、ASR 和 OCR 页面。 */
+/** 管理员账号：可访问全部页面 */
+export function isAdmin(username: string | null | undefined): boolean {
+  return username === "lihan";
+}
+
+/** 普通账号登录后的默认页面，也是访问受限页面时的跳转目标 */
+export const REGULAR_HOME = "/chat-lobby";
+
+/** 普通用户只能使用聊天大厅、聊天室、ASR 和 OCR 页面。 */
 export function canVisitPage(username: string | null | undefined, pathname: string): boolean {
-  return username === "lihan" || ["/chat", "/llama/asr", "/llama/ocr"].some(path => pathname === path || pathname === `${path}/`);
+  return isAdmin(username)
+    || [REGULAR_HOME, "/chat", "/llama/asr", "/llama/ocr"].some(path => pathname === path || pathname === `${path}/`);
 }

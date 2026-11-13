@@ -134,6 +134,8 @@ export interface LobbyBridge {
   paused: boolean;
   /** 触屏「使用」按钮按下后置 true，场景消费后复位 */
   interactQueued: boolean;
+  /** 出生房间与出生点；null 时使用 layout.json 的默认入口（入口厅） */
+  start: { room: string; spawn: string } | null;
 }
 
 export interface LobbyEvents {

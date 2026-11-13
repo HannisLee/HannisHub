@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
-import { canVisitPage, isActivePath, navigation, navTitle } from "../../lib/navigation";
+import { canVisitPage, isActivePath, isAdmin, navigation, navTitle, REGULAR_HOME } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
 import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } from "../chatworld/room/chat-watcher";
 import { DocumentTitle } from "./document-title";
+import { ShellContext, type ShellInfo } from "./shell-context";
 import { SidebarNav } from "./sidebar-nav";
 
 /** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */
@@ -56,7 +57,14 @@ function subscribeMobileViewport(onChange: () => void): () => void {
 /** 静态导出的构建期没有浏览器环境，服务端快照统一回退到默认形态 */
 const serverSnapshot = () => false;
 
-export function AppShell({ children, contentClassName = "" }: { children: ReactNode; contentClassName?: string }) {
+interface AppShellProps {
+  children: ReactNode;
+  contentClassName?: string;
+  /** 普通账号访问时整页显示页面内容（不渲染侧栏与顶栏），管理员仍使用完整外壳 */
+  immersiveForRegular?: boolean;
+}
+
+export function AppShell({ children, contentClassName = "", immersiveForRegular = false }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const sidebarCollapsed = useSyncExternalStore(subscribeSidebarCollapsed, readSidebarCollapsed, serverSnapshot);
@@ -106,7 +114,7 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
   }, [router]);
 
   useEffect(() => {
-    if (auth?.authenticated && !canVisitPage(auth.username, pathname)) router.replace("/chat");
+    if (auth?.authenticated && !canVisitPage(auth.username, pathname)) router.replace(REGULAR_HOME);
   }, [auth, pathname, router]);
 
   /** 桌面端切换侧栏的展开/收起，移动端切换抽屉 */
@@ -120,10 +128,17 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
 
   const closeDrawer = useCallback(() => setDrawer(current => ({ ...current, open: false })), []);
 
-  async function logout() {
+  const logout = useCallback(async () => {
     await apiFetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
-  }
+  }, [router]);
+
+  const admin = isAdmin(auth?.username);
+  const immersive = immersiveForRegular && !!auth?.authenticated && !admin;
+  const shellInfo = useMemo<ShellInfo>(
+    () => ({ username: auth?.username ?? "", admin, immersive, logout }),
+    [auth?.username, admin, immersive, logout],
+  );
 
   if (authError) return <div className="app-error-screen"><DocumentTitle title="无法连接" />{authError}</div>;
   if (!auth || !auth.authenticated) {
@@ -131,7 +146,16 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
   }
 
   if (!canVisitPage(auth.username, pathname)) {
-    return <div className="app-loading-screen"><DocumentTitle title="载入中" />正在前往聊天室…</div>;
+    return <div className="app-loading-screen"><DocumentTitle title="载入中" />正在前往聊天大厅…</div>;
+  }
+
+  if (immersive) {
+    return (
+      <ShellContext.Provider value={shellInfo}>
+        <DocumentTitle title={pageTitle} unread={unread} />
+        <main className={`immersive-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
+      </ShellContext.Provider>
+    );
   }
 
   // 移动端侧栏始终是抽屉形态，收起形态只在桌面端生效
@@ -139,51 +163,53 @@ export function AppShell({ children, contentClassName = "" }: { children: ReactN
   const navigationOpen = isMobile ? mobileDrawerOpen : !collapsed;
 
   return (
-    <div className="app-shell">
-      <DocumentTitle title={pageTitle} unread={unread} />
-      <div className={`shell-overlay${mobileDrawerOpen ? " is-visible" : ""}`} onClick={closeDrawer} />
-      <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
-        <div className="sidebar-head">
-          <div className="brand-lockup">
-            <Link href={auth.username === "lihan" ? "/" : "/chat"} className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
-            <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
+    <ShellContext.Provider value={shellInfo}>
+      <div className="app-shell">
+        <DocumentTitle title={pageTitle} unread={unread} />
+        <div className={`shell-overlay${mobileDrawerOpen ? " is-visible" : ""}`} onClick={closeDrawer} />
+        <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
+          <div className="sidebar-head">
+            <div className="brand-lockup">
+              <Link href={admin ? "/" : REGULAR_HOME} className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
+              <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
+            </div>
+            <button
+              className="sidebar-toggle"
+              type="button"
+              onClick={toggleNavigation}
+              aria-expanded={navigationOpen}
+              aria-controls="main-sidebar"
+              aria-label={navigationOpen ? "收起侧栏" : "展开侧栏"}
+              title={navigationOpen ? "收起侧栏" : "展开侧栏"}
+            >
+              <Icon name={navigationOpen ? "panelCollapse" : "panelExpand"} />
+            </button>
           </div>
-          <button
-            className="sidebar-toggle"
-            type="button"
-            onClick={toggleNavigation}
-            aria-expanded={navigationOpen}
-            aria-controls="main-sidebar"
-            aria-label={navigationOpen ? "收起侧栏" : "展开侧栏"}
-            title={navigationOpen ? "收起侧栏" : "展开侧栏"}
-          >
-            <Icon name={navigationOpen ? "panelCollapse" : "panelExpand"} />
-          </button>
-        </div>
-        <SidebarNav
-          pathname={pathname}
-          username={auth.username}
-          unread={unread}
-          iconMode={collapsed}
-          onNavigate={closeDrawer}
-        />
-        <div className="sidebar-footer">
-          <div className="sidebar-status"><span className="status-dot" />FastAPI 在线</div>
-          <span className="sidebar-version">HannisHub workspace</span>
-        </div>
-      </aside>
-      <div className="shell-content">
-        <header className="topbar">
-          <button className="menu-toggle" type="button" onClick={toggleNavigation} aria-expanded={navigationOpen} aria-controls="main-sidebar" aria-label={navigationOpen ? "收起导航" : "展开导航"}>☰</button>
-          <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current.label}</strong></div>
-          <div className="topbar-user">
-            <span className="user-name">{auth.username || "管理员"}</span>
-            <Button variant="quiet" size="sm" onClick={logout}>退出</Button>
+          <SidebarNav
+            pathname={pathname}
+            username={auth.username}
+            unread={unread}
+            iconMode={collapsed}
+            onNavigate={closeDrawer}
+          />
+          <div className="sidebar-footer">
+            <div className="sidebar-status"><span className="status-dot" />FastAPI 在线</div>
+            <span className="sidebar-version">HannisHub workspace</span>
           </div>
-        </header>
-        <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
+        </aside>
+        <div className="shell-content">
+          <header className="topbar">
+            <button className="menu-toggle" type="button" onClick={toggleNavigation} aria-expanded={navigationOpen} aria-controls="main-sidebar" aria-label={navigationOpen ? "收起导航" : "展开导航"}>☰</button>
+            <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current.label}</strong></div>
+            <div className="topbar-user">
+              <span className="user-name">{auth.username || "管理员"}</span>
+              <Button variant="quiet" size="sm" onClick={logout}>退出</Button>
+            </div>
+          </header>
+          <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
+        </div>
+        {onChatPage ? null : <ChatToastView />}
       </div>
-      {onChatPage ? null : <ChatToastView />}
-    </div>
+    </ShellContext.Provider>
   );
 }

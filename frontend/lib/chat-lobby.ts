@@ -30,3 +30,37 @@ export function saveLobbyProfile(name: string, avatar: LobbyAvatar | null): Prom
     body: jsonBody({ name, avatar }),
   });
 }
+
+/** ---------- 多人同步（WebSocket /api/chat-lobby/ws），协议见 chatworld/lobby_presence.py ---------- */
+
+export type LobbyFacing = "down" | "up" | "left" | "right";
+
+/** 自己上报的状态：位于私有房间（我的房间）时服务端只保留房间编号 */
+export interface LobbyLocalState {
+  room: string;
+  x: number;
+  y: number;
+  dir: LobbyFacing;
+  moving: boolean;
+}
+
+/** 公共房间（入口厅、大厅）里的其他人；id 为服务端随机生成的角色编号 */
+export interface LobbyRemotePlayer extends LobbyLocalState {
+  id: string;
+  name: string;
+  avatar: LobbyAvatar | null;
+}
+
+export type LobbyServerMessage =
+  | { type: "snapshot"; players: LobbyRemotePlayer[] }
+  | { type: "player"; player: LobbyRemotePlayer }
+  | ({ type: "move"; id: string } & LobbyLocalState)
+  | { type: "hide"; id: string }
+  | { type: "leave"; id: string }
+  | { type: "profile"; id: string; name: string; avatar: LobbyAvatar | null };
+
+export function lobbySocketUrl(): string {
+  const override = process.env.NEXT_PUBLIC_HANNISHUB_WS_ORIGIN;
+  const origin = override || `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+  return `${origin}${API_PATHS.chatLobby}/ws`;
+}

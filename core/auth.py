@@ -364,10 +364,21 @@ def _accepts_html(scope: dict[str, Any]) -> bool:
     return False
 
 
+# 普通账号可连接的 WebSocket 路径
+REGULAR_WEBSOCKET_PATHS = {"/api/chat-lobby/ws"}
+# 普通账号登录后的默认页面，也是访问受限页面时的跳转目标
+REGULAR_HOME = "/chat-lobby"
+
+
 def _regular_user_allowed(path: str, method: str) -> bool:
     """普通账号默认拒绝管理接口，只放行页面所需接口。"""
-    if path in {"/chat", "/chat/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/"}:
+    if path in {"/chat", "/chat/", "/chat-lobby", "/chat-lobby/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/"}:
         return method in {"GET", "HEAD"}
+    # 聊天大厅的场景素材（布局、图集、形象部件）
+    if path.startswith("/chat-lobby/"):
+        return method in {"GET", "HEAD"}
+    if path.startswith("/api/chat-lobby/"):
+        return True
     if path.startswith("/emojibase/"):
         return method in {"GET", "HEAD"}
     if path in {"/api/auth/logout", "/api/auth/password"}:
@@ -410,8 +421,9 @@ class AuthMiddleware:
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "websocket":
-            # WebSocket 同样需要有效会话，未登录在握手阶段直接拒绝
-            if current_username(scope.get("session") or {}) == "lihan":
+            # WebSocket 同样需要有效会话，未登录在握手阶段直接拒绝；普通账号只能连接聊天大厅同步通道
+            username = current_username(scope.get("session") or {})
+            if username == "lihan" or (username and scope.get("path") in REGULAR_WEBSOCKET_PATHS):
                 await self.app(scope, receive, send)
             else:
                 await send({"type": "websocket.close", "code": 4401})
@@ -435,7 +447,7 @@ class AuthMiddleware:
         if username:
             if username != "lihan" and not _regular_user_allowed(path, scope.get("method", "GET")):
                 if _accepts_html(scope):
-                    await RedirectResponse(url="/chat", status_code=303)(scope, receive, send)
+                    await RedirectResponse(url=REGULAR_HOME, status_code=303)(scope, receive, send)
                 else:
                     await JSONResponse({"detail": "仅管理员可访问"}, status_code=403)(scope, receive, send)
                 return

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { setChatEmbedded } from "../../../lib/chat-notify";
+import { useShell } from "../../layout/shell-context";
 import type { MachineInfo } from "./game/layout";
 
 function PanelLoading() {
@@ -41,6 +42,8 @@ interface MachineDialogProps {
 export function MachineDialog({ machine, onClose }: MachineDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const entry = MACHINES[machine.id];
+  // 整页模式（普通账号）不提供跳出游戏的独立页面入口
+  const immersive = useShell()?.immersive ?? false;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -69,7 +72,7 @@ export function MachineDialog({ machine, onClose }: MachineDialogProps) {
             <span className="lobby-machine-hint">{machine.hint}</span>
           </div>
           <div className="lobby-machine-actions">
-            <Link href={href} className="lobby-machine-link">在独立页面打开</Link>
+            {immersive ? null : <Link href={href} className="lobby-machine-link">在独立页面打开</Link>}
             <button ref={closeRef} type="button" className="lobby-machine-close" onClick={onClose} aria-label="关闭面板，回到大厅">
               <kbd>Esc</kbd>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>

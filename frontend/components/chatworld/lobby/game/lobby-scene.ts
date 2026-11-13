@@ -3,8 +3,14 @@ import {
   ASSET_BASE, assetUrl, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
   type PortalDef, type Rect, type RoomDef,
 } from "./layout";
-import { FRAME_HEIGHT, FRAME_WIDTH, SHEET_HEIGHT, SHEET_WIDTH } from "./avatar";
+import type { LobbyAvatar, LobbyRemotePlayer, LobbyServerMessage } from "../../../../lib/chat-lobby";
+import {
+  AVATAR_SLOTS, composeAvatarSheet, FRAME_HEIGHT, FRAME_WIDTH, loadAvatarParts, normalizeAvatar, SHEET_HEIGHT, SHEET_WIDTH,
+} from "./avatar";
+import { NavGrid, type Point } from "./pathfinding";
 import { Player } from "./player";
+import { PresenceClient } from "./presence-client";
+import { RemotePlayer } from "./remote-player";
 
 /** 世界坐标下的房间：在布局数据基础上附加偏移后的矩形，便于判定 */
 interface RuntimeRoom {
@@ -19,6 +25,10 @@ interface RuntimeRoom {
 const FADE_MS = 220;
 /** 自定义形象贴图键：一张常驻的画布贴图，形象变化时重绘并刷新，已有动画与精灵无需重建 */
 const AVATAR_TEXTURE = "avatar-self";
+/** 我的房间：私有，不同步位置；其他人下线后自动走回这里 */
+const PRIVATE_ROOM = "room";
+/** 其他人在该距离内出现在带 cycleDoor 的出生点时，视为刚从电梯出来，电梯开合一次 */
+const ARRIVE_DISTANCE = 6;
 const CAMERA_MARGIN = 12;
 const LABEL_FONT = '"Anthropic Sans", Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 /** 文字纹理放大倍数：世界坐标 1px 在屏幕上会被放大 2–4 倍，文字需更高分辨率才清晰 */
@@ -55,6 +65,15 @@ export class LobbyScene extends Phaser.Scene {
   private paused = false;
   private failed = false;
   private avatarVersion = -1;
+  private presence: PresenceClient | null = null;
+  /** 其他人的角色，键为服务端角色编号 */
+  private remotes = new Map<string, RemotePlayer>();
+  /** 每个房间的寻路网格，首次需要时生成 */
+  private navGrids = new Map<string, NavGrid>();
+  /** 其他人的形象贴图：形象去重键 → 贴图键（已合成）；pending 为正在合成的键 */
+  private remoteSkins = new Map<string, string>();
+  private remoteSkinPending = new Set<string>();
+  private destroyed = false;
 
   constructor(bridge: LobbyBridge, events: LobbyEvents) {
     super("lobby");
@@ -96,9 +115,12 @@ export class LobbyScene extends Phaser.Scene {
     const solids = this.physics.add.staticGroup();
     for (const room of this.layout.rooms) this.rooms.set(room.id, this.buildRoom(room, solids));
 
-    const start = this.rooms.get(this.layout.start.room)!;
-    const spawn = start.def.spawns[this.layout.start.spawn];
-    this.createAvatarTexture();
+    // 页面可指定出生点（普通账号从我的房间开始），无效时退回布局默认入口
+    const custom = this.bridge.start;
+    const startRef = custom && this.rooms.get(custom.room)?.def.spawns[custom.spawn] ? custom : this.layout.start;
+    const start = this.rooms.get(startRef.room)!;
+    const spawn = start.def.spawns[startRef.spawn];
+    this.createSheetTexture(AVATAR_TEXTURE);
     this.player = new Player(this, start.def.x + spawn.x, start.def.y + spawn.y, this.bridge, this.applyAvatar());
     this.physics.add.collider(this.player, solids);
 
@@ -121,6 +143,14 @@ export class LobbyScene extends Phaser.Scene {
     this.time.delayedCall(250, () => start.onceAnims.forEach(sprite => sprite.play(`anim-${sprite.texture.key}`)));
     if (spawn.cycleDoor) this.time.delayedCall(250, () => this.cycleDoors(start));
     this.cameras.main.fadeIn(400, 20, 20, 19);
+
+    // 多人同步：游戏销毁（离开页面）时断开连接，其他人随后看到该角色走回私有房间
+    this.presence = new PresenceClient(message => this.handlePresence(message));
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      this.destroyed = true;
+      this.presence?.destroy();
+      this.presence = null;
+    });
     this.events_.onReady?.();
   }
 
@@ -145,16 +175,17 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   /** 创建 96x256 的画布贴图并切出 48 帧（与 player.png 相同布局） */
-  private createAvatarTexture() {
-    if (this.textures.exists(AVATAR_TEXTURE)) this.textures.remove(AVATAR_TEXTURE);
-    const texture = this.textures.createCanvas(AVATAR_TEXTURE, SHEET_WIDTH, SHEET_HEIGHT);
-    if (!texture) return;
+  private createSheetTexture(key: string): Phaser.Textures.CanvasTexture | null {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const texture = this.textures.createCanvas(key, SHEET_WIDTH, SHEET_HEIGHT);
+    if (!texture) return null;
     const columns = SHEET_WIDTH / FRAME_WIDTH;
     const count = columns * (SHEET_HEIGHT / FRAME_HEIGHT);
     for (let i = 0; i < count; i++) {
       texture.add(i, 0, (i % columns) * FRAME_WIDTH, Math.floor(i / columns) * FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT);
     }
     texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    return texture;
   }
 
   /** 把桥接对象中的形象帧表画进画布贴图；返回应使用的皮肤（无自定义形象时为默认角色） */
@@ -240,6 +271,18 @@ export class LobbyScene extends Phaser.Scene {
     g.lineStyle(0.5, brand ? COLORS.brand : COLORS.border, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
     this.add.container(x, y, [g, label]).setDepth(50000);
   }
+
+  /** 其他人头顶的名字标签：半透明深色胶囊 + 浅色文字，始终显示在家具与标牌之上 */
+  private makeNameTag = (name: string) => {
+    const label = this.makeText(name, 5.5, COLORS.text);
+    const w = Math.ceil(label.width) + 8;
+    const h = 9;
+    const g = this.add.graphics();
+    g.fillStyle(COLORS.surface, 0.82).fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    g.lineStyle(0.5, COLORS.border, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    // 高于墙面标牌（50000），低于按键提示（60000）
+    return this.add.container(0, 0, [g, label]).setDepth(55000);
+  };
 
   /** 机器上方的悬浮铭牌：品牌色指示点 + 名称，轻微上下浮动 */
   private createMachineSign(x: number, y: number, machine: MachineDef) {
@@ -340,6 +383,182 @@ export class LobbyScene extends Phaser.Scene {
     this.events_.onNearby?.(machine ? { id: machine.id, title: machine.title, hint: machine.hint } : null);
   }
 
+  // ---------- 多人同步 ----------
+
+  private handlePresence(message: LobbyServerMessage) {
+    if (this.destroyed) return;
+    switch (message.type) {
+      case "snapshot": {
+        // 重连后以快照为准：快照里没有、也不在离场途中的角色直接移除
+        const ids = new Set(message.players.map(p => p.id));
+        for (const [id, remote] of this.remotes) {
+          if (!ids.has(id) && !remote.leaving) this.removeRemote(id, false);
+        }
+        message.players.forEach(p => this.upsertRemote(p));
+        break;
+      }
+      case "player":
+        this.upsertRemote(message.player);
+        break;
+      case "move": {
+        const remote = this.remotes.get(message.id);
+        if (remote && this.rooms.has(message.room)) remote.push(message);
+        break;
+      }
+      case "hide":
+        // 自己走进了私有房间：此前同步的位置已在电梯 / 门口，淡出即可
+        this.removeRemote(message.id, true);
+        break;
+      case "leave":
+        this.walkHome(message.id);
+        break;
+      case "profile": {
+        const remote = this.remotes.get(message.id);
+        if (!remote) break;
+        remote.setName(message.name);
+        this.applyRemoteAvatar(remote, message.avatar);
+        break;
+      }
+    }
+  }
+
+  private upsertRemote(player: LobbyRemotePlayer) {
+    const room = this.rooms.get(player.room);
+    if (!room || player.room === PRIVATE_ROOM || typeof player.x !== "number" || typeof player.y !== "number") return;
+    let remote = this.remotes.get(player.id);
+    if (remote) {
+      remote.setName(player.name);
+      remote.push(player);
+    } else {
+      remote = new RemotePlayer(this, player.id, player.name, player, "player", this.makeNameTag);
+      this.remotes.set(player.id, remote);
+      // 在当前房间的电梯前出现：电梯开合一次，像是刚下楼
+      if (room === this.current) {
+        const arrived = Object.values(room.def.spawns).some(spawn => spawn.cycleDoor
+          && Phaser.Math.Distance.Between(player.x, player.y, room.def.x + spawn.x, room.def.y + spawn.y) < ARRIVE_DISTANCE);
+        if (arrived) this.cycleDoors(room);
+      }
+    }
+    this.applyRemoteAvatar(remote, player.avatar);
+  }
+
+  private removeRemote(id: string, fade: boolean) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    this.remotes.delete(id);
+    if (fade) remote.fadeOut();
+    else remote.destroy();
+  }
+
+  /** 为其他人合成形象贴图；同款搭配共用一张，合成完成前先显示默认角色 */
+  private applyRemoteAvatar(remote: RemotePlayer, avatar: LobbyAvatar | null) {
+    if (!avatar) {
+      remote.avatarKey = "";
+      remote.setSkin("player");
+      return;
+    }
+    const key = AVATAR_SLOTS.map(slot => avatar[slot] ?? "").join("|");
+    remote.avatarKey = key;
+    const ready = this.remoteSkins.get(key);
+    if (ready) {
+      remote.setSkin(ready);
+      return;
+    }
+    if (this.remoteSkinPending.has(key)) return;
+    this.remoteSkinPending.add(key);
+    loadAvatarParts()
+      .then(parts => {
+        if (this.destroyed) return;
+        const textureKey = `avatar-remote-${this.remoteSkins.size}`;
+        const texture = this.createSheetTexture(textureKey);
+        if (!texture?.context) return;
+        texture.context.drawImage(composeAvatarSheet(parts, normalizeAvatar(parts, avatar)), 0, 0);
+        texture.refresh();
+        this.remoteSkins.set(key, textureKey);
+        for (const other of this.remotes.values()) {
+          if (other.avatarKey === key) other.setSkin(textureKey);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => this.remoteSkinPending.delete(key));
+  }
+
+  private navGrid(roomId: string): NavGrid {
+    let grid = this.navGrids.get(roomId);
+    if (!grid) {
+      grid = new NavGrid(this.rooms.get(roomId)!.def);
+      this.navGrids.set(roomId, grid);
+    }
+    return grid;
+  }
+
+  /** 按传送门连接关系找出从某房间到私有房间要依次经过的传送门 */
+  private routeToPrivate(fromRoom: string): PortalDef[] | null {
+    const previous = new Map<string, { room: string; portal: PortalDef }>();
+    const queue = [fromRoom];
+    const seen = new Set(queue);
+    while (queue.length) {
+      const roomId = queue.shift()!;
+      if (roomId === PRIVATE_ROOM) {
+        const hops: PortalDef[] = [];
+        for (let at = roomId; at !== fromRoom;) {
+          const step = previous.get(at)!;
+          hops.unshift(step.portal);
+          at = step.room;
+        }
+        return hops;
+      }
+      for (const portal of this.rooms.get(roomId)?.def.portals ?? []) {
+        if (seen.has(portal.to) || !this.rooms.has(portal.to)) continue;
+        seen.add(portal.to);
+        previous.set(portal.to, { room: roomId, portal });
+        queue.push(portal.to);
+      }
+    }
+    return null;
+  }
+
+  /** 下线：让角色从当前位置自动走回私有房间（大厅 → 玻璃门 → 入口厅 → 电梯），走进去后淡出 */
+  private walkHome(id: string) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    const hops = this.routeToPrivate(remote.room);
+    if (!hops || hops.length === 0) {
+      this.removeRemote(id, true);
+      return;
+    }
+    remote.leaving = true;
+    const walkLeg = (roomId: string, from: Point, index: number) => {
+      const room = this.rooms.get(roomId)!.def;
+      const portal = hops[index];
+      const grid = this.navGrid(roomId);
+      const local = { x: from.x - room.x, y: from.y - room.y };
+      const target = grid.targetIn(portal.rect);
+      const path = target ? grid.findPath(local, target) : null;
+      if (!path) {
+        this.removeRemote(id, true);
+        return;
+      }
+      remote.follow({
+        room: roomId,
+        points: path.map(p => ({ x: room.x + p.x, y: room.y + p.y })),
+        onArrive: () => {
+          if (this.remotes.get(id) !== remote) return;
+          const next = this.rooms.get(portal.to)!;
+          if (portal.to === PRIVATE_ROOM) {
+            this.removeRemote(id, true);
+            return;
+          }
+          const spawn = next.def.spawns[portal.spawn];
+          const at = { x: next.def.x + spawn.x, y: next.def.y + spawn.y };
+          remote.placeAt(portal.to, at, spawn.dir);
+          walkLeg(portal.to, at, index + 1);
+        },
+      });
+    };
+    walkLeg(remote.room, { x: remote.x, y: remote.y }, 0);
+  }
+
   /** React 打开机器面板或页面输入框获得焦点时暂停：冻结角色并停止拦截按键，
    *  让输入框可以正常输入 WASD/E/空格 */
   private syncPause() {
@@ -359,7 +578,7 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (this.failed || !this.player) return;
     this.syncPause();
     if (this.bridge.avatar.version !== this.avatarVersion) this.player.setSkin(this.applyAvatar());
@@ -367,11 +586,20 @@ export class LobbyScene extends Phaser.Scene {
 
     const feetX = this.player.x;
     const feetY = this.player.y;
+    const roomId = this.current.def.id;
+    this.presence?.report({ room: roomId, x: feetX, y: feetY, dir: this.player.facingDir, moving: this.player.isMoving });
 
-    // 门：角色靠近自动打开，离开后关闭
+    // 其他人：插值移动或自动离场；只显示与自己同一房间的人
+    const actors: Point[] = [{ x: feetX, y: feetY }];
+    for (const remote of this.remotes.values()) {
+      remote.update(delta, roomId);
+      if (remote.room === roomId) actors.push({ x: remote.x, y: remote.y });
+    }
+
+    // 门：任何人（自己或同房间的其他人）靠近自动打开，都离开后关闭
     for (const door of this.current.doors) {
       const near = this.time.now < door.holdUntil
-        || Phaser.Math.Distance.Between(feetX, feetY, door.cx, door.cy) < door.def.radius;
+        || actors.some(actor => Phaser.Math.Distance.Between(actor.x, actor.y, door.cx, door.cy) < door.def.radius);
       if (near !== door.open) {
         door.open = near;
         door.sprite.play(`${door.def.key}-${near ? "open" : "close"}`);
