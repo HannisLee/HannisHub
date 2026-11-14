@@ -29,6 +29,8 @@ export default function LobbyCanvas({ bridge, events }: LobbyCanvasProps) {
       onRoomChange: room => eventsRef.current.onRoomChange?.(room),
       onNearby: machine => eventsRef.current.onNearby?.(machine),
       onInteract: machine => eventsRef.current.onInteract?.(machine),
+      onDesk: deskId => eventsRef.current.onDesk?.(deskId),
+      onDesksChanged: () => eventsRef.current.onDesksChanged?.(),
     };
     const game = createLobbyGame(el, bridge, relay);
     return () => game.destroy();

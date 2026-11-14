@@ -25,6 +25,7 @@ export const navigation: NavGroup[] = [
     items: [
       { href: "/chat-lobby", label: "聊天大厅", icon: "lobby" },
       { href: "/chat", label: "聊天室", icon: "chat" },
+      { href: "/todo", label: "工位待办", icon: "tasks" },
     ],
   },
   { id: "prompts", label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
@@ -86,8 +87,8 @@ export function isAdmin(username: string | null | undefined): boolean {
 /** 普通账号登录后的默认页面，也是访问受限页面时的跳转目标 */
 export const REGULAR_HOME = "/chat-lobby";
 
-/** 普通用户只能使用聊天大厅、聊天室、ASR 和 OCR 页面。 */
+/** 普通用户只能使用聊天大厅、聊天室、ASR、OCR 和工位待办页面。 */
 export function canVisitPage(username: string | null | undefined, pathname: string): boolean {
   return isAdmin(username)
-    || [REGULAR_HOME, "/chat", "/llama/asr", "/llama/ocr"].some(path => pathname === path || pathname === `${path}/`);
+    || [REGULAR_HOME, "/chat", "/llama/asr", "/llama/ocr", "/todo"].some(path => pathname === path || pathname === `${path}/`);
 }

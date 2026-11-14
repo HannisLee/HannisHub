@@ -1,6 +1,6 @@
 /** 像素形象：读取角色生成器部件图集（scripts/build_chat_lobby_assets.py 输出的 avatar/*.png + parts.json），
- *  按 身体 → 眼睛 → 服装 → 发型 → 配饰 的顺序叠层，合成与 player.png 相同布局的 96x256 帧表
- *  （6 帧 x 8 行：静止 南/北/左/右 + 行走 南/北/左/右，每帧 16x32）。React 与 Phaser 共用。 */
+ *  按 身体 → 眼睛 → 服装 → 发型 → 配饰 的顺序叠层，合成与 player.png 相同布局的 96x320 帧表
+ *  （6 帧 x 10 行：静止 南/北/左/右 + 行走 南/北/左/右 + 坐姿 右/左，每帧 16x32）。React 与 Phaser 共用。 */
 import type { LobbyAvatar } from "../../../../lib/chat-lobby";
 import { ASSET_BASE, assetUrl, type Facing } from "./layout";
 
@@ -52,7 +52,7 @@ export const DEFAULT_AVATAR: AvatarConfig = {
 /** 帧表中每个朝向所在的行（静止行；行走行 = 静止行 + 4） */
 export const FACING_ROW: Record<Facing, number> = { down: 0, up: 1, left: 2, right: 3 };
 export const SHEET_WIDTH = 96;
-export const SHEET_HEIGHT = 256;
+export const SHEET_HEIGHT = 320;
 export const FRAME_WIDTH = 16;
 export const FRAME_HEIGHT = 32;
 
@@ -118,7 +118,7 @@ export function randomAvatar(parts: AvatarParts): AvatarConfig {
   };
 }
 
-/** 计算某部件在图集中 96x256 块的左上角 */
+/** 计算某部件在图集中 96x320 块的左上角 */
 function blockOrigin(parts: AvatarParts, slot: AvatarSlot, id: string): [number, number] | null {
   const i = parts.index[slot].get(id);
   if (i === undefined) return null;

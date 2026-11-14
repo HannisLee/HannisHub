@@ -2,7 +2,7 @@
  "frameWidth": 16,
  "frameHeight": 32,
  "blockWidth": 96,
- "blockHeight": 256,
+ "blockHeight": 320,
  "columns": 16,
  "categories": {
   "body": {
@@ -2196,5 +2196,5 @@
    ]
   }
  },
- "build": "44894a1fb5f5"
+ "build": "596588c16452"
 }

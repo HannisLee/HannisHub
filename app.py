@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import chat_room, lobby_presence, lobby_profile
+from chatworld import chat_room, lobby_desks, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
 from server import terminal_manager
 from core.compression import SelectiveGZipMiddleware
@@ -292,6 +292,12 @@ async def chat_page():
 @app.get("/chat-lobby/", include_in_schema=False)
 async def chat_lobby_page():
     return await _new_frontend_route("chat-lobby")
+
+
+@app.get("/todo", include_in_schema=False)
+@app.get("/todo/", include_in_schema=False)
+async def todo_page():
+    return await _new_frontend_route("todo")
 
 
 @app.get("/terminal", include_in_schema=False)
@@ -662,6 +668,82 @@ async def chat_lobby_profile_save(request: Request, payload: dict[str, Any] = Bo
     return JSONResponse(profile)
 
 
+def _require_user(request: Request) -> str:
+    username = current_username(request.session)
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return username
+
+
+@app.get("/api/chat-lobby/desks")
+async def chat_lobby_desks(request: Request):
+    """聊天大厅工位归属：已认领工位的显示名字、是否为自己的，以及自己的工位编号。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(lobby_desks.desk_state, username))
+
+
+@app.put("/api/chat-lobby/desks/mine")
+async def chat_lobby_desk_claim(request: Request, payload: dict[str, Any] = Body(...)):
+    """认领工位（已有工位时换到新工位）；工位已被别人认领时返回 409。"""
+    username = _require_user(request)
+    state = await run_in_threadpool(lobby_desks.claim, username, payload.get("desk"))
+    lobby_presence.presence.notify_desks()
+    return JSONResponse(state)
+
+
+@app.delete("/api/chat-lobby/desks/mine")
+async def chat_lobby_desk_release(request: Request):
+    """退还自己的工位。"""
+    username = _require_user(request)
+    state = await run_in_threadpool(lobby_desks.release, username)
+    lobby_presence.presence.notify_desks()
+    return JSONResponse(state)
+
+
+@app.get("/api/todos")
+async def todo_list(request: Request):
+    """当前账号的全部工位待办。"""
+    username = _require_user(request)
+    return JSONResponse({"todos": await run_in_threadpool(todos.list_todos, username)})
+
+
+@app.post("/api/todos")
+async def todo_create(request: Request, payload: dict[str, Any] = Body(...)):
+    """新建待办。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.create_todo, username, payload))
+
+
+@app.post("/api/todos/reorder")
+async def todo_reorder(request: Request, payload: dict[str, Any] = Body(...)):
+    """按给定的待办编号顺序重排。"""
+    username = _require_user(request)
+    return JSONResponse({"todos": await run_in_threadpool(todos.reorder, username, payload.get("ids"))})
+
+
+@app.post("/api/todos/clear-completed")
+async def todo_clear_completed(request: Request, payload: dict[str, Any] = Body(default={})):
+    """删除已完成的待办；可只清理某个清单（list）。"""
+    username = _require_user(request)
+    list_name = payload.get("list") if isinstance(payload, dict) and isinstance(payload.get("list"), str) else None
+    return JSONResponse({"deleted": await run_in_threadpool(todos.clear_completed, username, list_name)})
+
+
+@app.patch("/api/todos/{todo_id}")
+async def todo_update(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """修改待办的部分字段（标题、备注、清单、优先级、截止日期、今天、完成、子任务、排序）。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.update_todo, username, todo_id, payload))
+
+
+@app.delete("/api/todos/{todo_id}")
+async def todo_delete(todo_id: str, request: Request):
+    """删除待办。"""
+    username = _require_user(request)
+    await run_in_threadpool(todos.delete_todo, username, todo_id)
+    return JSONResponse({"ok": True})
+
+
 @app.websocket("/api/chat-lobby/ws")
 async def chat_lobby_socket(websocket: WebSocket):
     """聊天大厅多人同步通道：上报自己的位置，接收公共房间内其他人的位置、形象与上下线。"""
@@ -861,6 +943,9 @@ async def users_delete(username: str, request: Request):
     # 账号删除后清理其按账号保存的数据，避免以后同名新账号继承旧记录
     await run_in_threadpool(model_manager_app.purge_asr_user, username)
     await run_in_threadpool(ocr_records.purge_user, username)
+    await run_in_threadpool(todos.purge_user, username)
+    await run_in_threadpool(lobby_desks.purge_user, username)
+    lobby_presence.presence.notify_desks()
     return JSONResponse({"ok": True})
 
 

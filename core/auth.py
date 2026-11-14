@@ -376,8 +376,12 @@ REGULAR_HOME = "/chat-lobby"
 
 def _regular_user_allowed(path: str, method: str) -> bool:
     """普通账号默认拒绝管理接口，只放行页面所需接口。"""
-    if path in {"/chat", "/chat/", "/chat-lobby", "/chat-lobby/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/"}:
+    if path in {"/chat", "/chat/", "/chat-lobby", "/chat-lobby/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/",
+                "/todo", "/todo/"}:
         return method in {"GET", "HEAD"}
+    # 工位待办：接口内部按当前账号隔离
+    if path == "/api/todos" or path.startswith("/api/todos/"):
+        return True
     # 聊天大厅的场景素材（布局、图集、形象部件）
     if path.startswith("/chat-lobby/"):
         return method in {"GET", "HEAD"}

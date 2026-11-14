@@ -1,9 +1,12 @@
 import Phaser from "phaser";
 import {
-  ASSET_BASE, assetUrl, type DoorDef, type LobbyBridge, type LobbyEvents, type LobbyLayout, type MachineDef,
-  type PortalDef, type Rect, type RoomDef,
+  ASSET_BASE, assetUrl, type ActionDef, type DeskDef, type DoorDef, type InteractKind, type LobbyBridge,
+  type LobbyEvents, type LobbyLayout, type MachineDef, type NearbyInfo, type PortalDef, type Rect, type RoomDef, type SeatDef,
 } from "./layout";
-import type { LobbyAvatar, LobbyRemotePlayer, LobbyServerMessage } from "../../../../lib/chat-lobby";
+import {
+  LOBBY_EMOTES, QUICK_EMOTES, type LobbyAvatar, type LobbyRemotePlayer, type LobbyServerMessage,
+} from "../../../../lib/chat-lobby";
+import { playTune } from "./tunes";
 import {
   AVATAR_SLOTS, composeAvatarSheet, FRAME_HEIGHT, FRAME_WIDTH, loadAvatarParts, normalizeAvatar, SHEET_HEIGHT, SHEET_WIDTH,
 } from "./avatar";
@@ -12,11 +15,31 @@ import { Player } from "./player";
 import { PresenceClient } from "./presence-client";
 import { RemotePlayer } from "./remote-player";
 
+/** 房间里可按 E 交互的对象（机器、工位、座位、小互动），rect 为世界坐标下的站立区 */
+interface Interactable {
+  kind: InteractKind;
+  id: string;
+  rect: Phaser.Geom.Rectangle;
+  machine?: MachineDef;
+  desk?: DeskDef;
+  seat?: SeatDef;
+  action?: ActionDef;
+}
+
+/** 头顶气泡：跟随角色，到时自动消失 */
+interface Bubble {
+  container: Phaser.GameObjects.Container;
+  follow: () => { x: number; y: number; visible: boolean };
+  until: number;
+}
+
 /** 世界坐标下的房间：在布局数据基础上附加偏移后的矩形，便于判定 */
 interface RuntimeRoom {
   def: RoomDef;
   portals: { def: PortalDef; rect: Phaser.Geom.Rectangle }[];
-  machines: { def: MachineDef; rect: Phaser.Geom.Rectangle }[];
+  interactables: Interactable[];
+  /** 可演奏的钢琴精灵（坐上琴凳时播放按键动画） */
+  pianos: Phaser.GameObjects.Sprite[];
   /** holdUntil：到达时开合一次的门在此时刻之前保持打开，不受距离判定影响 */
   doors: { def: DoorDef; sprite: Phaser.GameObjects.Sprite; cx: number; cy: number; open: boolean; holdUntil: number }[];
   onceAnims: Phaser.GameObjects.Sprite[];
@@ -30,6 +53,12 @@ const PRIVATE_ROOM = "room";
 /** 其他人在该距离内出现在带 cycleDoor 的出生点时，视为刚从电梯出来，电梯开合一次 */
 const ARRIVE_DISTANCE = 6;
 const CAMERA_MARGIN = 12;
+/** 自己发表情的最短间隔，避免连按刷屏（服务端另有限速） */
+const EMOTE_COOLDOWN_MS = 700;
+const BUBBLE_MS = 2400;
+const SELF_ID = "self";
+/** 自己头顶气泡的高度（本地角色不显示名字，气泡直接在头顶） */
+const SELF_BUBBLE_Y = 38;
 const LABEL_FONT = '"Anthropic Sans", Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 /** 文字纹理放大倍数：世界坐标 1px 在屏幕上会被放大 2–4 倍，文字需更高分辨率才清晰 */
 const TEXT_RESOLUTION = 6;
@@ -57,7 +86,13 @@ export class LobbyScene extends Phaser.Scene {
   private player!: Player;
   private rooms = new Map<string, RuntimeRoom>();
   private current!: RuntimeRoom;
-  private nearby: MachineDef | null = null;
+  private nearby: NearbyInfo | null = null;
+  /** 当前坐着的工位（坐在工位上再按 E 重新打开待办） */
+  private seatedDesk: string | null = null;
+  private deskVersion = -1;
+  private deskTags = new Map<string, Phaser.GameObjects.Container>();
+  private bubbles = new Map<string, Bubble>();
+  private lastEmoteAt = 0;
   /** 交互键按下标记：在 keydown 事件里置位，避免按下与抬起落在同一帧时 JustDown 丢失快速轻按 */
   private interactPressed = false;
   private prompt!: Phaser.GameObjects.Container;
@@ -133,6 +168,16 @@ export class LobbyScene extends Phaser.Scene {
     };
     keyboard.on("keydown-E", markInteract);
     keyboard.on("keydown-SPACE", markInteract);
+    // 数字键 1–4：快捷表情（面板打开或输入框聚焦时键盘已停用）
+    (["ONE", "TWO", "THREE", "FOUR"] as const).forEach((name, i) => {
+      keyboard.addKey(Phaser.Input.Keyboard.KeyCodes[name]);
+      keyboard.on(`keydown-${name}`, (event: KeyboardEvent) => {
+        if (!event.repeat) this.emote(QUICK_EMOTES[i]);
+      });
+    });
+    this.player.onStand = () => {
+      this.seatedDesk = null;
+    };
     this.prompt = this.createPrompt();
 
     this.cameras.main.setBackgroundColor("#141413");
@@ -174,7 +219,7 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  /** 创建 96x256 的画布贴图并切出 48 帧（与 player.png 相同布局） */
+  /** 创建 96x320 的画布贴图并切出 60 帧（与 player.png 相同布局） */
   private createSheetTexture(key: string): Phaser.Textures.CanvasTexture | null {
     if (this.textures.exists(key)) this.textures.remove(key);
     const texture = this.textures.createCanvas(key, SHEET_WIDTH, SHEET_HEIGHT);
@@ -218,10 +263,13 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     const onceAnims: Phaser.GameObjects.Sprite[] = [];
+    const pianos: Phaser.GameObjects.Sprite[] = [];
     for (const anim of def.anims) {
       const sprite = this.add.sprite(ox + anim.x, oy + anim.y, anim.key, 0).setOrigin(0);
       sprite.setDepth(oy + (anim.depth ?? anim.y + sprite.height));
-      if (anim.frames === "once") onceAnims.push(sprite);
+      // 钢琴只在有人弹奏时播放，不参与「到达时播放一次」
+      if (anim.key === "piano") pianos.push(sprite);
+      else if (anim.frames === "once") onceAnims.push(sprite);
       else {
         // 随机起始帧，避免同款物件（显示器、音箱）同步闪动
         const count = this.anims.get(`anim-${anim.key}`).frames.length;
@@ -240,10 +288,17 @@ export class LobbyScene extends Phaser.Scene {
     for (const machine of def.machines) this.createMachineSign(ox + machine.signX, oy + machine.signY, machine);
 
     const toRect = ([x, y, w, h]: Rect) => new Phaser.Geom.Rectangle(ox + x, oy + y, w, h);
+    const interactables: Interactable[] = [
+      ...def.machines.map(machine => ({ kind: "machine" as const, id: machine.id, rect: toRect(machine.zone), machine })),
+      ...(def.desks ?? []).map(desk => ({ kind: "desk" as const, id: desk.id, rect: toRect(desk.zone), desk })),
+      ...(def.seats ?? []).map(seat => ({ kind: "seat" as const, id: seat.id, rect: toRect(seat.zone), seat })),
+      ...(def.actions ?? []).map(action => ({ kind: "action" as const, id: action.id, rect: toRect(action.zone), action })),
+    ];
     return {
       def,
       portals: def.portals.map(portal => ({ def: portal, rect: toRect(portal.rect) })),
-      machines: def.machines.map(machine => ({ def: machine, rect: toRect(machine.zone) })),
+      interactables,
+      pianos,
       doors,
       onceAnims,
     };
@@ -261,7 +316,7 @@ export class LobbyScene extends Phaser.Scene {
     return label.setOrigin(0.5, 0.5);
   }
 
-  /** 墙上的小型标牌（如入口厅品牌、出口方向） */
+  /** 墙上的小型标牌（如入口厅品牌、出口方向、工位名牌） */
   private createSign(x: number, y: number, text: string, brand: boolean) {
     const label = this.makeText(text, brand ? 6 : 5.5, brand ? COLORS.text : COLORS.muted);
     const w = Math.ceil(label.width) + 10;
@@ -269,7 +324,7 @@ export class LobbyScene extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(COLORS.surface, 0.92).fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
     g.lineStyle(0.5, brand ? COLORS.brand : COLORS.border, 1).strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
-    this.add.container(x, y, [g, label]).setDepth(50000);
+    return this.add.container(x, y, [g, label]).setDepth(50000);
   }
 
   /** 其他人头顶的名字标签：半透明深色胶囊 + 浅色文字，始终显示在家具与标牌之上 */
@@ -376,11 +431,142 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  private setNearby(machine: MachineDef | null) {
-    if (this.nearby?.id === machine?.id) return;
-    this.nearby = machine;
-    this.prompt.setVisible(Boolean(machine));
-    this.events_.onNearby?.(machine ? { id: machine.id, title: machine.title, hint: machine.hint } : null);
+  private setNearby(info: NearbyInfo | null) {
+    const same = this.nearby && info && this.nearby.id === info.id && this.nearby.kind === info.kind
+      && this.nearby.title === info.title && this.nearby.hint === info.hint;
+    if (same || (!this.nearby && !info)) return;
+    this.nearby = info;
+    this.prompt.setVisible(Boolean(info));
+    this.events_.onNearby?.(info);
+  }
+
+  /** 工位的标题与提示随归属变化：自己的、别人的、空闲 */
+  private deskInfo(desk: DeskDef): NearbyInfo {
+    const claim = this.bridge.desks.claims[desk.id];
+    if (claim?.mine) return { kind: "desk", id: desk.id, title: "我的工位", hint: "坐下并打开待办" };
+    if (claim) return { kind: "desk", id: desk.id, title: `${claim.name} 的工位`, hint: "借坐一会儿" };
+    return { kind: "desk", id: desk.id, title: "空闲工位", hint: "坐下，可以认领为自己的工位" };
+  }
+
+  private describe(item: Interactable): NearbyInfo {
+    if (item.machine) return { kind: "machine", id: item.id, title: item.machine.title, hint: item.machine.hint };
+    if (item.desk) return this.deskInfo(item.desk);
+    if (item.seat) {
+      return { kind: "seat", id: item.id, title: item.seat.title, hint: item.seat.play === "piano" ? "坐下弹一段" : "按方向键起身" };
+    }
+    return { kind: "action", id: item.id, title: item.action!.title, hint: item.action!.hint };
+  }
+
+  /** 脚底所在的交互区；重叠时取面积最小（更具体）的一个 */
+  private findInteractable(x: number, y: number): Interactable | null {
+    let best: Interactable | null = null;
+    for (const item of this.current.interactables) {
+      if (!item.rect.contains(x, y)) continue;
+      if (!best || item.rect.width * item.rect.height < best.rect.width * best.rect.height) best = item;
+    }
+    return best;
+  }
+
+  private interact(item: Interactable) {
+    const room = this.current.def;
+    if (item.machine) {
+      this.events_.onInteract?.({ id: item.machine.id, title: item.machine.title, hint: item.machine.hint });
+    } else if (item.desk) {
+      const seat = item.desk.seat;
+      this.player.sit(room.x + seat.x, room.y + seat.y, seat.dir);
+      this.seatedDesk = item.desk.id;
+      this.events_.onDesk?.(item.desk.id);
+    } else if (item.seat) {
+      const seat = item.seat;
+      this.player.sit(room.x + seat.x, room.y + seat.y, seat.dir);
+      if (seat.play === "piano") this.playPiano(room.x + seat.x, room.y + seat.y);
+    } else if (item.action) {
+      this.emote(item.action.id);
+      if (item.action.sound) playTune(item.action.sound);
+    }
+  }
+
+  /** 坐上琴凳：最近的一架钢琴播放按键动画，并弹一段随机旋律 */
+  private playPiano(x: number, y: number) {
+    let piano: Phaser.GameObjects.Sprite | null = null;
+    let best = Infinity;
+    for (const sprite of this.current.pianos) {
+      const d = Phaser.Math.Distance.Between(x, y, sprite.x + sprite.width / 2, sprite.y + sprite.height);
+      if (d < best) {
+        best = d;
+        piano = sprite;
+      }
+    }
+    piano?.play({ key: "anim-piano", repeat: 3 });
+    playTune("piano");
+    this.emote("piano");
+  }
+
+  // ---------- 表情气泡 ----------
+
+  /** 自己发表情：头顶冒泡并广播给同房间的人 */
+  private emote(key: string) {
+    const texts = LOBBY_EMOTES[key];
+    if (!texts || this.paused || this.transitioning) return;
+    const now = this.time.now;
+    if (now - this.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
+    this.lastEmoteAt = now;
+    const text = texts[Math.floor(Math.random() * texts.length)];
+    this.showBubble(SELF_ID, text, () => ({ x: this.player.x, y: this.player.y - SELF_BUBBLE_Y, visible: true }));
+    // 私有房间里的表情不广播
+    if (this.current.def.id !== PRIVATE_ROOM) this.presence?.sendEmote(key);
+  }
+
+  private showBubble(owner: string, text: string, follow: Bubble["follow"]) {
+    this.bubbles.get(owner)?.container.destroy();
+    const label = this.makeText(text, 5.5, "#1C1B19", 500);
+    const w = Math.ceil(label.width) + 10;
+    const h = 11;
+    const g = this.add.graphics();
+    g.fillStyle(0xfaf9f5, 0.96).fillRoundedRect(-w / 2, -h / 2, w, h, 3);
+    // 气泡尾巴
+    g.fillTriangle(-2, h / 2 - 0.5, 2, h / 2 - 0.5, 0, h / 2 + 2.5);
+    const container = this.add.container(0, 0, [g, label]).setDepth(58000).setScale(0.6).setAlpha(0);
+    this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 140, ease: "Back.easeOut" });
+    const bubble = { container, follow, until: this.time.now + BUBBLE_MS };
+    this.bubbles.set(owner, bubble);
+    this.placeBubble(bubble);
+  }
+
+  private placeBubble(bubble: Bubble) {
+    const at = bubble.follow();
+    bubble.container.setPosition(Math.round(at.x), Math.round(at.y)).setVisible(at.visible);
+  }
+
+  private updateBubbles() {
+    const now = this.time.now;
+    for (const [owner, bubble] of this.bubbles) {
+      if (now > bubble.until) {
+        bubble.container.destroy();
+        this.bubbles.delete(owner);
+      } else {
+        this.placeBubble(bubble);
+        if (bubble.until - now < 200) bubble.container.setAlpha((bubble.until - now) / 200);
+      }
+    }
+  }
+
+  /** 工位名牌：自己的工位显示品牌色「我的工位」，别人的显示名字，空闲工位不显示 */
+  private refreshDeskTags() {
+    this.deskVersion = this.bridge.desks.version;
+    for (const tag of this.deskTags.values()) tag.destroy();
+    this.deskTags.clear();
+    for (const room of this.rooms.values()) {
+      for (const desk of room.def.desks ?? []) {
+        const claim = this.bridge.desks.claims[desk.id];
+        if (!claim) continue;
+        const tag = this.createSign(room.def.x + desk.signX, room.def.y + desk.signY, claim.mine ? "我的工位" : claim.name, claim.mine);
+        this.deskTags.set(desk.id, tag);
+      }
+    }
+    // 归属变化后，站在工位旁的提示文字随之更新
+    const item = this.player ? this.findInteractable(this.player.x, this.player.y) : null;
+    if (item?.desk && !this.player.isSeated) this.setNearby(this.describe(item));
   }
 
   // ---------- 多人同步 ----------
@@ -419,6 +605,18 @@ export class LobbyScene extends Phaser.Scene {
         this.applyRemoteAvatar(remote, message.avatar);
         break;
       }
+      case "emote": {
+        const remote = this.remotes.get(message.id);
+        const text = LOBBY_EMOTES[message.key]?.[0];
+        if (!remote || !text) break;
+        this.showBubble(message.id, text, () => ({
+          x: remote.x, y: remote.y - RemotePlayer.BUBBLE_OFFSET_Y, visible: remote.shown,
+        }));
+        break;
+      }
+      case "desks":
+        this.events_.onDesksChanged?.();
+        break;
     }
   }
 
@@ -446,6 +644,8 @@ export class LobbyScene extends Phaser.Scene {
     const remote = this.remotes.get(id);
     if (!remote) return;
     this.remotes.delete(id);
+    this.bubbles.get(id)?.container.destroy();
+    this.bubbles.delete(id);
     if (fade) remote.fadeOut();
     else remote.destroy();
   }
@@ -582,12 +782,21 @@ export class LobbyScene extends Phaser.Scene {
     if (this.failed || !this.player) return;
     this.syncPause();
     if (this.bridge.avatar.version !== this.avatarVersion) this.player.setSkin(this.applyAvatar());
+    if (this.bridge.desks.version !== this.deskVersion) this.refreshDeskTags();
     this.player.update();
+    if (this.bridge.emoteQueued) {
+      const key = this.bridge.emoteQueued;
+      this.bridge.emoteQueued = "";
+      this.emote(key);
+    }
 
     const feetX = this.player.x;
     const feetY = this.player.y;
     const roomId = this.current.def.id;
-    this.presence?.report({ room: roomId, x: feetX, y: feetY, dir: this.player.facingDir, moving: this.player.isMoving });
+    const seated = this.player.isSeated;
+    this.presence?.report({
+      room: roomId, x: feetX, y: feetY, dir: this.player.facingDir, moving: this.player.isMoving, pose: seated ? "sit" : "",
+    });
 
     // 其他人：插值移动或自动离场；只显示与自己同一房间的人
     const actors: Point[] = [{ x: feetX, y: feetY }];
@@ -606,11 +815,27 @@ export class LobbyScene extends Phaser.Scene {
       }
     }
 
-    // 交互请求只在当帧有效：本帧不在机器地台上（或正在切换房间）时直接丢弃
+    this.updateBubbles();
+
+    // 交互请求只在当帧有效：本帧不在交互区（或正在切换房间）时直接丢弃
     const interact = this.interactPressed || this.bridge.interactQueued;
     this.interactPressed = false;
     this.bridge.interactQueued = false;
     if (this.transitioning || this.paused) return;
+
+    if (seated) {
+      // 坐着：工位上按 E 重新打开（待办 / 认领），其他座位按 E 起身
+      const desk = this.seatedDesk ? this.current.def.desks?.find(d => d.id === this.seatedDesk) : undefined;
+      this.setNearby(desk
+        ? { ...this.deskInfo(desk), hint: this.bridge.desks.claims[desk.id]?.mine ? "按 E 打开待办 · 方向键起身" : "方向键起身" }
+        : { kind: "seat", id: "stand", title: "起身", hint: "或按方向键" });
+      this.prompt.setVisible(false);
+      if (interact) {
+        if (desk) this.events_.onDesk?.(desk.id);
+        else this.player.stand();
+      }
+      return;
+    }
 
     const portal = this.current.portals.find(p => p.rect.contains(feetX, feetY));
     if (portal) {
@@ -618,11 +843,11 @@ export class LobbyScene extends Phaser.Scene {
       return;
     }
 
-    const machine = this.current.machines.find(m => m.rect.contains(feetX, feetY))?.def ?? null;
-    this.setNearby(machine);
-    if (machine) {
+    const item = this.findInteractable(feetX, feetY);
+    this.setNearby(item ? this.describe(item) : null);
+    if (item) {
       this.prompt.setPosition(this.player.x, this.player.y - 40);
-      if (interact) this.events_.onInteract?.({ id: machine.id, title: machine.title, hint: machine.hint });
+      if (interact) this.interact(item);
     }
   }
 }

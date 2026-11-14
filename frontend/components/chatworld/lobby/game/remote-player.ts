@@ -17,6 +17,8 @@ interface Sample extends Point {
   t: number;
   dir: Facing;
   moving: boolean;
+  /** 坐着：直接摆在座位上，不做插值 */
+  sit: boolean;
 }
 
 /** 一段自动行走：在 room 内依次走过 points，走完后执行 onArrive（换房间或消失） */
@@ -62,7 +64,7 @@ export class RemotePlayer {
     this.sprite = scene.add.sprite(state.x, state.y, skin, 0).setOrigin(0.5, 1).setDepth(state.y);
     this.sprite.anims.play(`${skin}:idle-${state.dir}`);
     this.label = makeLabel(name);
-    this.samples = [{ t: scene.time.now, x: state.x, y: state.y, dir: state.dir, moving: state.moving }];
+    this.samples = [{ t: scene.time.now, x: state.x, y: state.y, dir: state.dir, moving: state.moving, sit: state.pose === "sit" }];
     this.placeLabel();
     // 出现时淡入
     this.sprite.setAlpha(0);
@@ -96,6 +98,9 @@ export class RemotePlayer {
     this.sprite.anims.play(`${skin}:${action}`, true);
   }
 
+  /** 名字标签上方的高度（气泡放在名字之上） */
+  static readonly BUBBLE_OFFSET_Y = NAME_OFFSET_Y + 10;
+
   /** 收到服务端位置：换房间或距离过远直接瞬移，否则加入插值队列；正在离场时取消离场（重新上线） */
   push(state: LobbyLocalState) {
     const now = this.scene.time.now;
@@ -104,9 +109,11 @@ export class RemotePlayer {
     const last = this.samples[this.samples.length - 1];
     const jump = !last || state.room !== this.room
       || Math.hypot(state.x - last.x, state.y - last.y) > TELEPORT_DISTANCE;
-    const sample = { t: now, x: state.x, y: state.y, dir: state.dir, moving: state.moving };
+    const sit = state.pose === "sit";
+    const sample = { t: now, x: state.x, y: state.y, dir: state.dir, moving: state.moving, sit };
     this.room = state.room;
-    if (jump) {
+    // 坐下与起身都是瞬间换位（座位在家具上，起身回到坐下前的位置），不插值
+    if (jump || sit || last?.sit) {
       this.samples = [sample];
       this.sprite.setPosition(state.x, state.y);
     } else {
@@ -128,7 +135,7 @@ export class RemotePlayer {
     this.room = room;
     this.facing = dir;
     this.sprite.setPosition(p.x, p.y);
-    this.samples = [{ t: this.scene.time.now, x: p.x, y: p.y, dir, moving: false }];
+    this.samples = [{ t: this.scene.time.now, x: p.x, y: p.y, dir, moving: false, sit: false }];
   }
 
   /** 淡出并销毁 */
@@ -155,13 +162,20 @@ export class RemotePlayer {
 
   update(delta: number, visibleRoom: string) {
     if (this.removed && !this.sprite.active) return;
-    let moving: boolean;
-    if (this.route) moving = this.walkRoute(delta);
-    else moving = this.interpolate();
-
-    const action = `${moving ? "walk" : "idle"}-${this.facing}`;
-    const key = `${this.skin}:${action}`;
-    if (this.sprite.anims.currentAnim?.key !== key) this.sprite.anims.play(key, true);
+    const latest = this.samples[this.samples.length - 1];
+    const seated = !this.route && Boolean(latest?.sit);
+    if (seated) {
+      this.facing = latest.dir;
+      this.sprite.setPosition(latest.x, latest.y);
+      Player.applyPose(this.sprite, this.skin, latest.dir, true);
+    } else {
+      if (this.sprite.isCropped) Player.applyPose(this.sprite, this.skin, this.facing, false);
+      let moving: boolean;
+      if (this.route) moving = this.walkRoute(delta);
+      else moving = this.interpolate();
+      const key = `${this.skin}:${moving ? "walk" : "idle"}-${this.facing}`;
+      if (this.sprite.anims.currentAnim?.key !== key) this.sprite.anims.play(key, true);
+    }
     this.sprite.setDepth(this.sprite.y);
     const visible = this.room === visibleRoom;
     this.sprite.setVisible(visible);
@@ -171,6 +185,11 @@ export class RemotePlayer {
 
   private placeLabel() {
     this.label.setPosition(Math.round(this.sprite.x), Math.round(this.sprite.y - NAME_OFFSET_Y));
+  }
+
+  /** 当前所在房间是否可见（场景据此决定是否给该角色冒气泡） */
+  get shown() {
+    return this.sprite.visible && !this.removed;
   }
 
   /** 按渲染时刻（当前时刻减去插值延迟）在相邻两个样本之间线性插值 */

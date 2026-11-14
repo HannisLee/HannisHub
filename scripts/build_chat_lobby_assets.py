@@ -7,8 +7,9 @@
 - foyer.png / room.png / hall.png：各房间的烘焙背景（地板、墙面、墙顶收边、区域地毯、墙面挂饰）
 - objects.png + objects.json：可遮挡家具的图集（Phaser JSON Hash 格式）
 - anims/*.png：动画物件帧条
+- player.png：默认角色（预制角色 12 号），帧布局与形象部件相同（静止、行走各 4 方向 + 左右坐姿）
 - avatar/*.png + avatar/parts.json：角色生成器分层部件（身体、眼睛、服装、发型、配饰），前端运行时叠层合成
-- layout.json：房间尺寸、家具坐标、碰撞盒、传送门、出生点、交互机器（前端运行时读取）
+- layout.json：房间尺寸、家具坐标、碰撞盒、传送门、出生点、交互机器、座位、工位与小互动（前端运行时读取）
 
 layout.json 与 avatar/parts.json 带有 build 字段（素材内容哈希）。前端总是重新获取这两个清单，
 并给其余素材加 ?v=<build>：重新构建后浏览器不会把缓存的旧图集与新坐标表混用（否则家具会错位）。
@@ -45,6 +46,8 @@ SINGLE_PATTERNS = {
 }
 GENERIC = "1_Interiors/16x16/Theme_Sorter/1_Generic_16x16.png"
 BEDROOM = "1_Interiors/16x16/Theme_Sorter/4_Bedroom_16x16.png"
+KITCHEN = "1_Interiors/16x16/Theme_Sorter/12_Kitchen_16x16.png"
+MUSIC = "1_Interiors/16x16/Theme_Sorter/6_Music_and_sport_16x16.png"
 CHARGEN = "2_Characters/Character_Generator/"
 FLOORS = "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Floors_16x16.png"
 WALLS = "1_Interiors/16x16/Room_Builder_subfiles/Room_Builder_Walls_16x16.png"
@@ -181,6 +184,49 @@ def build_objects() -> None:
     o["nightstand"] = trimmed(BEDROOM, (128, 1140, 144, 1166))
     o["wardrobe"] = trimmed(BEDROOM, (128, 1572, 160, 1618))
     o["mirror"] = trimmed(GENERIC, (224, 1040, 240, 1084))
+    # ---- 大厅新增
+    # 工位桌：俯视的深桌面木桌，双屏显示器能完整落在桌面上（原先的正视角书桌桌面只有几像素深，显示器像悬空）
+    o["work_table"] = trimmed(GENERIC, (88, 542, 136, 592))
+    o["side_cabinet"] = single("living", 65)
+    # 完整台球桌：素材包把球桌拆成左右两半
+    o["pool_full"] = combine([(single("basement", 76), 0, 0), (single("basement", 77), 32, 0)])
+    o["pool_rack"] = single("basement", 72)
+    # 三人沙发（正面）：左 / 中 / 右三段拼接
+    o["sofa_front"] = combine([(single("basement", 4), 0, 0), (single("basement", 5), 16, 0), (single("basement", 6), 32, 0)])
+    o["coffee_table"] = trimmed(GENERIC, (84, 96, 128, 124))
+    # 侧向餐椅：靠背在左（面朝右）/ 靠背在右（面朝左）
+    o["chair_side_r"] = trimmed(GENERIC, (144, 800, 160, 832))
+    o["chair_side_l"] = trimmed(GENERIC, (240, 800, 256, 832))
+    # 茶水间：橱柜台面、冰箱、咖啡机
+    o["fridge"] = trimmed(KITCHEN, (144, 372, 160, 412))
+    o["espresso"] = trimmed(KITCHEN, (240, 376, 256, 408))
+    # 音乐角：钢琴凳、吉他
+    o["piano_bench"] = flood(MUSIC, 16, 72)
+    o["guitar"] = trimmed(MUSIC, (112, 36, 128, 80))
+    o["guitar_blue"] = trimmed(MUSIC, (160, 36, 176, 80))
+    o["whiteboard"] = single("class", 39)
+
+
+def combine(parts: list[tuple[Image.Image, int, int]]) -> Image.Image:
+    """把多个单件按偏移拼成一件（如左右两半的台球桌、三段沙发）。"""
+    w = max(img.width + x for img, x, _ in parts)
+    h = max(img.height + y for img, _, y in parts)
+    out = Image.new("RGBA", (w, h))
+    for img, x, y in parts:
+        out.alpha_composite(img, (x, y))
+    return out
+
+
+# 家具贴图裁掉四周透明边后的偏移（原图左上角 → 可见像素左上角）。不裁掉时，贴图底部的透明行会让
+# 碰撞盒与遮挡深度落在可见底边下方（绿植看起来悬空、角色走到盆底前方却被画在后面）
+TRIM: dict[str, tuple[int, int, int]] = {}
+
+
+def trim_objects() -> None:
+    for key, img in OBJECTS.items():
+        box = img.getbbox()
+        TRIM[key] = (box[0], box[1], img.height - box[3])
+        OBJECTS[key] = img.crop(box)
 
 
 # 素材包单件自带的默认阴影是不透明的单一颜色，压在地毯上会露出一块灰底；统一换成半透明暗色
@@ -262,6 +308,8 @@ def build_anims() -> None:
     add("cat", load(ANIM_DIR + "animated_cat.png"), 48, 16, 6)
     add("fishtank", load(ANIM_DIR + "animated_fishtank_orange.png"), 32, 32, 6)
     add("clock", load(ANIM_DIR + "animated_cuckoo_clock.png"), 16, 32, 2)
+    add("piano", load(ANIM_DIR + "animated_wall_piano.png"), 32, 32, 8)
+    add("toytrain", load(ANIM_DIR + "animated_toytrain.png"), 96, 64, 10)
     add("arrow_down", gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif"), 16, 16, 8)
     add("arrow_up", gif_strip(UI_DIR + "UI_arrow_pointing_up.gif"), 16, 16, 8)
     # 声纹屏：截取 X 光机监视器的波形区域（14 帧），作为 ASR 录音台的挂墙示波器
@@ -326,6 +374,12 @@ class Room:
         self.machines: list[dict] = []
         self.doors: list[dict] = []
         self.signs: list[dict] = []
+        # 可坐的位置：角色脚底坐标、坐下朝向与站立交互区
+        self.seats: list[dict] = []
+        # 工位：可认领，认领者在自己的工位按 E 打开待办
+        self.desks: list[dict] = []
+        # 小互动：按 E 在角色头顶冒出一句气泡（咖啡、喂鱼、撸猫、弹琴……）
+        self.actions: list[dict] = []
         self.bottom_openings: list[tuple[int, int]] = []
         self.top_openings: list[tuple[int, int]] = []
         # 左右墙开口（纵向区间 y0..y1，须位于墙面以下的地板段）
@@ -412,9 +466,18 @@ class Room:
     # ---- 运行时对象
     def prop(self, key: str, x: int, y: int, foot: int | None = None, solid=None, depth: int | None = None,
              inset: int = 1) -> dict:
-        """放置家具（左上角坐标）。默认碰撞盒为底部 foot 像素高、左右各内缩 inset。"""
+        """放置家具（以未裁边的原图左上角为坐标，入口厅与我的房间沿用）。默认碰撞盒为可见底部 foot 像素高
+        （扣除原图底部透明行）、左右各内缩 inset。"""
+        dx, dy, pad = TRIM[key]
+        f = None if foot is None else max(4, foot - pad)
+        return self.put(key, x + dx, y + dy + OBJECTS[key].height, foot=f, solid=solid, depth=depth, inset=inset)
+
+    def put(self, key: str, x: int, bottom: int, foot: int | None = None, solid=None, depth: int | None = None,
+            inset: int = 1) -> dict:
+        """放置家具：x 为可见像素左边，bottom 为可见底边（落地线）。碰撞盒默认为底部 foot 像素高。"""
         img = OBJECTS[key]
         w, h = img.size
+        y = bottom - h
         item: dict = {"key": key, "x": x, "y": y}
         if solid is not False:
             if solid is None:
@@ -465,7 +528,21 @@ class Room:
             "width": self.w, "height": self.h, "background": f"{self.id}.png",
             "walls": self.walls, "props": self.props, "anims": self.anims, "portals": self.portals,
             "spawns": self.spawns, "machines": self.machines, "doors": self.doors, "signs": self.signs,
+            "seats": self.seats, "desks": self.desks, "actions": self.actions,
         }
+
+    # ---- 交互
+    def seat(self, x: int, y: int, facing: str, zone: list[int], title: str = "坐下") -> dict:
+        """可坐位置：(x, y) 为坐下后角色的脚底坐标（决定前后遮挡），facing 为坐下后的朝向。
+        朝上的座位让 y 略小于椅子底边，椅背画在角色前面；朝下与侧向的座位 y 在椅子底边之下，角色画在椅子上。"""
+        item = {"id": f"seat-{len(self.seats) + 1}", "x": x, "y": y, "dir": facing, "zone": zone, "title": title}
+        self.seats.append(item)
+        return item
+
+    def action(self, aid: str, title: str, hint: str, zone: list[int], **extra) -> dict:
+        item = {"id": aid, "title": title, "hint": hint, "zone": zone, **extra}
+        self.actions.append(item)
+        return item
 
 
 # ---------------------------------------------------------------- 像素字
@@ -583,71 +660,94 @@ def build_foyer() -> Room:
     return room
 
 
-def workstation(room: Room, x: int, y: int, accessory: str) -> None:
-    """一个工位：两张书桌拼成 64px 长桌，双屏滚动显示器 + 桌面小物，转椅在桌前（面向屏幕）。"""
-    room.prop("desk", x, y, foot=20)
-    room.prop("desk_plain", x + 32, y, foot=20)
-    top = y + 32
-    room.anim("monitor", x + 12, y - 14, depth=top + 1)
-    room.anim("monitor", x + 28, y - 14, depth=top + 1)
+# 工位数量：后端 chatworld/lobby_desks.py 的 DESK_COUNT 必须与此一致
+DESK_COUNT = 6
+
+
+def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str) -> None:
+    """一个工位：俯视木桌 + 桌面双屏滚动显示器（屏幕与键盘完整落在桌面内）+ 右侧矮柜与桌面小物 + 桌前转椅。
+    转椅与桌子水平居中对齐；站到椅子后方按 E 坐下，认领者在自己的工位打开待办。"""
+    table = room.put("work_table", x, top + OBJECTS["work_table"].height, foot=16)
+    tw = OBJECTS["work_table"].width
+    bottom = table["y"] + OBJECTS["work_table"].height
+    # 显示器帧 16x32，可见像素 y=4..25：底边（键盘）落在桌面前沿上方 8px；深度紧跟桌子，画在桌面之上
+    for mx in (x + 5, x + tw - 21):
+        room.anim("monitor", mx, bottom - 8 - 26 + 1, depth=bottom + 1)
+    cab = room.put("side_cabinet", x + tw + 2, bottom - 4, foot=12)
+    cab_top = cab["y"]
     if accessory == "coffee":
-        room.anim("coffee", x + 44, y - 14, depth=top + 1)
+        room.anim("coffee", x + tw + 2, cab_top - 22, depth=bottom - 3)
     else:
-        room.prop(accessory, x + 44, y - 14, solid=False, depth=top + 1)
-    room.prop("chair_task", x + 24, y + 18, solid=[x + 27, y + 42, 10, 6])
+        img = OBJECTS[accessory]
+        room.put(accessory, x + tw + 2 + (16 - img.width) // 2, cab_top + 4, solid=False, depth=bottom - 3)
+    # 转椅：背对镜头（角色面朝屏幕），与桌子居中对齐
+    cw = OBJECTS["chair_task"].width
+    cx = x + tw // 2
+    chair_bottom = bottom + 10
+    room.put("chair_task", cx - cw // 2, chair_bottom, solid=[cx - 4, chair_bottom - 5, 8, 5])
+    room.desks.append({
+        "id": desk_id,
+        # 站在椅子正后方（下方）按 E
+        "zone": [cx - 14, chair_bottom - 4, 28, 16],
+        # 坐下：脚底略高于椅子底边，椅背画在角色前面
+        "seat": {"x": cx, "y": chair_bottom - 2, "dir": "up"},
+        "signX": cx + 8, "signY": table["y"] - 4,
+    })
 
 
 def build_hall() -> Room:
-    """大厅：上墙中间玻璃门入口；左上 4 工位，右上 ASR / OCR 两台机器，右侧圆桌聊天角（聊天室），左下休息区，右下游戏角。"""
-    room = Room("hall", "大厅", 36, 24, floor_tex(4, 12), wall_tex(23, 24))
-    door_x = t(17)
+    """大厅：上墙左侧 HannisHub 像素字，中间玻璃门入口；左上 6 个可认领工位，右上 ASR / OCR 两台机器，
+    右侧圆桌聊天角与鱼缸，中部钢琴角，左下休息区，中下茶水间，右下游戏角。"""
+    room = Room("hall", "大厅", 40, 26, floor_tex(4, 12), wall_tex(23, 24))
+    w, h = room.w, room.h
+    door_x = w // 2 - 16
     room.top_openings.append((door_x + 4, door_x + 28))
     room.draw_shell()
-    w, h = room.w, room.h
+    floor_bottom = h - 16
 
-    # ---- 上墙挂饰
-    room.decal("window_curtain", t(3.5), 18)
-    room.decal("world_map", t(7), 16)
-    room.decal("window_curtain", t(10), 18)
-    room.decal("cork_board", t(13), 22)
+    # ---- 上墙：左上角 HannisHub 像素字，窗与挂饰
+    logo = pixel_text("HannisHub")
+    room.bg.alpha_composite(logo, (26, 24))
+    room.decal("window_curtain", t(9), 18)
+    room.decal("world_map", t(12), 16)
+    room.decal("window_curtain", t(15), 18)
+    room.anim("clock", w - 70, 12, depth=10)
 
-    # ---- 入口：玻璃双开门 + 红色迎宾长毯 + 两侧绿植
+    # ---- 入口：玻璃双开门 + 红色迎宾长毯 + 两侧落地绿植（盆底落在墙脚以下的地板上）
     room.door_recess(door_x)
     room.doors.append({"key": "door_glass", "x": door_x, "y": 0, "radius": 40})
     room.portals.append({"rect": [door_x + 6, 22, 20, 20], "to": "foyer", "spawn": "fromHall"})
-    room.rug((door_x + 2, 48, door_x + 30, t(13)), floor_tex(4, 14), edge=(70, 30, 30), inner=(214, 160, 90))
-    room.prop("plant_tall2", door_x - 18, 16, foot=12)
-    room.prop("plant_tall2", door_x + 34, 16, foot=12)
+    room.rug((door_x + 2, 48, door_x + 30, t(13.5)), floor_tex(4, 14), edge=(70, 30, 30), inner=(214, 160, 90))
+    room.put("plant_tall2", door_x - 16, 60, foot=8)
+    room.put("plant_tall2", door_x + 34, 60, foot=8)
     room.anim("arrow_up", door_x + 8, 50, depth=h + 100)
     room.signs.append({"x": door_x + 16, "y": 8, "text": "入口厅", "tone": "muted"})
 
-    # ---- 左上：工位区（浅灰地毯 + 2x2 工位）
-    room.prop("bookshelf", t(1), 16, foot=16)
-    room.prop("plant_tall", t(14.5), 16, foot=12)
-    room.rug((t(2), t(5), t(15), t(14.5)), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
-    workstation(room, t(3), t(6.5), "lamp_desk_blue")
-    workstation(room, t(9), t(6.5), "plant_desk")
-    workstation(room, t(3), t(10.5), "coffee")
-    workstation(room, t(9), t(10.5), "lamp_desk_cream")
-    room.prop("plant_pot", t(7.5), t(8.5) - 4, foot=10)
+    # ---- 左上：工位区（浅灰地毯上 3x2 共 6 个工位）
+    room.rug((22, 54, 280, 216), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
+    accessories = ["lamp_desk_blue", "plant_desk", "coffee", "lamp_desk_cream", "coffee", "plant_desk"]
+    n = 0
+    for row, top in enumerate((60, 138)):
+        for col in range(3):
+            n += 1
+            workstation(room, f"desk-{n}", 34 + col * 82, top, accessories[n - 1])
+    assert n == DESK_COUNT
+    room.signs.append({"x": 151, "y": 228, "text": "工位区 · 站到椅子后按 E 坐下 / 认领", "tone": "muted"})
 
     # ---- 右上：机器区。台前为高亮地台，站上去按 E 交互
-    # ASR 录音台：音箱 + 音频工作台 + 音箱 + 机柜，挂墙声纹屏，台前录音话筒
-    asr_x = t(20.5)
+    asr_x = door_x + 56
     room.rug((asr_x - 8, 48, asr_x + 88, t(6.5)), floor_tex(8, 20), edge=(110, 54, 40), inner=(217, 119, 87))
     room.anim("speaker", asr_x, 16)
     room.prop("audio_desk", asr_x + 16, 16, foot=16)
     room.anim("speaker", asr_x + 48, 16)
     room.anim("server", asr_x + 64, 16)
     room.anim("wave_screen", asr_x + 82, 22, depth=10)
-    room.prop("mic", asr_x + 34, 38, solid=False)  # 话筒不挡路，地台上可横向走动
+    room.prop("mic", asr_x + 34, 38, solid=False)
     room.machines.append({
         "id": "asr", "title": "ASR 语音转写", "hint": "上传音频，转写为文字",
         "zone": [asr_x - 6, 58, 92, t(6.5) - 58], "signX": asr_x + 40, "signY": 8,
     })
-
-    # OCR 文档终端：自助扫描终端 + 挂墙文档屏 + 复印机 + 纸篓
-    ocr_x = t(27.5)
+    ocr_x = asr_x + 112
     room.rug((ocr_x - 8, 48, ocr_x + 88, t(6.5)), floor_tex(8, 30), edge=(40, 60, 100), inner=(106, 155, 204))
     room.prop("kiosk", ocr_x + 4, 16, foot=16)
     room.anim("doc_screen", ocr_x + 22, 14, depth=10)
@@ -657,56 +757,122 @@ def build_hall() -> Room:
         "id": "ocr", "title": "OCR 文字识别", "hint": "解析文档、提取字段、图像问答",
         "zone": [ocr_x - 6, 58, 92, t(6.5) - 58], "signX": ocr_x + 40, "signY": 8,
     })
-    room.prop("plant_palm", t(33.5), 14, foot=14)
+    room.put("plant_palm", w - 16 - 26, 62, foot=8)
 
-    # ---- 右侧中部：圆桌聊天角（椭圆地毯 + 木圆桌 + 四张高脚凳），站上地毯按 E 打开聊天室；右墙边鱼缸
-    cx, cy = t(26.5), t(10.5)
-    room.rug_round((cx - 58, cy - 40, cx + 58, cy + 40), floor_tex(8, 8), edge=(110, 54, 40), inner=(217, 119, 87))
-    room.prop("table_round", cx - 16, cy - 16, foot=16)
-    room.anim("coffee", cx - 8, cy - 26, depth=cy + 17)
-    room.prop("stool_blue", cx - 8, cy - 44, foot=8)
-    room.prop("stool_yellow", cx - 44, cy - 20, foot=8)
-    room.prop("stool_wood", cx + 28, cy - 20, foot=8)
-    room.prop("stool_blue", cx - 8, cy + 10, foot=8)
+    # ---- 右侧中部：圆桌聊天角（椭圆地毯 + 木圆桌 + 四张高脚凳，凳子都能坐），站上地毯按 E 打开聊天室
+    cx, cy = t(31), t(11)
+    room.rug_round((cx - 60, cy - 42, cx + 60, cy + 42), floor_tex(8, 8), edge=(110, 54, 40), inner=(217, 119, 87))
+    tb = cy + 12
+    room.put("table_round", cx - 12, tb, foot=14)
+    room.anim("coffee", cx - 8, tb - 30, depth=tb + 1)
+    # 高脚凳：上方（面朝下）、左右（面朝圆桌）、下方（面朝上）
+    stools = [
+        ("stool_blue", cx, cy - 20, "down"),
+        ("stool_yellow", cx - 30, cy + 8, "right"),
+        ("stool_wood", cx + 30, cy + 8, "left"),
+        ("stool_blue", cx, cy + 30, "up"),
+    ]
+    for key, sx, sb, facing in stools:
+        sw = OBJECTS[key].width
+        room.put(key, sx - sw // 2, sb, solid=[sx - 4, sb - 5, 8, 5])
+        seat_y = sb - 2 if facing == "up" else sb + 1
+        if facing == "down":
+            zone = [sx - 10, sb - 26, 20, 12]
+        elif facing == "up":
+            zone = [sx - 10, sb - 2, 20, 12]
+        elif facing == "right":
+            zone = [sx - 22, sb - 10, 14, 16]
+        else:
+            zone = [sx + 8, sb - 10, 14, 16]
+        room.seat(sx, seat_y, facing, zone, title="坐高脚凳")
     room.machines.append({
         "id": "chat", "title": "聊天室", "hint": "和大家一起聊天",
-        "zone": [cx - 50, cy - 32, 100, 64], "signX": cx, "signY": cy - 52,
+        "zone": [cx - 52, cy - 34, 104, 68], "signX": cx, "signY": cy - 54,
     })
-    room.anim("fishtank", t(32.5), t(9), solid=[t(32.5) + 1, t(9) + 18, 30, 14])
-    room.prop("plant_big", t(32.5), t(11), foot=14)
+    # 右墙边鱼缸（可喂鱼）与绿植
+    fx, fb = w - 16 - 34, cy - 6
+    room.anim("fishtank", fx, fb - 32, solid=[fx + 1, fb - 14, 30, 14])
+    room.action("fish", "鱼缸", "喂喂小鱼", [fx - 4, fb - 2, 40, 14])
+    room.put("plant_big", w - 16 - 26, cy + 44, foot=10)
+    room.action("plant", "绿植", "浇浇水", [w - 16 - 34, cy + 42, 34, 14])
 
-    # ---- 左下：休息区
-    room.rug((t(2), t(16.5), t(13), t(22)), floor_tex(12, 28), edge=(50, 60, 90), inner=(220, 230, 245))
-    room.prop("armchair_red", t(3), t(17.5), foot=14)
-    room.prop("table_round", t(5.5), t(18), foot=16)
-    room.prop("armchair_blue", t(8), t(17.5), foot=14)
-    room.prop("armchair_yellow", t(4.25), t(20), foot=14)
-    room.prop("armchair_white", t(6.75), t(20), foot=14)
-    room.anim("cat", t(9.5), t(21) - 2, depth=t(21) + 14)
-    room.prop("lamp_floor", t(1.25), t(15), foot=8)
-    room.prop("lamp_floor", t(11), t(15), foot=8)
-    room.prop("plant_big", t(11), t(19.5), foot=14)
-    room.prop("bookshelf_wide", t(1), t(19), foot=16)
+    # ---- 中部偏右：白板（今日一句）
+    room.put("whiteboard", 356, 170, foot=8)
+    room.action("board", "白板", "看看今日一句", [352, 168, 40, 14])
 
-    # ---- 中下：咖啡角
-    room.prop("bar_shelf", t(15), t(15), foot=16)
-    room.prop("sideboard", t(17), t(16), foot=14)
-    room.anim("coffee", t(17) + 8, t(16) - 12, depth=t(18) + 1)
-    room.prop("egg_yellow", t(15.5), t(19.5), foot=12)
-    room.prop("table_round_dark", t(17.5), t(19.5), foot=14)
-    room.prop("egg_red", t(19.5), t(19.5), foot=12)
+    # ---- 中部：钢琴角（坐上琴凳弹一段）
+    px, pb = door_x - 4, 280
+    room.rug((px - 22, 238, px + 62, 300), floor_tex(12, 26), edge=(60, 40, 30))
+    room.anim("piano", px, pb - 32, solid=[px + 1, pb - 12, 30, 12], frames="once")
+    bw = OBJECTS["piano_bench"].width
+    room.put("piano_bench", px + 16 - bw // 2, pb + 12, solid=[px + 10, pb + 6, 12, 5])
+    room.seat(px + 16, pb + 10, "up", [px + 4, pb + 10, 24, 14], title="弹钢琴")
+    room.seats[-1]["play"] = "piano"
+    room.put("guitar", px + 38, pb, foot=6)
+    room.put("guitar_blue", px + 52, pb + 2, foot=6)
+    room.action("guitar", "吉他", "拨一段旋律", [px + 34, pb - 2, 34, 16], sound="guitar")
 
-    # ---- 右下：游戏角
-    room.rug((t(22), t(15), t(34), t(22)), floor_tex(4, 20), edge=(60, 40, 40), inner=(170, 120, 100))
-    room.prop("arcade_a", t(23), t(14) + 2, foot=14)
-    room.prop("arcade_b", t(24), t(14) + 2, foot=14)
-    room.prop("pool_table", t(27), t(17), foot=30)
-    room.prop("pinball", t(31), t(14) + 2, foot=14)
-    room.prop("egg_blue", t(23), t(19.5), foot=12)
-    room.prop("egg_white", t(31.5), t(19.5), foot=12)
-    room.prop("lamp_floor_red", t(34), t(19), foot=8)
+    # ---- 左下：休息区（正面三人沙发 + 两侧扶手椅 + 茶几，地毯上小火车，书柜、落地灯、睡猫）
+    room.rug((22, 248, 236, floor_bottom - 6), floor_tex(12, 28), edge=(50, 60, 90), inner=(220, 230, 245))
+    sofa_x, sofa_b = 80, 286
+    room.put("sofa_front", sofa_x, sofa_b, foot=12)
+    for i in range(3):
+        sx = sofa_x + 8 + i * 16
+        room.seat(sx, sofa_b + 1, "down", [sx - 7, sofa_b, 14, 14], title="坐沙发")
+    for key, ax in (("armchair_red", 40), ("armchair_blue", 148)):
+        aw = OBJECTS[key].width
+        room.put(key, ax, sofa_b + 2, foot=10)
+        room.seat(ax + aw // 2, sofa_b + 3, "down", [ax + aw // 2 - 8, sofa_b + 2, 16, 14], title="坐扶手椅")
+    room.put("coffee_table", sofa_x + 5, sofa_b + 34, foot=12)
+    room.prop("lamp_floor", 22, 236, foot=6)
+    room.put("lamp_floor", 196, sofa_b - 2, foot=6)
+    room.anim("cat", 172, 318, depth=334)
+    room.action("cat", "猫", "撸一撸", [168, 316, 52, 18])
+    room.anim("toytrain", 32, 326, depth=328)
+    room.action("train", "小火车", "看小火车转圈", [36, 368, 88, 14])
+    room.put("bookshelf_wide", 136, floor_bottom - 8, foot=12)
+    room.put("bookshelf", 172, floor_bottom - 8, foot=12)
+    room.action("book", "书柜", "翻一本书", [132, floor_bottom - 22, 72, 14])
+    room.put("plant_big", 206, floor_bottom - 4, foot=10)
 
-    room.prop("plant_big", t(1), t(13) - 6, foot=14)
+    # ---- 中下：茶水间（橱柜台面 + 咖啡机 + 冰箱），两张小圆桌配侧向餐椅
+    kx, kb = 252, 332
+    room.put("desk_plain", kx, kb, foot=16)
+    room.put("desk_plain", kx + 32, kb, foot=16)
+    room.put("bar_shelf", kx + 66, kb, foot=16)
+    room.put("espresso", kx + 8, kb - 6, solid=False, depth=kb + 1)
+    room.anim("coffee", kx + 40, kb - 34, depth=kb + 1)
+    room.put("fridge", kx + 100, kb, foot=14)
+    room.action("coffee", "咖啡机", "来一杯咖啡", [kx + 2, kb, 60, 14])
+    room.action("fridge", "冰箱", "找点吃的", [kx + 96, kb, 24, 14])
+    for tx in (kx + 18, kx + 82):
+        tbm = floor_bottom - 10
+        room.put("table_round_dark", tx - 12, tbm, foot=14)
+        lw = OBJECTS["chair_side_r"].width
+        room.put("chair_side_r", tx - 14 - lw, tbm, solid=[tx - 14 - lw + 1, tbm - 6, lw - 2, 6])
+        room.seat(tx - 14 - lw // 2, tbm + 1, "right", [tx - 34, tbm - 14, 14, 16], title="坐下")
+        room.put("chair_side_l", tx + 14, tbm, solid=[tx + 15, tbm - 6, OBJECTS["chair_side_l"].width - 2, 6])
+        room.seat(tx + 14 + OBJECTS["chair_side_l"].width // 2, tbm + 1, "left", [tx + 22, tbm - 14, 14, 16], title="坐下")
+
+    # ---- 右下：游戏角（街机、弹珠机、完整台球桌与球杆架、蛋椅）
+    gx0, gx1 = 400, w - 22
+    room.rug((gx0, 250, gx1, floor_bottom - 6), floor_tex(4, 20), edge=(60, 40, 40), inner=(170, 120, 100))
+    room.put("arcade_a", gx0 + 10, 286, foot=10)
+    room.put("arcade_b", gx0 + 28, 286, foot=10)
+    room.action("arcade", "街机", "来一局", [gx0 + 8, 286, 38, 14])
+    room.put("pinball", gx0 + 50, 286, foot=10)
+    room.action("pinball", "弹珠机", "弹一把", [gx0 + 48, 286, 22, 14])
+    pool_x = gx0 + 92
+    room.put("pool_full", pool_x, 352, foot=30)
+    room.action("pool", "台球桌", "打一杆", [pool_x - 6, 352, 60, 14])
+    room.put("pool_rack", pool_x + 66, 330, foot=8)
+    room.put("egg_blue", gx0 + 14, floor_bottom - 12, foot=10)
+    room.seat(gx0 + 23, floor_bottom - 11, "down", [gx0 + 14, floor_bottom - 12, 20, 12], title="坐蛋椅")
+    room.put("egg_red", gx1 - 30, floor_bottom - 12, foot=10)
+    room.seat(gx1 - 21, floor_bottom - 11, "down", [gx1 - 30, floor_bottom - 12, 20, 12], title="坐蛋椅")
+    room.put("lamp_floor_red", gx1 - 18, 290, foot=6)
+    room.put("plant_big", gx1 - 74, floor_bottom - 4, foot=10)
+
     room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
     return room
@@ -760,10 +926,15 @@ def build_room() -> Room:
 # ---------------------------------------------------------------- 角色部件
 
 # 角色生成器原图（16x16 档 896x656）帧布局：每帧 16x32；第 1 行 idle、第 2 行 walk，
-# 每行 24 帧按 右/上/左/下 每方向 6 帧。导出为与 player.png 相同的 96x256 块：
-# 6 帧 x 8 行（静止 南/北/左/右 + 行走 南/北/左/右）。
+# 每行 24 帧按 右/上/左/下 每方向 6 帧（第 4 行坐姿为 右/左 各 6 帧）。导出为与 player.png 相同的 96x320 块：
+# 6 帧 x 10 行（静止 南/北/左/右 + 行走 南/北/左/右 + 坐姿 右/左）。
 AVATAR_DIR_ORDER = {"down": 3, "up": 1, "left": 2, "right": 0}
-AVATAR_ROWS = [(1, "down"), (1, "up"), (1, "left"), (1, "right"), (2, "down"), (2, "up"), (2, "left"), (2, "right")]
+# 导出行：(源行, 源起始帧)。前 8 行为静止 南/北/左/右 + 行走 南/北/左/右；
+# 第 9、10 行为坐姿（源第 4 行 sit：前 6 帧面朝右、后 6 帧面朝左），侧向座位使用
+AVATAR_ROWS = [(1, AVATAR_DIR_ORDER[d] * 6) for d in ("down", "up", "left", "right")] \
+    + [(2, AVATAR_DIR_ORDER[d] * 6) for d in ("down", "up", "left", "right")] \
+    + [(4, 0), (4, 6)]
+SHEET_ROWS = len(AVATAR_ROWS)
 AVATAR_CATEGORIES = [
     # (前端槽位, 源目录, 是否允许不选)
     ("body", "Bodies", False),
@@ -776,10 +947,10 @@ AVATAR_COLS = 16
 
 
 def avatar_block(src: Image.Image) -> Image.Image:
-    out = Image.new("RGBA", (96, 256))
-    for r, (row, direction) in enumerate(AVATAR_ROWS):
+    out = Image.new("RGBA", (96, 32 * SHEET_ROWS))
+    for r, (row, start) in enumerate(AVATAR_ROWS):
         for i in range(6):
-            fx = (AVATAR_DIR_ORDER[direction] * 6 + i) * 16
+            fx = (start + i) * 16
             out.paste(src.crop((fx, row * 32, fx + 16, row * 32 + 32)), (i * 16, r * 32))
     return out
 
@@ -794,15 +965,15 @@ def split_part_name(stem: str) -> tuple[str, str]:
 
 def build_avatar_parts() -> tuple[dict[str, Image.Image], dict]:
     sheets: dict[str, Image.Image] = {}
-    manifest: dict = {"frameWidth": 16, "frameHeight": 32, "blockWidth": 96, "blockHeight": 256,
+    manifest: dict = {"frameWidth": 16, "frameHeight": 32, "blockWidth": 96, "blockHeight": 32 * SHEET_ROWS,
                       "columns": AVATAR_COLS, "categories": {}}
     for slot, folder, optional in AVATAR_CATEGORIES:
         files = sorted((PACK / CHARGEN / folder / "16x16").glob("*.png"))
         rows = (len(files) + AVATAR_COLS - 1) // AVATAR_COLS
-        sheet = Image.new("RGBA", (min(AVATAR_COLS, len(files)) * 96, rows * 256))
+        sheet = Image.new("RGBA", (min(AVATAR_COLS, len(files)) * 96, rows * 32 * SHEET_ROWS))
         items = []
         for i, f in enumerate(files):
-            sheet.paste(avatar_block(Image.open(f).convert("RGBA")), ((i % AVATAR_COLS) * 96, (i // AVATAR_COLS) * 256))
+            sheet.paste(avatar_block(Image.open(f).convert("RGBA")), ((i % AVATAR_COLS) * 96, (i // AVATAR_COLS) * 32 * SHEET_ROWS))
             style, variant = split_part_name(f.stem)
             items.append({"id": f.stem, "style": style, "variant": variant})
         sheets[slot] = sheet
@@ -871,6 +1042,11 @@ def render_preview(rooms: list[tuple[Room, tuple[int, int]]], path: Path, world:
         for m in room.machines:
             x, y, w, h = m["zone"]
             d.rectangle((ox + x, oy + y, ox + x + w - 1, oy + y + h - 1), outline=(0, 255, 120, 220))
+        for item in room.seats + room.desks + room.actions:
+            x, y, w, h = item["zone"]
+            d.rectangle((ox + x, oy + y, ox + x + w - 1, oy + y + h - 1), outline=(255, 80, 220, 200))
+        for item in room.seats + [dk["seat"] for dk in room.desks]:
+            d.ellipse((ox + item["x"] - 1, oy + item["y"] - 1, ox + item["x"] + 1, oy + item["y"] + 1), fill=(255, 80, 220, 255))
         for portal in room.portals:
             x, y, w, h = portal["rect"]
             d.rectangle((ox + x, oy + y, ox + x + w - 1, oy + y + h - 1), outline=(0, 200, 255, 220))
@@ -899,6 +1075,7 @@ def main() -> None:
         raise SystemExit(f"找不到素材包目录：{PACK}")
     build_objects()
     soften_shadows()
+    trim_objects()
     build_decals()
     build_anims()
     foyer = build_foyer()
@@ -940,6 +1117,8 @@ def main() -> None:
     (OUT / "avatar").mkdir(parents=True, exist_ok=True)
     for r, _ in placed:
         r.bg.save(OUT / f"{r.id}.png", optimize=True)
+    # 默认角色：预制角色 12 号，按与形象部件相同的帧布局导出（含坐姿行）
+    avatar_block(load(CHARGEN + "0_Premade_Characters/16x16/Premade_Character_12.png")).save(OUT / "player.png", optimize=True)
     atlas, atlas_json = pack_atlas(OBJECTS)
     atlas.save(OUT / "objects.png", optimize=True)
     (OUT / "objects.json").write_text(json.dumps(atlas_json, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")

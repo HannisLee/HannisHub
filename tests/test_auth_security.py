@@ -27,12 +27,17 @@ class SecurityTest(unittest.TestCase):
         with patch('core.auth.current_username', return_value='other'):
             for path in ['/api/file-manager/directory', '/api/users', '/server/api/tasks', '/llama-manager/api/settings', '/llama-manager/llama-process/123/api/other']:
                 self.assertEqual(self.client.get(path).status_code, 403, path)
-            for path in ['/api/chat-room/messages', '/api/ocr/records', '/llama-manager/api/asr/history', '/llama-manager/api/custom-services']:
+            for path in ['/api/chat-room/messages', '/api/ocr/records', '/llama-manager/api/asr/history', '/llama-manager/api/custom-services',
+                         '/api/todos', '/api/chat-lobby/desks']:
                 self.assertEqual(self.client.get(path).status_code, 200, path)
             self.assertEqual(self.client.delete('/api/chat-room/messages', headers={'Origin': 'http://testserver'}).status_code, 403)
             self.assertEqual(self.client.post('/api/ocr/records', headers={'Origin': 'http://evil.test'}).status_code, 403)
             self.assertEqual(self.client.post('/api/ocr/records').status_code, 403)
             self.assertEqual(self.client.post('/api/ocr/records', headers={'Origin': 'http://testserver'}).status_code, 200)
+            # 工位待办：普通账号可读写自己的待办，跨站写请求同样被拒
+            self.assertEqual(self.client.post('/api/todos', headers={'Origin': 'http://testserver'}).status_code, 200)
+            self.assertEqual(self.client.post('/api/todos', headers={'Origin': 'http://evil.test'}).status_code, 403)
+            self.assertEqual(self.client.delete('/api/todos/abc', headers={'Origin': 'http://testserver'}).status_code, 200)
         with patch('core.auth.current_username', return_value='lihan'):
             self.assertEqual(self.client.get('/api/file-manager/directory').status_code, 200)
             self.assertEqual(self.client.post('/api/users', headers={'Referer': 'http://testserver/settings/users'}).status_code, 200)

@@ -11,7 +11,7 @@ const CLOSE_CODES_FATAL = new Set([4401, 4403]);
 /** 状态去重键：私有房间只看房间编号，公共房间坐标取整，避免亚像素抖动反复发送 */
 function stateKey(state: LobbyLocalState): string {
   if (state.room === "room") return state.room;
-  return `${state.room}|${Math.round(state.x)}|${Math.round(state.y)}|${state.dir}|${state.moving ? 1 : 0}`;
+  return `${state.room}|${Math.round(state.x)}|${Math.round(state.y)}|${state.dir}|${state.moving ? 1 : 0}|${state.pose ?? ""}`;
 }
 
 /** 聊天大厅多人同步连接：节流上报自己的状态，断线后指数退避重连。
@@ -92,10 +92,17 @@ export class PresenceClient {
         y: Math.round(state.y * 10) / 10,
         dir: state.dir,
         moving: state.moving,
+        ...(state.pose ? { pose: state.pose } : {}),
       };
     socket.send(JSON.stringify(payload));
     this.sentKey = key;
     this.sentAt = now;
+  }
+
+  /** 发送表情：只在连接打开时发送，断线期间的表情直接丢弃（气泡是即时的，补发没有意义） */
+  sendEmote(key: string) {
+    const socket = this.socket;
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "emote", key }));
   }
 
   destroy() {

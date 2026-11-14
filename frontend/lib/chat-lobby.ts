@@ -35,6 +35,9 @@ export function saveLobbyProfile(name: string, avatar: LobbyAvatar | null): Prom
 
 export type LobbyFacing = "down" | "up" | "left" | "right";
 
+/** 姿势：空字符串为站立 / 行走，"sit" 为坐着（dir 为坐下的朝向） */
+export type LobbyPose = "" | "sit";
+
 /** 自己上报的状态：位于私有房间（我的房间）时服务端只保留房间编号 */
 export interface LobbyLocalState {
   room: string;
@@ -42,6 +45,7 @@ export interface LobbyLocalState {
   y: number;
   dir: LobbyFacing;
   moving: boolean;
+  pose?: LobbyPose;
 }
 
 /** 公共房间（入口厅、大厅）里的其他人；id 为服务端随机生成的角色编号 */
@@ -57,10 +61,61 @@ export type LobbyServerMessage =
   | ({ type: "move"; id: string } & LobbyLocalState)
   | { type: "hide"; id: string }
   | { type: "leave"; id: string }
-  | { type: "profile"; id: string; name: string; avatar: LobbyAvatar | null };
+  | { type: "profile"; id: string; name: string; avatar: LobbyAvatar | null }
+  | { type: "emote"; id: string; key: string }
+  | { type: "desks" };
 
 export function lobbySocketUrl(): string {
   const override = process.env.NEXT_PUBLIC_HANNISHUB_WS_ORIGIN;
   const origin = override || `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
   return `${origin}${API_PATHS.chatLobby}/ws`;
+}
+
+/** ---------- 表情气泡：键名经服务端校验后广播，文字由各端本地决定 ---------- */
+
+/** 表情键 → 可选文字（随机取一条）。自己看到随机一条，其他人看到第一条 */
+export const LOBBY_EMOTES: Record<string, string[]> = {
+  wave: ["嗨！"],
+  laugh: ["哈哈哈"],
+  like: ["赞！"],
+  think: ["嗯……"],
+  coffee: ["咖啡续上了", "再来一杯", "提神中"],
+  fridge: ["拿了瓶汽水", "冰淇淋！", "牛奶快喝完了"],
+  snack: ["咔嚓咔嚓", "薯片真香", "就吃一包"],
+  fish: ["喂鱼中", "小鱼游过来了", "别抢别抢"],
+  cat: ["喵～", "呼噜呼噜", "猫翻了个身"],
+  plant: ["浇浇水", "又长高了", "叶子很精神"],
+  train: ["呜呜——", "小火车出发", "绕圈圈"],
+  book: ["读书中", "这本不错", "翻了几页"],
+  board: ["看白板", "先做最重要的事", "完成比完美更重要", "大任务拆成小步骤", "记得喝水", "专注 25 分钟，休息 5 分钟"],
+  arcade: ["来一局！", "新纪录！", "再来一局", "Game Over"],
+  pinball: ["叮叮叮", "高分！", "球掉了……"],
+  pool: ["打一杆", "一杆进洞！", "差一点点", "清台！"],
+  piano: ["♪ ♫ ♪"],
+  guitar: ["♪ 拨弦"],
+};
+
+/** 数字键 1–4 对应的快捷表情 */
+export const QUICK_EMOTES = ["wave", "laugh", "like", "think"] as const;
+
+/** ---------- 工位（GET/PUT/DELETE /api/chat-lobby/desks） ---------- */
+
+export interface LobbyDeskState {
+  /** 已认领的工位：工位编号 → { name, mine } */
+  desks: Record<string, { name: string; mine: boolean }>;
+  /** 自己认领的工位编号；没有时为 null */
+  mine: string | null;
+}
+
+export function fetchLobbyDesks(): Promise<LobbyDeskState> {
+  return apiFetch<LobbyDeskState>(`${API_PATHS.chatLobby}/desks`);
+}
+
+/** 认领工位：已有工位时改为这一个；已被别人认领时返回 409 */
+export function claimLobbyDesk(desk: string): Promise<LobbyDeskState> {
+  return apiFetch<LobbyDeskState>(`${API_PATHS.chatLobby}/desks/mine`, { method: "PUT", body: jsonBody({ desk }) });
+}
+
+export function releaseLobbyDesk(): Promise<LobbyDeskState> {
+  return apiFetch<LobbyDeskState>(`${API_PATHS.chatLobby}/desks/mine`, { method: "DELETE" });
 }

@@ -8,7 +8,9 @@
 - 对外只暴露随机生成的角色编号与显示名字，不暴露登录用户名
 
 协议（JSON 文本帧）：
-- 客户端 → 服务端：{"type": "state", "room", "x", "y", "dir", "moving"}，移动中约每 100ms 一次，静止时每 5 秒一次作为心跳
+- 客户端 → 服务端：{"type": "state", "room", "x", "y", "dir", "moving", "pose"}，移动中约每 100ms 一次，静止时每 5 秒一次作为心跳；
+  pose 可省略，"sit" 表示坐着（坐在椅子、沙发、工位上，dir 为坐下的朝向）
+- 客户端 → 服务端：{"type": "emote", "key"}，表情气泡（键名为小写字母，文字由各端本地决定），只在公共房间广播
 - 服务端 → 客户端：
   - {"type": "snapshot", "players": [玩家, ...]}：连接建立时发送当前公共房间内的其他人
   - {"type": "player", "player": 玩家}：某人出现在公共房间（首次进入或从私有房间下来）
@@ -16,7 +18,9 @@
   - {"type": "hide", "id"}：走进了自己的私有房间
   - {"type": "leave", "id"}：下线
   - {"type": "profile", "id", "name", "avatar"}：名字或形象变化
-  玩家 = {"id", "name", "avatar", "room", "x", "y", "dir", "moving"}
+  - {"type": "emote", "id", "key"}：某人冒了一个表情气泡
+  - {"type": "desks"}：工位认领有变化，客户端重新读取 /api/chat-lobby/desks（发给所有连接，包括自己）
+  玩家 = {"id", "name", "avatar", "room", "x", "y", "dir", "moving", "pose"}
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ import asyncio
 import contextlib
 import json
 import math
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -49,6 +54,10 @@ MAX_COORD = 100_000.0
 SEND_QUEUE_SIZE = 256
 # 每个连接每秒最多处理的消息数，超出部分直接丢弃
 RATE_PER_SECOND = 30
+# 表情：键名格式与同一连接两次表情的最短间隔
+EMOTE_KEY = re.compile(r"^[a-z]{1,16}$")
+EMOTE_INTERVAL_SECONDS = 0.5
+POSES = frozenset({"sit"})
 
 CLOSE_FORBIDDEN = 4403
 CLOSE_FULL = 4429
@@ -67,6 +76,7 @@ class Connection:
     active_at: float = 0.0
     rate_window: float = 0.0
     rate_count: int = 0
+    emote_at: float = 0.0
 
 
 @dataclass(eq=False)
@@ -103,6 +113,7 @@ def _parse_state(data: dict[str, Any]) -> dict[str, Any] | None:
         "y": round(float(y), 1),
         "dir": facing if facing in FACINGS else "down",
         "moving": data.get("moving") is True,
+        "pose": data["pose"] if data.get("pose") in POSES else "",
     }
 
 
@@ -228,6 +239,26 @@ class LobbyPresence:
         if member.visible:
             self._broadcast(member, {"type": "leave", "id": member.id})
 
+    def _handle_emote(self, conn: Connection, data: dict[str, Any]) -> None:
+        """表情只从主连接、位于公共房间时广播；同一连接限速。"""
+        key = data.get("key")
+        member = self.members.get(conn.username)
+        if not isinstance(key, str) or not EMOTE_KEY.match(key) or member is None:
+            return
+        if member.primary is not conn or not member.visible:
+            return
+        now = time.monotonic()
+        if now - conn.emote_at < EMOTE_INTERVAL_SECONDS:
+            return
+        conn.emote_at = now
+        self._broadcast(member, {"type": "emote", "id": member.id, "key": key})
+
+    def notify_desks(self) -> None:
+        """工位认领变化：通知所有连接（包括认领者自己的其他标签页）重新读取工位。"""
+        text = json.dumps({"type": "desks"})
+        for conn in list(self.connections):
+            self._enqueue(conn, text)
+
     def update_profile(self, username: str, profile: dict[str, Any]) -> None:
         """名字或形象保存后通知其他人刷新该角色。"""
         member = self.members.get(username)
@@ -268,8 +299,12 @@ class LobbyPresence:
                     data = json.loads(text)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(data, dict) and data.get("type") == "state":
+                if not isinstance(data, dict):
+                    continue
+                if data.get("type") == "state":
                     self._handle_state(conn, data)
+                elif data.get("type") == "emote":
+                    self._handle_emote(conn, data)
         except Exception:
             # 断开、超时、发送了二进制帧等都按断开处理
             pass

@@ -57,6 +57,37 @@ export interface MachineDef {
   signY: number;
 }
 
+/** 可坐的位置：(x, y) 为坐下后的脚底坐标（决定前后遮挡），dir 为坐下后的朝向；站进 zone 按 E 坐下 */
+export interface SeatDef {
+  id: string;
+  x: number;
+  y: number;
+  dir: Facing;
+  zone: Rect;
+  title: string;
+  /** 坐下后顺带演奏的乐器（钢琴凳） */
+  play?: "piano";
+}
+
+/** 工位：可认领；认领者坐到自己的工位上打开待办 */
+export interface DeskDef {
+  id: string;
+  zone: Rect;
+  seat: { x: number; y: number; dir: Facing };
+  /** 工位名牌位置 */
+  signX: number;
+  signY: number;
+}
+
+/** 小互动：按 E 在头顶冒出一句气泡（咖啡、喂鱼、撸猫……），sound 为附带的短旋律 */
+export interface ActionDef {
+  id: string;
+  title: string;
+  hint: string;
+  zone: Rect;
+  sound?: "guitar";
+}
+
 export interface DoorDef {
   key: string;
   x: number;
@@ -91,6 +122,9 @@ export interface RoomDef {
   machines: MachineDef[];
   doors: DoorDef[];
   signs: SignDef[];
+  seats?: SeatDef[];
+  desks?: DeskDef[];
+  actions?: ActionDef[];
 }
 
 export interface AnimSheetDef {
@@ -125,10 +159,23 @@ export interface MachineInfo {
   hint: string;
 }
 
+/** 角色附近可交互对象的种类：machine 打开功能面板，desk 工位，seat 坐下，action 小互动 */
+export type InteractKind = "machine" | "desk" | "seat" | "action";
+
+export interface NearbyInfo extends MachineInfo {
+  kind: InteractKind;
+}
+
+/** 工位归属（React 从接口读取后写入桥接对象）：name 为认领者在大厅中的名字，mine 表示自己的工位 */
+export interface DeskClaim {
+  name: string;
+  mine: boolean;
+}
+
 /** React 与 Phaser 共享的可变桥接对象：React 写入，场景每帧读取，避免跨层重渲染 */
 export interface LobbyBridge {
   touch: { x: number; y: number };
-  /** 自定义形象：合成好的 96x256 帧表（null 时使用默认角色）；version 变化时场景重新贴图 */
+  /** 自定义形象：合成好的 96x320 帧表（null 时使用默认角色）；version 变化时场景重新贴图 */
   avatar: { sheet: HTMLCanvasElement | null; version: number };
   /** 机器面板打开时为 true：角色冻结，键盘释放给页面输入框 */
   paused: boolean;
@@ -136,6 +183,10 @@ export interface LobbyBridge {
   interactQueued: boolean;
   /** 出生房间与出生点；null 时使用 layout.json 的默认入口（入口厅） */
   start: { room: string; spawn: string } | null;
+  /** 工位归属：工位编号 → 认领信息；version 变化时场景刷新工位名牌 */
+  desks: { claims: Record<string, DeskClaim>; version: number };
+  /** 快捷表情（数字键或触屏按钮）：React 写入表情键，场景消费后清空 */
+  emoteQueued: string;
 }
 
 export interface LobbyEvents {
@@ -143,6 +194,10 @@ export interface LobbyEvents {
   onReady?: () => void;
   onError?: (message: string) => void;
   onRoomChange?: (room: RoomInfo) => void;
-  onNearby?: (machine: MachineInfo | null) => void;
+  onNearby?: (target: NearbyInfo | null) => void;
   onInteract?: (machine: MachineInfo) => void;
+  /** 在工位坐下：React 按归属决定打开待办、询问认领或仅提示 */
+  onDesk?: (deskId: string) => void;
+  /** 有人认领或退还了工位：React 重新读取工位归属 */
+  onDesksChanged?: () => void;
 }
