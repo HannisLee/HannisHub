@@ -187,7 +187,10 @@ def build_objects() -> None:
     # ---- 大厅新增
     # 工位桌：俯视的深桌面木桌，双屏显示器能完整落在桌面上（原先的正视角书桌桌面只有几像素深，显示器像悬空）
     o["work_table"] = trimmed(GENERIC, (88, 542, 136, 592))
-    o["side_cabinet"] = single("living", 65)
+    # 长条工位桌：同一张木桌横向拉长、纵向压扁（木纹是横向的，复制中段列、去掉中段行都不会露出接缝）
+    o["work_desk"] = stretch(o["work_table"], 74, 32, left=8, right=8, top=6, bottom=12)
+    # 留言板：脚本绘制的落地软木板，贴满彩色便签
+    o["notice_board"] = notice_board()
     # 完整台球桌：素材包把球桌拆成左右两半
     o["pool_full"] = combine([(single("basement", 76), 0, 0), (single("basement", 77), 32, 0)])
     o["pool_rack"] = single("basement", 72)
@@ -205,6 +208,67 @@ def build_objects() -> None:
     o["guitar"] = trimmed(MUSIC, (112, 36, 128, 80))
     o["guitar_blue"] = trimmed(MUSIC, (160, 36, 176, 80))
     o["whiteboard"] = single("class", 39)
+
+
+def stretch(img: Image.Image, w: int, h: int, *, left: int, right: int, top: int, bottom: int) -> Image.Image:
+    """九宫格式缩放：四边保留原样，中段按需平铺或截短（用于把方桌改成长条桌）。"""
+    def resize_axis(src: Image.Image, size: int, head: int, tail: int, horizontal: bool) -> Image.Image:
+        total = src.width if horizontal else src.height
+        mid = total - head - tail
+        out = Image.new("RGBA", (size, src.height) if horizontal else (src.width, size))
+
+        def part(a: int, b: int) -> Image.Image:
+            return src.crop((a, 0, b, src.height)) if horizontal else src.crop((0, a, src.width, b))
+
+        def put(img2: Image.Image, at: int) -> None:
+            out.paste(img2, (at, 0) if horizontal else (0, at))
+        put(part(0, head), 0)
+        put(part(total - tail, total), size - tail)
+        at = head
+        while at < size - tail:
+            n = min(mid, size - tail - at)
+            put(part(head, head + n), at)
+            at += n
+        return out
+    return resize_axis(resize_axis(img, w, left, right, True), h, top, bottom, False)
+
+
+def notice_board() -> Image.Image:
+    """落地留言板（56x42）：木框软木板 + 彩色便签与图钉 + 两根支脚，像素风手绘。"""
+    import random
+    rng = random.Random(7)
+    w, h = 56, 42
+    img = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(img)
+    wood, wood_dark, wood_light = (126, 82, 50, 255), (78, 50, 34, 255), (168, 116, 72, 255)
+    # 支脚与底座阴影
+    for x in (8, w - 11):
+        d.rectangle((x, 30, x + 2, h - 2), fill=wood_dark)
+        d.rectangle((x - 2, h - 2, x + 4, h - 1), fill=wood_dark)
+    # 木框
+    d.rectangle((0, 0, w - 1, 33), fill=OUTLINE)
+    d.rectangle((1, 1, w - 2, 32), fill=wood)
+    d.line((1, 1, w - 2, 1), fill=wood_light)
+    d.line((1, 32, w - 2, 32), fill=wood_dark)
+    # 软木
+    cork, cork_dark, cork_light = (198, 150, 98, 255), (168, 120, 74, 255), (218, 176, 126, 255)
+    d.rectangle((4, 4, w - 5, 29), fill=cork)
+    for _ in range(90):
+        x, y = rng.randint(4, w - 5), rng.randint(4, 29)
+        d.point((x, y), fill=cork_dark if rng.random() < 0.6 else cork_light)
+    d.line((4, 4, w - 5, 4), fill=cork_dark)
+    # 便签：位置略有错落，底边一行暗色表示纸张厚度，顶部红 / 蓝图钉
+    notes = [
+        (7, 7, (250, 220, 110)), (17, 6, (255, 168, 190)), (28, 8, (150, 205, 255)), (39, 6, (170, 225, 140)),
+        (10, 17, (255, 190, 120)), (21, 18, (200, 170, 255)), (33, 17, (250, 220, 110)), (43, 18, (255, 168, 190)),
+    ]
+    for x, y, color in notes:
+        d.rectangle((x, y, x + 7, y + 8), fill=(*color, 255))
+        d.line((x, y + 8, x + 7, y + 8), fill=tuple(int(c * 0.78) for c in color) + (255,))
+        for ty in (y + 3, y + 5):
+            d.line((x + 2, ty, x + 5, ty), fill=tuple(int(c * 0.6) for c in color) + (255,))
+        d.point((x + 3, y), fill=(214, 60, 60, 255) if (x + y) % 2 else (70, 110, 210, 255))
+    return img
 
 
 def combine(parts: list[tuple[Image.Image, int, int]]) -> Image.Image:
@@ -561,6 +625,66 @@ BRAND = (217, 119, 87, 255)
 BRAND_LIGHT = (240, 168, 132, 255)
 
 
+RAINBOW = [
+    (255, 107, 107), (255, 159, 67), (254, 211, 72), (130, 221, 85), (58, 214, 196),
+    (77, 166, 255), (124, 120, 255), (196, 107, 246), (255, 102, 179),
+]
+
+
+def _mix(a: tuple[int, ...], b: tuple[int, ...], t: float) -> tuple[int, int, int, int]:
+    return tuple(int(round(a[i] * (1 - t) + b[i] * t)) for i in range(3)) + (255,)
+
+
+def rainbow_text(text: str, scale: int = 3, gap: int = 2) -> Image.Image:
+    """炫彩像素字：每个字母一种颜色（彩虹渐变），字内自上而下由亮到深，2px 深色描边、
+    外圈同色半透明光晕、右下投影，字母之间留 gap 列点阵宽的字距，四周点缀闪光。"""
+    widths = [len(PIXEL_GLYPHS[c][0]) for c in text]
+    cols = sum(widths) + gap * (len(text) - 1)
+    w, h = cols * scale, 7 * scale
+    pad = 5
+    body = Image.new("RGBA", (w, h))
+    glow = Image.new("RGBA", (w + pad * 2, h + pad * 2))
+    d = ImageDraw.Draw(body)
+    dg = ImageDraw.Draw(glow)
+    x = 0
+    for i, c in enumerate(text):
+        base = RAINBOW[round(i * (len(RAINBOW) - 1) / max(1, len(text) - 1))]
+        glyph = PIXEL_GLYPHS[c]
+        for gy, row in enumerate(glyph):
+            # 顶行偏白、底行偏深，形成立体的糖果质感
+            t = gy / 6
+            color = _mix(_mix(base, (255, 255, 255), 0.55), _mix(base, (0, 0, 0), 0.18), t) if gy < 6 else _mix(base, (0, 0, 0), 0.22)
+            for gx, bit in enumerate(row):
+                if bit != "1":
+                    continue
+                x0, y0 = (x + gx) * scale, gy * scale
+                d.rectangle((x0, y0, x0 + scale - 1, y0 + scale - 1), fill=color)
+                # 每个点阵块左上角一个高光像素
+                if gy < 3:
+                    d.point((x0, y0), fill=_mix(color, (255, 255, 255), 0.6))
+                dg.rectangle((x0 + pad - 3, y0 + pad - 3, x0 + pad + scale + 2, y0 + pad + scale + 2), fill=(*base, 46))
+        x += widths[i] + gap
+    mask = body.getchannel("A")
+    out = Image.new("RGBA", (w + pad * 2, h + pad * 2))
+    out.alpha_composite(glow)
+    shadow = Image.new("RGBA", (w, h), (16, 12, 22, 150))
+    out.paste(shadow, (pad + 3, pad + 3), mask)
+    outline = Image.new("RGBA", (w, h), OUTLINE)
+    for dx in range(-2, 3):
+        for dy in range(-2, 3):
+            if abs(dx) + abs(dy) and abs(dx) + abs(dy) <= 3:
+                out.paste(outline, (pad + dx, pad + dy), mask)
+    out.alpha_composite(body, (pad, pad))
+    # 闪光：四角星
+    sparkle = ImageDraw.Draw(out)
+    for sx, sy, size in ((pad - 3, pad - 2, 2), (out.width - pad + 1, pad + 1, 2), (out.width // 2 + 7, 1, 1),
+                         (out.width // 3, out.height - 3, 1)):
+        color = (255, 248, 220, 255)
+        sparkle.line((sx - size, sy, sx + size, sy), fill=color)
+        sparkle.line((sx, sy - size, sx, sy + size), fill=color)
+    return out
+
+
 def pixel_text(text: str, scale: int = 2) -> Image.Image:
     """像素风墙面字：品牌色字身 + 顶行高光 + 1px 深色描边 + 右下 1px 投影。"""
     cols = sum(len(PIXEL_GLYPHS[c][0]) for c in text) + len(text) - 1
@@ -664,53 +788,49 @@ def build_foyer() -> Room:
 DESK_COUNT = 6
 
 
-def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str) -> None:
-    """一个工位：俯视木桌 + 桌面双屏滚动显示器（屏幕与键盘完整落在桌面内）+ 右侧矮柜与桌面小物 + 桌前转椅。
-    转椅与桌子水平居中对齐；站到椅子后方按 E 坐下，认领者在自己的工位打开待办。"""
-    table = room.put("work_table", x, top + OBJECTS["work_table"].height, foot=16)
-    tw = OBJECTS["work_table"].width
-    bottom = table["y"] + OBJECTS["work_table"].height
-    # 显示器帧 16x32，可见像素 y=4..25：底边（键盘）落在桌面前沿上方 8px；深度紧跟桌子，画在桌面之上
-    for mx in (x + 5, x + tw - 21):
-        room.anim("monitor", mx, bottom - 8 - 26 + 1, depth=bottom + 1)
-    cab = room.put("side_cabinet", x + tw + 2, bottom - 4, foot=12)
-    cab_top = cab["y"]
+def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str, chair: str) -> None:
+    """一个工位：长条木桌 + 桌面双屏滚动显示器（屏幕与键盘完整落在桌面内）+ 桌角小物 + 桌前转椅。
+    转椅为背对镜头的圆背办公椅，坐下时椅背挡住角色后背，只露出头和肩膀；站到椅子后方按 E。"""
+    dw, dh = OBJECTS["work_desk"].size
+    bottom = top + dh
+    room.put("work_desk", x, bottom, foot=14)
+    cx = x + dw // 2
+    # 显示器帧 16x32，可见像素 y=4..25：底边（键盘）落在桌面前沿上方 3px
+    for mx in (cx - 17, cx + 1):
+        room.anim("monitor", mx, bottom - 12 - 26 + 1, depth=bottom + 1)
     if accessory == "coffee":
-        room.anim("coffee", x + tw + 2, cab_top - 22, depth=bottom - 3)
+        room.anim("coffee", x + dw - 16, bottom - 12 - 26, depth=bottom + 1)
     else:
         img = OBJECTS[accessory]
-        room.put(accessory, x + tw + 2 + (16 - img.width) // 2, cab_top + 4, solid=False, depth=bottom - 3)
-    # 转椅：背对镜头（角色面朝屏幕），与桌子居中对齐
-    cw = OBJECTS["chair_task"].width
-    cx = x + tw // 2
-    chair_bottom = bottom + 10
-    room.put("chair_task", cx - cw // 2, chair_bottom, solid=[cx - 4, chair_bottom - 5, 8, 5])
+        room.put(accessory, x + dw - 4 - img.width, bottom - 13, solid=False, depth=bottom + 1)
+    room.put("plant_desk" if accessory != "plant_desk" else "lamp_desk_cream", x + 3, bottom - 13, solid=False, depth=bottom + 1)
+    cw = OBJECTS[chair].width
+    chair_bottom = bottom + 15
+    room.put(chair, cx - cw // 2, chair_bottom, solid=[cx - 4, chair_bottom - 4, 8, 4])
     room.desks.append({
         "id": desk_id,
-        # 站在椅子正后方（下方）按 E
-        "zone": [cx - 14, chair_bottom - 4, 28, 16],
-        # 坐下：脚底略高于椅子底边，椅背画在角色前面
-        "seat": {"x": cx, "y": chair_bottom - 2, "dir": "up"},
-        "signX": cx + 8, "signY": table["y"] - 4,
+        "zone": [cx - 14, chair_bottom - 3, 28, 15],
+        # 坐下：脚底略高于椅子底边，圆椅背画在角色前面
+        "seat": {"x": cx, "y": chair_bottom - 3, "dir": "up"},
+        "signX": cx, "signY": top - 7,
     })
 
 
 def build_hall() -> Room:
     """大厅：上墙左侧 HannisHub 像素字，中间玻璃门入口；左上 6 个可认领工位，右上 ASR / OCR 两台机器，
     右侧圆桌聊天角与鱼缸，中部钢琴角，左下休息区，中下茶水间，右下游戏角。"""
-    room = Room("hall", "大厅", 40, 26, floor_tex(4, 12), wall_tex(23, 24))
+    # 墙面：深色石板墙，让左上角的炫彩 HannisHub 像霓虹招牌一样醒目（原奶油色 + 青绿墙裙）
+    room = Room("hall", "大厅", 40, 26, floor_tex(4, 12), wall_tex(1, 34))
     w, h = room.w, room.h
     door_x = w // 2 - 16
     room.top_openings.append((door_x + 4, door_x + 28))
     room.draw_shell()
     floor_bottom = h - 16
 
-    # ---- 上墙：左上角 HannisHub 像素字，窗与挂饰
-    logo = pixel_text("HannisHub")
-    room.bg.alpha_composite(logo, (26, 24))
-    room.decal("window_curtain", t(9), 18)
-    room.decal("world_map", t(12), 16)
-    room.decal("window_curtain", t(15), 18)
+    # ---- 上墙：左侧整面是炫彩 HannisHub 像素字（3 倍点阵、加宽字距，铺满门左侧墙面），右侧挂钟
+    logo = rainbow_text("HannisHub", scale=3, gap=4)
+    span = door_x - 30 - 20
+    room.bg.alpha_composite(logo, (20 + (span - logo.width) // 2, 16 + (32 - logo.height) // 2 + 1))
     room.anim("clock", w - 70, 12, depth=10)
 
     # ---- 入口：玻璃双开门 + 红色迎宾长毯 + 两侧落地绿植（盆底落在墙脚以下的地板上）
@@ -724,13 +844,14 @@ def build_hall() -> Room:
     room.signs.append({"x": door_x + 16, "y": 8, "text": "入口厅", "tone": "muted"})
 
     # ---- 左上：工位区（浅灰地毯上 3x2 共 6 个工位）
-    room.rug((22, 54, 280, 216), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
-    accessories = ["lamp_desk_blue", "plant_desk", "coffee", "lamp_desk_cream", "coffee", "plant_desk"]
+    room.rug((22, 54, 282, 216), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
+    accessories = ["lamp_desk_blue", "coffee", "plant_desk", "coffee", "lamp_desk_blue", "coffee"]
+    chairs = ["chair_office", "chair_office_brown", "chair_office_white", "chair_office_green", "chair_office", "chair_office_brown"]
     n = 0
-    for row, top in enumerate((60, 138)):
+    for row, top in enumerate((66, 142)):
         for col in range(3):
             n += 1
-            workstation(room, f"desk-{n}", 34 + col * 82, top, accessories[n - 1])
+            workstation(room, f"desk-{n}", 31 + col * 84, top, accessories[n - 1], chairs[n - 1])
     assert n == DESK_COUNT
     room.signs.append({"x": 151, "y": 228, "text": "工位区 · 站到椅子后按 E 坐下 / 认领", "tone": "muted"})
 
@@ -765,29 +886,19 @@ def build_hall() -> Room:
     tb = cy + 12
     room.put("table_round", cx - 12, tb, foot=14)
     room.anim("coffee", cx - 8, tb - 30, depth=tb + 1)
-    # 高脚凳：上方（面朝下）、左右（面朝圆桌）、下方（面朝上）
+    # 高脚凳：圆桌左右两侧各两张，都面朝圆桌（侧坐有真正的坐姿帧，正面 / 背面坐高脚凳会像站在凳子上）
     stools = [
-        ("stool_blue", cx, cy - 20, "down"),
-        ("stool_yellow", cx - 30, cy + 8, "right"),
-        ("stool_wood", cx + 30, cy + 8, "left"),
-        ("stool_blue", cx, cy + 30, "up"),
+        ("stool_yellow", cx - 27, cy + 2, "right"), ("stool_blue", cx - 27, cy + 22, "right"),
+        ("stool_wood", cx + 27, cy + 2, "left"), ("stool_blue", cx + 27, cy + 22, "left"),
     ]
     for key, sx, sb, facing in stools:
         sw = OBJECTS[key].width
-        room.put(key, sx - sw // 2, sb, solid=[sx - 4, sb - 5, 8, 5])
-        seat_y = sb - 2 if facing == "up" else sb + 1
-        if facing == "down":
-            zone = [sx - 10, sb - 26, 20, 12]
-        elif facing == "up":
-            zone = [sx - 10, sb - 2, 20, 12]
-        elif facing == "right":
-            zone = [sx - 22, sb - 10, 14, 16]
-        else:
-            zone = [sx + 8, sb - 10, 14, 16]
-        room.seat(sx, seat_y, facing, zone, title="坐高脚凳")
+        room.put(key, sx - sw // 2, sb, solid=[sx - 4, sb - 4, 8, 4])
+        zone = [sx - 22, sb - 9, 14, 14] if facing == "right" else [sx + 8, sb - 9, 14, 14]
+        room.seat(sx + (2 if facing == "right" else -2), sb + 1, facing, zone, title="坐高脚凳")
     room.machines.append({
         "id": "chat", "title": "聊天室", "hint": "和大家一起聊天",
-        "zone": [cx - 52, cy - 34, 104, 68], "signX": cx, "signY": cy - 54,
+        "zone": [cx - 50, cy - 34, 100, 68], "signX": cx, "signY": cy - 54,
     })
     # 右墙边鱼缸（可喂鱼）与绿植
     fx, fb = w - 16 - 34, cy - 6
@@ -796,9 +907,18 @@ def build_hall() -> Room:
     room.put("plant_big", w - 16 - 26, cy + 44, foot=10)
     room.action("plant", "绿植", "浇浇水", [w - 16 - 34, cy + 42, 34, 14])
 
-    # ---- 中部偏右：白板（今日一句）
-    room.put("whiteboard", 356, 170, foot=8)
-    room.action("board", "白板", "看看今日一句", [352, 168, 40, 14])
+    # ---- 中部：留言板（站到板前按 E，大厅里所有人都能看到的便签墙）
+    nb_w = OBJECTS["notice_board"].width
+    nb_x, nb_b = 386 - nb_w // 2, 186
+    room.put("notice_board", nb_x, nb_b, solid=[nb_x + 6, nb_b - 6, nb_w - 12, 6])
+    room.machines.append({
+        "id": "notes", "title": "留言板", "hint": "贴一张便签，大家都能看到",
+        "zone": [nb_x - 2, nb_b, nb_w + 4, 16], "signX": 386, "signY": nb_b - 50,
+    })
+    # ---- 右上角：白板（今日一句），在 OCR 区下方靠右墙
+    wb_x, wb_b = w - 16 - 34, 134
+    room.put("whiteboard", wb_x, wb_b, foot=8)
+    room.action("board", "白板", "看看今日一句", [wb_x - 2, wb_b, 36, 12])
 
     # ---- 中部：钢琴角（坐上琴凳弹一段）
     px, pb = door_x - 4, 280
@@ -849,10 +969,11 @@ def build_hall() -> Room:
         tbm = floor_bottom - 10
         room.put("table_round_dark", tx - 12, tbm, foot=14)
         lw = OBJECTS["chair_side_r"].width
-        room.put("chair_side_r", tx - 14 - lw, tbm, solid=[tx - 14 - lw + 1, tbm - 6, lw - 2, 6])
-        room.seat(tx - 14 - lw // 2, tbm + 1, "right", [tx - 34, tbm - 14, 14, 16], title="坐下")
-        room.put("chair_side_l", tx + 14, tbm, solid=[tx + 15, tbm - 6, OBJECTS["chair_side_l"].width - 2, 6])
-        room.seat(tx + 14 + OBJECTS["chair_side_l"].width // 2, tbm + 1, "left", [tx + 22, tbm - 14, 14, 16], title="坐下")
+        rx = tx - 14 - lw
+        room.put("chair_side_r", rx, tbm, solid=[rx + 1, tbm - 5, lw - 2, 5])
+        room.seat(rx + 8, tbm + 1, "right", [tx - 34, tbm - 14, 14, 16], title="坐下")
+        room.put("chair_side_l", tx + 14, tbm, solid=[tx + 15, tbm - 5, OBJECTS["chair_side_l"].width - 2, 5])
+        room.seat(tx + 14 + OBJECTS["chair_side_l"].width - 8, tbm + 1, "left", [tx + 22, tbm - 14, 14, 16], title="坐下")
 
     # ---- 右下：游戏角（街机、弹珠机、完整台球桌与球杆架、蛋椅）
     gx0, gx1 = 400, w - 22
@@ -866,10 +987,11 @@ def build_hall() -> Room:
     room.put("pool_full", pool_x, 352, foot=30)
     room.action("pool", "台球桌", "打一杆", [pool_x - 6, 352, 60, 14])
     room.put("pool_rack", pool_x + 66, 330, foot=8)
+    # 蛋椅的靠背在右侧（面朝左），侧坐
     room.put("egg_blue", gx0 + 14, floor_bottom - 12, foot=10)
-    room.seat(gx0 + 23, floor_bottom - 11, "down", [gx0 + 14, floor_bottom - 12, 20, 12], title="坐蛋椅")
+    room.seat(gx0 + 21, floor_bottom - 11, "left", [gx0 + 12, floor_bottom - 12, 22, 12], title="坐蛋椅")
     room.put("egg_red", gx1 - 30, floor_bottom - 12, foot=10)
-    room.seat(gx1 - 21, floor_bottom - 11, "down", [gx1 - 30, floor_bottom - 12, 20, 12], title="坐蛋椅")
+    room.seat(gx1 - 23, floor_bottom - 11, "left", [gx1 - 32, floor_bottom - 12, 22, 12], title="坐蛋椅")
     room.put("lamp_floor_red", gx1 - 18, 290, foot=6)
     room.put("plant_big", gx1 - 74, floor_bottom - 4, foot=10)
 

@@ -15,6 +15,7 @@ function PanelLoading() {
 const AsrPanel = dynamic(() => import("../../llama/asr-panel").then(m => m.AsrPanel), { ssr: false, loading: PanelLoading });
 const OcrPanel = dynamic(() => import("../../llama/ocr-panel").then(m => m.OcrPanel), { ssr: false, loading: PanelLoading });
 const ChatRoom = dynamic(() => import("../room/chat-room").then(m => m.ChatRoom), { ssr: false, loading: PanelLoading });
+const NotesBoard = dynamic(() => import("./notes-board").then(m => m.NotesBoard), { ssr: false, loading: PanelLoading });
 const TodoPanel = dynamic(() => import("../todo/todo-panel").then(m => m.TodoPanel), { ssr: false, loading: PanelLoading });
 
 /** 内嵌聊天室：打开期间暂停页面级的后台新消息检查，避免对正在看的消息弹提示、响提示音 */
@@ -26,12 +27,13 @@ function ChatPanel() {
   return <ChatRoom />;
 }
 
-/** 大厅机器 → 对应的功能面板与独立页面地址；fill 表示面板铺满对话框（自带滚动区） */
-const MACHINES: Record<string, { Panel: ComponentType; href: string; fill?: boolean }> = {
+/** 大厅机器 → 对应的功能面板与独立页面地址（留言板没有独立页面）；fill 表示面板铺满对话框（自带滚动区） */
+const MACHINES: Record<string, { Panel: ComponentType; href?: string; fill?: boolean }> = {
   asr: { Panel: AsrPanel, href: "/llama/asr" },
   ocr: { Panel: OcrPanel, href: "/llama/ocr" },
   chat: { Panel: ChatPanel, href: "/chat", fill: true },
   todo: { Panel: TodoPanel, href: "/todo" },
+  notes: { Panel: NotesBoard },
 };
 
 interface MachineDialogProps {
@@ -77,7 +79,7 @@ export function MachineDialog({ machine, onClose, actions }: MachineDialogProps)
           </div>
           <div className="lobby-machine-actions">
             {actions}
-            {immersive ? null : <Link href={href} className="lobby-machine-link">在独立页面打开</Link>}
+            {immersive || !href ? null : <Link href={href} className="lobby-machine-link">在独立页面打开</Link>}
             <button ref={closeRef} type="button" className="lobby-machine-close" onClick={onClose} aria-label="关闭面板，回到大厅">
               <kbd>Esc</kbd>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>

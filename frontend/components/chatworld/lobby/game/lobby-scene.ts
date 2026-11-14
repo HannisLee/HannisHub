@@ -4,7 +4,7 @@ import {
   type LobbyEvents, type LobbyLayout, type MachineDef, type NearbyInfo, type PortalDef, type Rect, type RoomDef, type SeatDef,
 } from "./layout";
 import {
-  LOBBY_EMOTES, QUICK_EMOTES, type LobbyAvatar, type LobbyRemotePlayer, type LobbyServerMessage,
+  LOBBY_EMOTES, LOBBY_NOTES_EVENT, QUICK_EMOTES, type LobbyAvatar, type LobbyRemotePlayer, type LobbyServerMessage,
 } from "../../../../lib/chat-lobby";
 import { playTune } from "./tunes";
 import {
@@ -56,9 +56,18 @@ const CAMERA_MARGIN = 12;
 /** 自己发表情的最短间隔，避免连按刷屏（服务端另有限速） */
 const EMOTE_COOLDOWN_MS = 700;
 const BUBBLE_MS = 2400;
+/** 说话气泡（回车输入的一句话）停留更久，按字数延长 */
+const SAY_MS = 4500;
+const SAY_MS_PER_CHAR = 90;
+/** 说话气泡的最大宽度（世界像素），超出自动换行 */
+const SAY_WRAP = 96;
 const SELF_ID = "self";
-/** 自己头顶气泡的高度（本地角色不显示名字，气泡直接在头顶） */
-const SELF_BUBBLE_Y = 38;
+/** 自己头顶气泡的高度（本地角色不显示名字，气泡直接在头顶）；头顶有「E」按键提示时再往上抬，避免互相遮挡 */
+const SELF_BUBBLE_Y = 33;
+const SELF_BUBBLE_Y_WITH_PROMPT = 49;
+/** 与猫互动的随机反应（表情键，广播后其他人也看到同样的反应） */
+const CAT_REACTIONS = ["catpurr", "catflip", "catzzz", "catrun", "catmeow"] as const;
+type CatReaction = (typeof CAT_REACTIONS)[number];
 const LABEL_FONT = '"Anthropic Sans", Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
 /** 文字纹理放大倍数：世界坐标 1px 在屏幕上会被放大 2–4 倍，文字需更高分辨率才清晰 */
 const TEXT_RESOLUTION = 6;
@@ -93,6 +102,10 @@ export class LobbyScene extends Phaser.Scene {
   private deskTags = new Map<string, Phaser.GameObjects.Container>();
   private bubbles = new Map<string, Bubble>();
   private lastEmoteAt = 0;
+  private lastSayAt = 0;
+  private lastCatReaction: CatReaction | null = null;
+  /** 正在跑开、还没回来的猫 */
+  private busyCats = new Set<Phaser.GameObjects.Sprite>();
   /** 交互键按下标记：在 keydown 事件里置位，避免按下与抬起落在同一帧时 JustDown 丢失快速轻按 */
   private interactPressed = false;
   private prompt!: Phaser.GameObjects.Container;
@@ -304,13 +317,16 @@ export class LobbyScene extends Phaser.Scene {
     };
   }
 
-  private makeText(text: string, size: number, color: string, weight = 500) {
+  private makeText(text: string, size: number, color: string, weight = 500, wrap = 0) {
     const label = this.add.text(0, 0, text, {
       fontFamily: LABEL_FONT,
       fontSize: `${size}px`,
       fontStyle: String(weight),
       color,
       resolution: TEXT_RESOLUTION,
+      align: "center",
+      // 中文没有空格，需要按字符换行
+      ...(wrap ? { wordWrap: { width: wrap, useAdvancedWrap: true } } : {}),
     });
     label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
     return label.setOrigin(0.5, 0.5);
@@ -481,7 +497,8 @@ export class LobbyScene extends Phaser.Scene {
       this.player.sit(room.x + seat.x, room.y + seat.y, seat.dir);
       if (seat.play === "piano") this.playPiano(room.x + seat.x, room.y + seat.y);
     } else if (item.action) {
-      this.emote(item.action.id);
+      if (item.action.id === "cat") this.petCat(item.rect);
+      else this.emote(item.action.id);
       if (item.action.sound) playTune(item.action.sound);
     }
   }
@@ -512,25 +529,134 @@ export class LobbyScene extends Phaser.Scene {
     if (now - this.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
     this.lastEmoteAt = now;
     const text = texts[Math.floor(Math.random() * texts.length)];
-    this.showBubble(SELF_ID, text, () => ({ x: this.player.x, y: this.player.y - SELF_BUBBLE_Y, visible: true }));
+    this.showBubble(SELF_ID, text, this.selfBubbleAnchor);
     // 私有房间里的表情不广播
     if (this.current.def.id !== PRIVATE_ROOM) this.presence?.sendEmote(key);
   }
 
-  private showBubble(owner: string, text: string, follow: Bubble["follow"]) {
+  /** 自己头顶气泡的位置：有「E」提示时抬高，两者不重叠 */
+  private selfBubbleAnchor = () => ({
+    x: this.player.x,
+    y: this.player.y - (this.prompt.visible ? SELF_BUBBLE_Y_WITH_PROMPT : SELF_BUBBLE_Y),
+    visible: true,
+  });
+
+  private remoteBubbleAnchor(remote: RemotePlayer) {
+    return () => ({ x: remote.sprite.x, y: remote.sprite.y - RemotePlayer.BUBBLE_OFFSET_Y, visible: remote.shown });
+  }
+
+  /** 回车输入的一句话：头顶显示并广播给同房间的人（私有房间只自己看到） */
+  private say(text: string) {
+    const now = this.time.now;
+    if (!text || now - this.lastSayAt < 800) return;
+    this.lastSayAt = now;
+    this.showBubble(SELF_ID, text, this.selfBubbleAnchor, { say: true });
+    if (this.current.def.id !== PRIVATE_ROOM) this.presence?.sendSay(text);
+  }
+
+  private showBubble(owner: string, text: string, follow: Bubble["follow"], options: { say?: boolean; ms?: number } = {}) {
     this.bubbles.get(owner)?.container.destroy();
-    const label = this.makeText(text, 5.5, "#1C1B19", 500);
+    const label = this.makeText(text, 5.5, "#1C1B19", 500, options.say ? SAY_WRAP : 0);
     const w = Math.ceil(label.width) + 10;
-    const h = 11;
+    const h = Math.max(11, Math.ceil(label.height) + 4);
     const g = this.add.graphics();
-    g.fillStyle(0xfaf9f5, 0.96).fillRoundedRect(-w / 2, -h / 2, w, h, 3);
-    // 气泡尾巴
-    g.fillTriangle(-2, h / 2 - 0.5, 2, h / 2 - 0.5, 0, h / 2 + 2.5);
+    g.fillStyle(0xfaf9f5, 0.96).fillRoundedRect(-w / 2, -h, w, h, 3);
+    if (options.say) g.lineStyle(0.5, COLORS.brand, 1).strokeRoundedRect(-w / 2, -h, w, h, 3);
+    // 气泡尾巴：容器原点在尾巴尖上方，多行气泡向上长
+    g.fillTriangle(-2, -0.5, 2, -0.5, 0, 3);
+    label.setY(-h / 2);
     const container = this.add.container(0, 0, [g, label]).setDepth(58000).setScale(0.6).setAlpha(0);
     this.tweens.add({ targets: container, scale: 1, alpha: 1, duration: 140, ease: "Back.easeOut" });
-    const bubble = { container, follow, until: this.time.now + BUBBLE_MS };
+    const ms = options.ms ?? (options.say ? SAY_MS + text.length * SAY_MS_PER_CHAR : BUBBLE_MS);
+    const bubble = { container, follow, until: this.time.now + ms };
     this.bubbles.set(owner, bubble);
     this.placeBubble(bubble);
+  }
+
+  // ---------- 猫 ----------
+
+  /** 与猫互动：随机一种反应（不与上一次相同），自己冒泡并广播，其他人看到同样的反应 */
+  private petCat(zone: Phaser.Geom.Rectangle) {
+    const cat = this.nearestCat(zone.centerX, zone.centerY);
+    const options = CAT_REACTIONS.filter(r => r !== this.lastCatReaction && !(r === "catrun" && cat && this.busyCats.has(cat)));
+    const reaction = options[Math.floor(Math.random() * options.length)];
+    const before = this.lastEmoteAt;
+    this.emote(reaction);
+    if (this.lastEmoteAt === before) return; // 冷却中
+    this.lastCatReaction = reaction;
+    if (cat) this.playCatReaction(cat, reaction);
+  }
+
+  private nearestCat(x: number, y: number): Phaser.GameObjects.Sprite | null {
+    let best: Phaser.GameObjects.Sprite | null = null;
+    let bestDist = 120;
+    this.children.each(child => {
+      if (!(child instanceof Phaser.GameObjects.Sprite) || child.texture.key !== "cat") return;
+      const d = Phaser.Math.Distance.Between(x, y, child.x + child.width / 2, child.y + child.height / 2);
+      if (d < bestDist) {
+        bestDist = d;
+        best = child;
+      }
+    });
+    return best;
+  }
+
+  /** 在猫身上飘一串字符（爱心、Zzz），逐个上升淡出 */
+  private floatAbove(cat: Phaser.GameObjects.Sprite, glyphs: string[], color: string, drift: number) {
+    glyphs.forEach((glyph, i) => {
+      const label = this.makeText(glyph, 6 + i * 0.6, color, 700)
+        .setPosition(cat.x + cat.width / 2 + (i - 1) * 3, cat.y + 2)
+        .setDepth(57000).setAlpha(0);
+      this.tweens.add({
+        targets: label,
+        alpha: { from: 0, to: 1 },
+        y: label.y - 14 - i * 3,
+        x: label.x + drift * (i + 1),
+        delay: i * 260,
+        duration: 700,
+        ease: "Sine.easeOut",
+        onComplete: () => this.tweens.add({ targets: label, alpha: 0, duration: 400, onComplete: () => label.destroy() }),
+      });
+    });
+  }
+
+  private playCatReaction(cat: Phaser.GameObjects.Sprite, reaction: CatReaction) {
+    switch (reaction) {
+      case "catpurr":
+        this.floatAbove(cat, ["♥", "♥", "♥"], "#FF7AA8", 0);
+        break;
+      case "catzzz":
+        this.floatAbove(cat, ["z", "z", "Z"], "#FAF9F5", 2);
+        break;
+      case "catflip":
+        // 翻个身：左右翻转并轻轻弹两下
+        cat.setFlipX(!cat.flipX);
+        this.tweens.add({ targets: cat, y: cat.y - 3, duration: 120, yoyo: true, repeat: 1, ease: "Sine.easeOut" });
+        break;
+      case "catmeow":
+        this.showBubble(`cat-${cat.x}-${cat.y}`, "喵！", () => ({ x: cat.x + cat.width / 2, y: cat.y - 2, visible: cat.visible }), { ms: 1800 });
+        break;
+      case "catrun": {
+        // 被吵醒：小跑到一旁，过一会儿再跑回来趴下
+        if (this.busyCats.has(cat)) break;
+        this.busyCats.add(cat);
+        const home = { x: cat.x, y: cat.y, flip: cat.flipX };
+        const away = home.x > this.current.def.x + this.current.def.width / 2 ? -46 : 46;
+        const trot = (toX: number, done: () => void) => {
+          cat.setFlipX(toX < cat.x);
+          this.tweens.add({ targets: cat, y: home.y - 2, duration: 110, yoyo: true, repeat: 4 });
+          this.tweens.add({ targets: cat, x: toX, duration: 1000, ease: "Sine.easeInOut", onComplete: done });
+        };
+        trot(home.x + away, () => {
+          this.time.delayedCall(2600, () => trot(home.x, () => {
+            cat.setFlipX(home.flip);
+            cat.setY(home.y);
+            this.busyCats.delete(cat);
+          }));
+        });
+        break;
+      }
+    }
   }
 
   private placeBubble(bubble: Bubble) {
@@ -609,13 +735,25 @@ export class LobbyScene extends Phaser.Scene {
         const remote = this.remotes.get(message.id);
         const text = LOBBY_EMOTES[message.key]?.[0];
         if (!remote || !text) break;
-        this.showBubble(message.id, text, () => ({
-          x: remote.x, y: remote.y - RemotePlayer.BUBBLE_OFFSET_Y, visible: remote.shown,
-        }));
+        this.showBubble(message.id, text, this.remoteBubbleAnchor(remote));
+        // 别人逗猫：同一房间里也看到猫的反应
+        if ((CAT_REACTIONS as readonly string[]).includes(message.key) && remote.room === this.current.def.id) {
+          const cat = this.nearestCat(remote.x, remote.y);
+          if (cat) this.playCatReaction(cat, message.key as CatReaction);
+        }
+        break;
+      }
+      case "say": {
+        const remote = this.remotes.get(message.id);
+        if (remote) this.showBubble(message.id, message.text, this.remoteBubbleAnchor(remote), { say: true });
         break;
       }
       case "desks":
         this.events_.onDesksChanged?.();
+        break;
+      case "notes":
+        // 留言板有新便签或删除：打开着的留言板面板自行刷新
+        window.dispatchEvent(new CustomEvent(LOBBY_NOTES_EVENT));
         break;
     }
   }
@@ -789,9 +927,14 @@ export class LobbyScene extends Phaser.Scene {
       this.bridge.emoteQueued = "";
       this.emote(key);
     }
+    if (this.bridge.sayQueued) {
+      const text = this.bridge.sayQueued;
+      this.bridge.sayQueued = "";
+      this.say(text);
+    }
 
-    const feetX = this.player.x;
-    const feetY = this.player.y;
+    // 坐着时按座位坐标上报与判定（侧坐的精灵是上移绘制的）
+    const { x: feetX, y: feetY } = this.player.feet;
     const roomId = this.current.def.id;
     const seated = this.player.isSeated;
     this.presence?.report({

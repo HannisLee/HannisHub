@@ -1,4 +1,4 @@
-"""工位待办与聊天大厅工位认领：按账号隔离、字段校验、排序与清理、认领冲突，以及多人同步的坐姿与表情。
+"""工位待办、聊天大厅工位认领与留言板：按账号隔离、字段校验、排序与清理、认领冲突，以及多人同步的坐姿、表情与说话。
 全部使用临时库与临时资料文件，不读写线上 data/。"""
 import asyncio
 import json
@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from chatworld import lobby_desks, lobby_presence, lobby_profile, todos
+from chatworld import lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from core import database
 
 
@@ -133,6 +133,49 @@ class DeskTest(_TempData):
             self.assertEqual(ctx.exception.status_code, 400)
 
 
+class NotesTest(_TempData):
+    def test_post_list_and_isolation(self):
+        lobby_profile.save_profile("alice", {"name": "阿丽"})
+        note = lobby_notes.post_note("alice", {"text": "  午饭\x07一起？\n\n\n几点  ", "color": "pink"})
+        self.assertEqual((note["text"], note["color"], note["mine"], note["name"]), ("午饭一起？\n\n几点", "pink", True, "阿丽"))
+        lobby_notes.post_note("bob", {"text": "x" * 500, "color": "rainbow"})
+        state = lobby_notes.list_notes("alice")
+        self.assertFalse(state["can_moderate"])
+        self.assertEqual([n["mine"] for n in state["notes"]], [False, True])
+        bob = state["notes"][0]
+        self.assertEqual((len(bob["text"]), bob["color"]), (lobby_notes.MAX_TEXT, "yellow"))
+        self.assertNotIn("owner", bob)
+
+    def test_rate_limit_and_empty(self):
+        lobby_notes.post_note("alice", {"text": "一"})
+        with self.assertRaises(HTTPException) as ctx:
+            lobby_notes.post_note("alice", {"text": "二"})
+        self.assertEqual(ctx.exception.status_code, 429)
+        with self.assertRaises(HTTPException) as ctx:
+            lobby_notes.post_note("bob", {"text": " \n "})
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_delete_rules(self):
+        a = lobby_notes.post_note("alice", {"text": "a"})
+        b = lobby_notes.post_note("bob", {"text": "b"})
+        with self.assertRaises(HTTPException) as ctx:
+            lobby_notes.delete_note("alice", b["id"])
+        self.assertEqual(ctx.exception.status_code, 404)
+        lobby_notes.delete_note("alice", a["id"])
+        self.assertTrue(lobby_notes.list_notes("lihan")["can_moderate"])
+        lobby_notes.delete_note("lihan", b["id"])
+        self.assertEqual(lobby_notes.list_notes("alice")["notes"], [])
+
+    def test_purge_and_cap(self):
+        with patch.object(lobby_notes, "POST_INTERVAL_SECONDS", 0), patch.object(lobby_notes, "MAX_NOTES", 3):
+            for i in range(3):
+                lobby_notes.post_note("alice", {"text": f"a{i}"})
+            lobby_notes.post_note("bob", {"text": "b"})
+            self.assertEqual([n["text"] for n in lobby_notes.list_notes("x")["notes"]], ["b", "a2", "a1"])
+        lobby_notes.purge_user("alice")
+        self.assertEqual([n["text"] for n in lobby_notes.list_notes("x")["notes"]], ["b"])
+
+
 class _FakeSocket:
     def __init__(self):
         self.sent = []
@@ -181,7 +224,29 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         self.hub.notify_desks()
         self.assertEqual(self._drain(a), [{"type": "desks"}])
         self.assertEqual(self._drain(b), [{"type": "desks"}])
+        self.hub.notify_all("notes")
+        self.assertEqual(self._drain(a), [{"type": "notes"}])
         await asyncio.sleep(0)
+
+    async def test_say(self):
+        a, b = self._join("alice"), self._join("bob")
+        self.hub._handle_state(a, {"room": "hall", "x": 10, "y": 20, "dir": "down", "moving": False})
+        self._drain(b)
+        self.hub._handle_say(a, {"text": "  你好\n\x1b[31m 大家  " + "长" * 100})
+        self.hub._handle_say(a, {"text": "太快了"})  # 限速丢弃
+        self.hub._handle_say(a, {"text": 42})
+        msgs = self._drain(b)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["type"], "say")
+        self.assertTrue(msgs[0]["text"].startswith("你好 [31m 大家 长"))
+        self.assertEqual(len(msgs[0]["text"]), lobby_presence.MAX_SAY_CHARS)
+        self.assertEqual(self._drain(a), [])
+        # 私有房间里说话不广播
+        a.say_at = 0
+        self.hub._handle_state(a, {"room": "room"})
+        self._drain(b)
+        self.hub._handle_say(a, {"text": "悄悄话"})
+        self.assertEqual(self._drain(b), [])
 
 
 if __name__ == "__main__":

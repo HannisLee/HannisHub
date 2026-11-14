@@ -105,6 +105,12 @@ export class PresenceClient {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "emote", key }));
   }
 
+  /** 发送说话气泡（回车输入的一句话），规则同表情 */
+  sendSay(text: string) {
+    const socket = this.socket;
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "say", text }));
+  }
+
   destroy() {
     this.destroyed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);

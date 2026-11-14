@@ -63,7 +63,9 @@ export type LobbyServerMessage =
   | { type: "leave"; id: string }
   | { type: "profile"; id: string; name: string; avatar: LobbyAvatar | null }
   | { type: "emote"; id: string; key: string }
-  | { type: "desks" };
+  | { type: "say"; id: string; text: string }
+  | { type: "desks" }
+  | { type: "notes" };
 
 export function lobbySocketUrl(): string {
   const override = process.env.NEXT_PUBLIC_HANNISHUB_WS_ORIGIN;
@@ -83,7 +85,12 @@ export const LOBBY_EMOTES: Record<string, string[]> = {
   fridge: ["拿了瓶汽水", "冰淇淋！", "牛奶快喝完了"],
   snack: ["咔嚓咔嚓", "薯片真香", "就吃一包"],
   fish: ["喂鱼中", "小鱼游过来了", "别抢别抢"],
-  cat: ["喵～", "呼噜呼噜", "猫翻了个身"],
+  // 与猫互动的随机反应（场景里还会播放对应的动作：爱心、翻身、Zzz、跑开、回一声喵）
+  catpurr: ["猫蹭了蹭你的手，呼噜呼噜～"],
+  catflip: ["猫翻了个身，露出肚皮"],
+  catzzz: ["猫看了你一眼，又睡着了"],
+  catrun: ["猫被吵醒，溜达了一圈"],
+  catmeow: ["喵～"],
   plant: ["浇浇水", "又长高了", "叶子很精神"],
   train: ["呜呜——", "小火车出发", "绕圈圈"],
   book: ["读书中", "这本不错", "翻了几页"],
@@ -119,3 +126,44 @@ export function claimLobbyDesk(desk: string): Promise<LobbyDeskState> {
 export function releaseLobbyDesk(): Promise<LobbyDeskState> {
   return apiFetch<LobbyDeskState>(`${API_PATHS.chatLobby}/desks/mine`, { method: "DELETE" });
 }
+
+/** 回车说话的最大字数（与服务端 chatworld/lobby_presence.py 的 MAX_SAY_CHARS 一致） */
+export const LOBBY_SAY_MAX = 60;
+
+/** ---------- 留言板（/api/chat-lobby/notes）：大厅里所有人共享的便签墙 ---------- */
+
+export const NOTE_COLORS = ["yellow", "pink", "blue", "green", "orange", "purple"] as const;
+export type NoteColor = (typeof NOTE_COLORS)[number];
+export const NOTE_TEXT_MAX = 140;
+
+export interface LobbyNote {
+  id: string;
+  /** 作者在大厅中的显示名字（贴出时的名字） */
+  name: string;
+  text: string;
+  color: NoteColor;
+  /** 自己贴的便签（可以撕掉） */
+  mine: boolean;
+  created_at: number;
+}
+
+export interface LobbyNotesState {
+  notes: LobbyNote[];
+  /** 管理员可以撕掉任何人的便签 */
+  can_moderate: boolean;
+}
+
+export function fetchLobbyNotes(): Promise<LobbyNotesState> {
+  return apiFetch<LobbyNotesState>(`${API_PATHS.chatLobby}/notes`);
+}
+
+export function postLobbyNote(text: string, color: NoteColor): Promise<LobbyNote> {
+  return apiFetch<LobbyNote>(`${API_PATHS.chatLobby}/notes`, { method: "POST", body: jsonBody({ text, color }) });
+}
+
+export function deleteLobbyNote(id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`${API_PATHS.chatLobby}/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** 留言板变化事件：场景收到同步通道的 notes 通知后在 window 上派发 */
+export const LOBBY_NOTES_EVENT = "hannishub:lobby-notes";

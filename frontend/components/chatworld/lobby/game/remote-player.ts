@@ -76,8 +76,10 @@ export class RemotePlayer {
     return this.sprite.x;
   }
 
+  /** 脚底纵坐标（坐着时为座位坐标，不含侧坐的绘制上移） */
   get y() {
-    return this.sprite.y;
+    const latest = this.samples[this.samples.length - 1];
+    return !this.route && latest?.sit ? latest.y : this.sprite.y;
   }
 
   setName(name: string) {
@@ -99,7 +101,7 @@ export class RemotePlayer {
   }
 
   /** 名字标签上方的高度（气泡放在名字之上） */
-  static readonly BUBBLE_OFFSET_Y = NAME_OFFSET_Y + 10;
+  static readonly BUBBLE_OFFSET_Y = NAME_OFFSET_Y + 7;
 
   /** 收到服务端位置：换房间或距离过远直接瞬移，否则加入插值队列；正在离场时取消离场（重新上线） */
   push(state: LobbyLocalState) {
@@ -166,7 +168,7 @@ export class RemotePlayer {
     const seated = !this.route && Boolean(latest?.sit);
     if (seated) {
       this.facing = latest.dir;
-      this.sprite.setPosition(latest.x, latest.y);
+      this.sprite.setPosition(latest.x, Player.seatDrawY(latest.y, latest.dir));
       Player.applyPose(this.sprite, this.skin, latest.dir, true);
     } else {
       if (this.sprite.isCropped) Player.applyPose(this.sprite, this.skin, this.facing, false);
@@ -176,7 +178,8 @@ export class RemotePlayer {
       const key = `${this.skin}:${moving ? "walk" : "idle"}-${this.facing}`;
       if (this.sprite.anims.currentAnim?.key !== key) this.sprite.anims.play(key, true);
     }
-    this.sprite.setDepth(this.sprite.y);
+    // 侧坐时精灵上移绘制，遮挡深度仍按座位脚底
+    this.sprite.setDepth(seated ? latest.y : this.sprite.y);
     const visible = this.room === visibleRoom;
     this.sprite.setVisible(visible);
     this.label.setVisible(visible);

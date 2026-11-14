@@ -5,9 +5,14 @@ const SPEED = 88;
 /** 面朝上 / 面朝下坐着时裁掉帧底部的像素行：腿被椅背或坐垫挡住，看起来是坐在座位里 */
 const SIT_CROP: Partial<Record<Facing, number>> = { down: 6, up: 5 };
 
-/** 坐着的状态：坐下前站立的位置（起身时回到这里，保证不卡在家具碰撞盒里） */
+/** 侧坐时精灵上移的像素：坐姿帧的脚底在帧底，上移后臀部落在椅面上；遮挡深度仍按座位脚底坐标 */
+export const SIDE_SIT_LIFT = 6;
+
+/** 坐着的状态：座位脚底坐标（同步与遮挡用），以及坐下前站立的位置（起身时回到这里，保证不卡在家具碰撞盒里） */
 interface Seated {
   dir: Facing;
+  x: number;
+  y: number;
   standX: number;
   standY: number;
 }
@@ -77,6 +82,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     make("sit-left", 9, 3);
   }
 
+  /** 坐姿下精灵实际绘制的纵坐标（侧坐上移） */
+  static seatDrawY(y: number, dir: Facing): number {
+    return dir === "left" || dir === "right" ? y - SIDE_SIT_LIFT : y;
+  }
+
   /** 把精灵摆成坐姿或恢复站立（本地角色与其他人的角色共用） */
   static applyPose(sprite: Phaser.GameObjects.Sprite, skin: string, dir: Facing, seated: boolean) {
     const key = seated && (dir === "left" || dir === "right") ? `${skin}:sit-${dir}` : null;
@@ -101,14 +111,19 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     return this.seated !== null;
   }
 
+  /** 同步上报用的脚底坐标：坐着时为座位坐标（不含侧坐的绘制上移） */
+  get feet(): { x: number; y: number } {
+    return this.seated ? { x: this.seated.x, y: this.seated.y } : { x: this.x, y: this.y };
+  }
+
   /** 坐下：记住当前站立位置，关闭碰撞体后移到座位上 */
   sit(x: number, y: number, dir: Facing) {
-    if (!this.seated) this.seated = { dir, standX: this.x, standY: this.y };
-    else this.seated.dir = dir;
+    if (!this.seated) this.seated = { dir, x, y, standX: this.x, standY: this.y };
+    else Object.assign(this.seated, { dir, x, y });
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.stop();
     body.enable = false;
-    this.setPosition(x, y);
+    this.setPosition(x, Player.seatDrawY(y, dir));
     this.facing = dir;
     Player.applyPose(this, this.skin, dir, true);
     this.setDepth(y);

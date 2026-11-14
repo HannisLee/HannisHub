@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
-  claimLobbyDesk, fetchLobbyDesks, fetchLobbyProfile, QUICK_EMOTES, releaseLobbyDesk, type LobbyDeskState, type LobbyProfile,
+  claimLobbyDesk, fetchLobbyDesks, fetchLobbyProfile, LOBBY_SAY_MAX, QUICK_EMOTES, releaseLobbyDesk, type LobbyDeskState, type LobbyProfile,
 } from "../../../lib/chat-lobby";
 import { errorMessage } from "../../../lib/format";
 import { useShell } from "../../layout/shell-context";
@@ -24,7 +24,7 @@ type Phase = "loading" | "ready" | "error";
 const ROOM_GUIDES: Record<string, string> = {
   foyer: "入口厅 · 下方出口通往大厅，HannisHub 标牌下的电梯通往我的房间",
   room: "我的房间 · 站到衣柜前的地台上按 E 换形象、改名字，下方出口回入口厅",
-  hall: "大厅 · 机器前、工位椅后、沙发与各处小物件旁按 E 互动，数字键 1–4 发表情",
+  hall: "大厅 · 机器前、工位椅后、沙发、留言板与各处小物件旁按 E 互动；回车说话，数字键 1–4 发表情",
 };
 
 /** 工位待办面板（在自己的工位坐下时打开） */
@@ -65,6 +65,7 @@ const bridge: LobbyBridge = {
   start: null,
   desks: { claims: {}, version: 0 },
   emoteQueued: "",
+  sayQueued: "",
 };
 
 function applyDesks(state: LobbyDeskState) {
@@ -94,6 +95,14 @@ function resetBridge() {
   bridge.paused = false;
   bridge.interactQueued = false;
   bridge.emoteQueued = "";
+  bridge.sayQueued = "";
+}
+
+/** 焦点在可输入元素上（输入框、文本域、可编辑区域） */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
 export function ChatLobby() {
@@ -110,6 +119,10 @@ export function ChatLobby() {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [claimError, setClaimError] = useState("");
   const [toast, setToast] = useState("");
+  // 回车说话的输入框
+  const [saying, setSaying] = useState(false);
+  const [sayText, setSayText] = useState("");
+  const sayRef = useRef<HTMLInputElement>(null);
   // 资料（名字与形象）就绪后才创建游戏，避免先显示默认角色再闪换
   const [profile, setProfile] = useState<LobbyProfile | null>(null);
   const [profileReady, setProfileReady] = useState(false);
@@ -231,6 +244,38 @@ export function ChatLobby() {
     bridge.emoteQueued = key;
   }, []);
 
+  const closeSay = useCallback(() => {
+    setSaying(false);
+    setSayText("");
+    sayRef.current?.blur();
+  }, []);
+
+  const submitSay = useCallback((event: FormEvent) => {
+    event.preventDefault();
+    const text = sayText.replace(/\s+/g, " ").trim().slice(0, LOBBY_SAY_MAX);
+    if (text) bridge.sayQueued = text;
+    closeSay();
+  }, [sayText, closeSay]);
+
+  const ready = phase === "ready";
+  const sayAllowed = ready && !active && !claiming;
+
+  // 回车：打开说话输入框（面板打开、正在别的输入框里打字时不响应）
+  useEffect(() => {
+    if (!sayAllowed || saying) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.isComposing || event.repeat || isTypingTarget(event.target)) return;
+      event.preventDefault();
+      setSaying(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sayAllowed, saying]);
+
+  useEffect(() => {
+    if (saying) sayRef.current?.focus();
+  }, [saying]);
+
   const events = useMemo<LobbyEvents>(() => ({
     onProgress: setProgress,
     onReady: () => setPhase("ready"),
@@ -265,8 +310,6 @@ export function ChatLobby() {
     bridge.touch.y = 0;
   };
 
-  const ready = phase === "ready";
-
   return (
     <div className={`lobby${immersive ? " is-immersive" : ""}`}>
       {immersive ? null : <header className="lobby-head">
@@ -282,6 +325,10 @@ export function ChatLobby() {
           <span className="lobby-hint-group">
             <Key>E</Key>
             <span className="lobby-hint-text">交互</span>
+          </span>
+          <span className="lobby-hint-group">
+            <Key>Enter</Key>
+            <span className="lobby-hint-text">说话</span>
           </span>
           <span className="lobby-hint-group">
             <span className="lobby-hint-keys"><Key>1</Key><Key>4</Key></span>
@@ -307,7 +354,31 @@ export function ChatLobby() {
           </div>
         ) : null}
 
-        {ready && nearby && !active && !claiming ? (
+        {saying && sayAllowed ? (
+          <form className="lobby-say" onSubmit={submitSay}>
+            <input
+              ref={sayRef}
+              className="lobby-say-input"
+              value={sayText}
+              maxLength={LOBBY_SAY_MAX}
+              onChange={event => setSayText(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeSay();
+                }
+              }}
+              onBlur={() => { if (!sayText.trim()) closeSay(); }}
+              placeholder="说点什么，回车发送，Esc 取消"
+              aria-label="在头顶说一句话"
+              enterKeyHint="send"
+            />
+            <span className="lobby-say-count">{sayText.length}/{LOBBY_SAY_MAX}</span>
+          </form>
+        ) : null}
+
+        {ready && nearby && !active && !claiming && !saying ? (
           <div className="lobby-prompt" role="status">
             <Key>E</Key>
             <span className="lobby-prompt-text">
@@ -324,6 +395,9 @@ export function ChatLobby() {
 
         {ready && !active && !claiming ? (
           <div className="lobby-emotes" aria-label="快捷表情">
+            <button type="button" className="lobby-emote" onClick={() => setSaying(true)} title="在头顶说一句话（回车）">
+              {coarse ? null : <kbd>↵</kbd>}说话
+            </button>
             {QUICK_EMOTES.map((key, i) => (
               <button key={key} type="button" className="lobby-emote" onClick={() => sendEmote(key)} title={`快捷表情（数字键 ${i + 1}）`}>
                 {coarse ? null : <kbd>{i + 1}</kbd>}{QUICK_EMOTE_LABELS[key]}

@@ -1,4 +1,4 @@
-"""SQLite 数据库：保存按登录账号隔离的业务记录（ASR 转写、OCR 识别、个人偏好、工位待办）与聊天大厅工位认领。
+"""SQLite 数据库：保存按登录账号隔离的业务记录（ASR 转写、OCR 识别、个人偏好、工位待办）与聊天大厅工位认领、留言板。
 
 - 数据库文件位于根目录 data/hannishub.db（不入库），可用环境变量 HANNISHUB_DB_PATH 覆盖（测试用临时库）。
 - 每条记录带 owner 列（登录用户名），查询时按 owner 过滤，因此 data/ 下的文件不再需要按用户分目录。
@@ -101,6 +101,19 @@ _MIGRATIONS: list[str] = [
         owner      TEXT NOT NULL UNIQUE,
         claimed_at REAL NOT NULL
     );
+    """,
+    # v3：聊天大厅留言板（所有人共享的便签墙，owner 为作者，用于撕掉自己的便签与删除账号时清理）
+    """
+    CREATE TABLE lobby_notes (
+        id         TEXT PRIMARY KEY,
+        owner      TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        text       TEXT NOT NULL,
+        color      TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX lobby_notes_created ON lobby_notes(created_at DESC);
+    CREATE INDEX lobby_notes_owner ON lobby_notes(owner, created_at DESC);
     """,
 ]
 

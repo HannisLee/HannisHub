@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import chat_room, lobby_desks, lobby_presence, lobby_profile, todos
+from chatworld import chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
 from server import terminal_manager
 from core.compression import SelectiveGZipMiddleware
@@ -700,6 +700,31 @@ async def chat_lobby_desk_release(request: Request):
     return JSONResponse(state)
 
 
+@app.get("/api/chat-lobby/notes")
+async def chat_lobby_notes(request: Request):
+    """聊天大厅留言板：全部便签（最新在前）与当前账号能否撕掉别人的便签。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(lobby_notes.list_notes, username))
+
+
+@app.post("/api/chat-lobby/notes")
+async def chat_lobby_note_post(request: Request, payload: dict[str, Any] = Body(...)):
+    """在留言板贴一张便签。"""
+    username = _require_user(request)
+    note = await run_in_threadpool(lobby_notes.post_note, username, payload)
+    lobby_presence.presence.notify_all("notes")
+    return JSONResponse(note)
+
+
+@app.delete("/api/chat-lobby/notes/{note_id}")
+async def chat_lobby_note_delete(note_id: str, request: Request):
+    """撕掉自己的便签（管理员可撕掉任何一张）。"""
+    username = _require_user(request)
+    await run_in_threadpool(lobby_notes.delete_note, username, note_id)
+    lobby_presence.presence.notify_all("notes")
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/todos")
 async def todo_list(request: Request):
     """当前账号的全部工位待办。"""
@@ -945,7 +970,9 @@ async def users_delete(username: str, request: Request):
     await run_in_threadpool(ocr_records.purge_user, username)
     await run_in_threadpool(todos.purge_user, username)
     await run_in_threadpool(lobby_desks.purge_user, username)
+    await run_in_threadpool(lobby_notes.purge_user, username)
     lobby_presence.presence.notify_desks()
+    lobby_presence.presence.notify_all("notes")
     return JSONResponse({"ok": True})
 
 

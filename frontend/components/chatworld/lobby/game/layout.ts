@@ -187,6 +187,8 @@ export interface LobbyBridge {
   desks: { claims: Record<string, DeskClaim>; version: number };
   /** 快捷表情（数字键或触屏按钮）：React 写入表情键，场景消费后清空 */
   emoteQueued: string;
+  /** 回车输入的一句话：React 写入，场景在头顶显示并广播后清空 */
+  sayQueued: string;
 }
 
 export interface LobbyEvents {

@@ -11,6 +11,7 @@
 - 客户端 → 服务端：{"type": "state", "room", "x", "y", "dir", "moving", "pose"}，移动中约每 100ms 一次，静止时每 5 秒一次作为心跳；
   pose 可省略，"sit" 表示坐着（坐在椅子、沙发、工位上，dir 为坐下的朝向）
 - 客户端 → 服务端：{"type": "emote", "key"}，表情气泡（键名为小写字母，文字由各端本地决定），只在公共房间广播
+- 客户端 → 服务端：{"type": "say", "text"}，回车说的一句话（最多 60 字，去控制字符、合并空白），只在公共房间广播，不落盘
 - 服务端 → 客户端：
   - {"type": "snapshot", "players": [玩家, ...]}：连接建立时发送当前公共房间内的其他人
   - {"type": "player", "player": 玩家}：某人出现在公共房间（首次进入或从私有房间下来）
@@ -19,6 +20,8 @@
   - {"type": "leave", "id"}：下线
   - {"type": "profile", "id", "name", "avatar"}：名字或形象变化
   - {"type": "emote", "id", "key"}：某人冒了一个表情气泡
+  - {"type": "say", "id", "text"}：某人在头顶说了一句话
+  - {"type": "notes"}：留言板有人贴或撕便签，客户端重新读取 /api/chat-lobby/notes（发给所有连接）
   - {"type": "desks"}：工位认领有变化，客户端重新读取 /api/chat-lobby/desks（发给所有连接，包括自己）
   玩家 = {"id", "name", "avatar", "room", "x", "y", "dir", "moving", "pose"}
 """
@@ -58,6 +61,9 @@ RATE_PER_SECOND = 30
 EMOTE_KEY = re.compile(r"^[a-z]{1,16}$")
 EMOTE_INTERVAL_SECONDS = 0.5
 POSES = frozenset({"sit"})
+# 回车说话：最多字数与同一连接两次说话的最短间隔
+MAX_SAY_CHARS = 60
+SAY_INTERVAL_SECONDS = 0.8
 
 CLOSE_FORBIDDEN = 4403
 CLOSE_FULL = 4429
@@ -77,6 +83,7 @@ class Connection:
     rate_window: float = 0.0
     rate_count: int = 0
     emote_at: float = 0.0
+    say_at: float = 0.0
 
 
 @dataclass(eq=False)
@@ -253,11 +260,30 @@ class LobbyPresence:
         conn.emote_at = now
         self._broadcast(member, {"type": "emote", "id": member.id, "key": key})
 
-    def notify_desks(self) -> None:
-        """工位认领变化：通知所有连接（包括认领者自己的其他标签页）重新读取工位。"""
-        text = json.dumps({"type": "desks"})
+    def _handle_say(self, conn: Connection, data: dict[str, Any]) -> None:
+        """说话气泡：规则同表情，只从主连接、位于公共房间时广播；内容不落盘。"""
+        text = data.get("text")
+        member = self.members.get(conn.username)
+        if not isinstance(text, str) or member is None or member.primary is not conn or not member.visible:
+            return
+        text = " ".join("".join(ch for ch in text if ch.isprintable() or ch.isspace()).split())[:MAX_SAY_CHARS]
+        if not text:
+            return
+        now = time.monotonic()
+        if now - conn.say_at < SAY_INTERVAL_SECONDS:
+            return
+        conn.say_at = now
+        self._broadcast(member, {"type": "say", "id": member.id, "text": text})
+
+    def notify_all(self, kind: str) -> None:
+        """通知所有连接（包括触发者自己的其他标签页）重新读取某类共享数据（工位 desks、留言板 notes）。"""
+        text = json.dumps({"type": kind})
         for conn in list(self.connections):
             self._enqueue(conn, text)
+
+    def notify_desks(self) -> None:
+        """工位认领变化：通知所有连接（包括认领者自己的其他标签页）重新读取工位。"""
+        self.notify_all("desks")
 
     def update_profile(self, username: str, profile: dict[str, Any]) -> None:
         """名字或形象保存后通知其他人刷新该角色。"""
@@ -305,6 +331,8 @@ class LobbyPresence:
                     self._handle_state(conn, data)
                 elif data.get("type") == "emote":
                     self._handle_emote(conn, data)
+                elif data.get("type") == "say":
+                    self._handle_say(conn, data)
         except Exception:
             # 断开、超时、发送了二进制帧等都按断开处理
             pass
