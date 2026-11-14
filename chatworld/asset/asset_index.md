@@ -149,9 +149,9 @@ python3 scripts/build_chat_lobby_assets.py --preview /tmp/lobby_preview.png   # 
 |---|---|
 | `room.png` 我的房间背景 | 木地板与浅绿墙面取自 Room_Builder；窗帘窗、米色地毯烘焙其中 |
 | `avatar/{body,eyes,outfit,hair,accessory}.png` + `avatar/parts.json` | `2_Characters/Character_Generator/` 的 `Bodies`、`Eyes`、`Outfits`、`Hairstyles`、`Accessories`（16x16 档，共 432 件）：取第 1 行 idle、第 2 行 walk 与第 4 行 sit（右 / 左）重排为 96x320 块，每类一张图集，前端运行时叠层合成 |
-| `foyer.png` / `hall.png` 房间背景 | 地板 `Room_Builder_subfiles/Room_Builder_Floors_16x16.png`、墙面 `Room_Builder_Walls_16x16.png`；墙顶收边与阴影为脚本程序化绘制；大厅上墙炫彩「HannisHub」为脚本点阵绘制（`rainbow_text`）；挂饰与地毯取自 `Theme_Sorter/1_Generic_16x16.png` 及各主题单件 |
-| `objects.png` + `objects.json` 家具图集 | `Theme_Sorter_Singles/` 的 Living Room、Basement、Classroom and Library、Conference Hall、Television and Film Studio，以及 Generic 总表裁剪（办公椅、长椅、穿衣镜、工位木桌、茶几、侧向餐椅）、Bedroom 总表裁剪（单人床、床头柜、白衣柜）、Kitchen 总表裁剪（冰箱、咖啡机）、Music and Sport 总表裁剪（钢琴凳、吉他）；台球桌与三人沙发由 Basement 单件拼接；工位长条桌由 Generic 俯视木桌九宫格拉伸（`stretch`），工位转椅为 Generic 背面视角办公转椅；留言板软木板为脚本程序化绘制（`notice_board`）。构建时统一裁掉透明边 |
-| `anims/*.png` 动画帧条 | `3_Animated_objects/16x16/spritesheets/`（玻璃门、电梯、接待员、滚动屏显示器、音箱、机柜、文档屏、咖啡、猫、鱼缸、布谷鸟钟、钢琴、小火车）；`wave_screen` 截取自 X 光机监视器波形；`arrow_down` / `arrow_up` 由 `4_User_Interface_Elements` 的 GIF 转为帧条 |
+| `foyer.png` / `hall.png` 房间背景 | 入口厅电梯门后的轿厢内部为脚本绘制（`Room.elevator_recess`）；地板 `Room_Builder_subfiles/Room_Builder_Floors_16x16.png`、墙面 `Room_Builder_Walls_16x16.png`；墙顶收边与阴影为脚本程序化绘制；大厅上墙炫彩「HannisHub」为脚本点阵绘制（`rainbow_text`）；挂饰与地毯取自 `Theme_Sorter/1_Generic_16x16.png` 及各主题单件 |
+| `objects.png` + `objects.json` 家具图集 | `Theme_Sorter_Singles/` 的 Living Room、Basement、Classroom and Library、Conference Hall、Television and Film Studio，以及 Generic 总表裁剪（办公椅、长椅、穿衣镜、工位木桌、茶几、侧向餐椅）、Bedroom 总表裁剪（单人床、床头柜、白衣柜）、Kitchen 总表裁剪（冰箱、咖啡机）、Music and Sport 总表裁剪（钢琴凳、吉他）；台球桌与三人沙发由 Basement 单件拼接；工位长条桌由 Generic 俯视木桌九宫格拉伸（`stretch`），工位转椅为 Television and Film Studio 7 的背面视角高背办公椅（饰条重新着色出四种颜色，注意它不是话筒）；ASR 吊杆话筒取自 Music and Sport 总表；留言板软木板（`notice_board`）、ASR 吸音棉墙板（`acoustic_panel`）与 REC 灯（`rec_lamp`）为脚本程序化绘制。构建时统一裁掉透明边 |
+| `anims/*.png` 动画帧条 | `3_Animated_objects/16x16/spritesheets/`（玻璃门、电梯、接待员、滚动屏显示器、音箱、文档屏、咖啡、猫、鱼缸、布谷鸟钟、钢琴、小火车）；`arrow_down` / `arrow_up` 由 `4_User_Interface_Elements` 的 GIF 转为帧条 |
 | `player.png` | `2_Characters/Character_Generator/0_Premade_Characters/16x16/Premade_Character_12.png` 按与形象部件相同的 96x320 布局重排（脚本生成） |
 
 详细说明见 `frontend/public/chat-lobby/CREDITS.md`。新增素材时同样只把派生文件放进 `frontend/public/chat-lobby/`，并在 CREDITS.md 登记。

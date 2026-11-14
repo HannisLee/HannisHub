@@ -123,11 +123,12 @@ def build_objects() -> None:
     o["desk"] = single("living", 51)
     o["desk_plain"] = single("living", 53)
     o["chair_task"] = single("conf", 39)
-    o["chair_office"] = crop(GENERIC, (64, 1008, 80, 1024))
-    o["chair_office_brown"] = crop(GENERIC, (64, 1024, 80, 1040))
-    o["chair_office_white"] = crop(GENERIC, (64, 1040, 80, 1056))
-    o["chair_office_green"] = crop(GENERIC, (112, 1040, 128, 1056))
-    o["lamp_desk_blue"] = single("living", 73)
+    # 工位转椅：电视台主题的背面视角办公转椅（高椅背 + 椅面饰条 + 五星脚轮，16x32 与角色等高）。
+    # 原先用的 Generic 16x16 转椅只有一团圆顶加底座，缩在桌前像台灯；饰条重新着色出另外三种颜色
+    o["chair_office"] = single("studio", 7)
+    o["chair_office_orange"] = recolor_accent(o["chair_office"], 0.05)
+    o["chair_office_green"] = recolor_accent(o["chair_office"], 0.33)
+    o["chair_office_purple"] = recolor_accent(o["chair_office"], 0.78)
     o["lamp_desk_cream"] = single("living", 74)
     o["plant_desk"] = single("living", 15)
     # 绿植与灯
@@ -154,7 +155,10 @@ def build_objects() -> None:
     o["trash"] = single("conf", 53)
     # ASR 录音台：音频工作台 + 录音话筒
     o["audio_desk"] = single("basement", 194)
-    o["mic"] = single("studio", 7)
+    # 落地话筒：Music and Sport 总表的吊杆话筒架（原先误用的 studio 7 其实是背面办公椅）
+    o["mic"] = trimmed(MUSIC, (144, 244, 160, 272))
+    o["studio_light"] = single("studio", 8)
+    o["file_shelf"] = single("class", 59)
     # 休闲
     o["armchair_yellow"] = single("basement", 202)
     o["armchair_white"] = single("basement", 203)
@@ -164,6 +168,9 @@ def build_objects() -> None:
     o["egg_yellow"] = single("basement", 211)
     o["egg_blue"] = single("basement", 212)
     o["egg_red"] = single("basement", 213)
+    # 靠背在左（面朝右）的蛋椅，与上面四种相对摆放
+    o["egg_blue_r"] = single("basement", 216)
+    o["egg_red_r"] = single("basement", 217)
     o["table_round"] = single("basement", 1)
     o["table_round_dark"] = single("basement", 2)
     o["sofa_gray"] = single("basement", 29)
@@ -208,6 +215,23 @@ def build_objects() -> None:
     o["guitar"] = trimmed(MUSIC, (112, 36, 128, 80))
     o["guitar_blue"] = trimmed(MUSIC, (160, 36, 176, 80))
     o["whiteboard"] = single("class", 39)
+
+
+def recolor_accent(img: Image.Image, hue: float) -> Image.Image:
+    """把高饱和的蓝色饰条换成指定色相（保留明度与饱和度），用于生成同款不同色的家具。"""
+    import colorsys
+    out = img.copy()
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
+            r, g, b, a = px[x, y]
+            if not a:
+                continue
+            h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+            if s > 0.45 and 0.5 < h < 0.72:
+                nr, ng, nb = colorsys.hsv_to_rgb(hue, s, v)
+                px[x, y] = (round(nr * 255), round(ng * 255), round(nb * 255), a)
+    return out
 
 
 def stretch(img: Image.Image, w: int, h: int, *, left: int, right: int, top: int, bottom: int) -> Image.Image:
@@ -268,6 +292,47 @@ def notice_board() -> Image.Image:
         for ty in (y + 3, y + 5):
             d.line((x + 2, ty, x + 5, ty), fill=tuple(int(c * 0.6) for c in color) + (255,))
         d.point((x + 3, y), fill=(214, 60, 60, 255) if (x + y) % 2 else (70, 110, 210, 255))
+    return img
+
+
+def acoustic_panel(w: int, h: int, accent: tuple[int, int, int]) -> Image.Image:
+    """录音室吸音棉墙板：深色描边木框内铺 4x4 楔形吸音块（横竖交错的明暗条纹），底边一条强调色饰条。"""
+    img = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, w - 1, h - 1), fill=OUTLINE)
+    d.rectangle((1, 1, w - 2, h - 2), fill=(40, 37, 46, 255))
+    shades = [(98, 92, 108), (80, 75, 92), (66, 62, 78), (54, 50, 64)]
+    for ty in range(2, h - 4, 4):
+        for tx in range(2, w - 2, 4):
+            vertical = ((tx - 2) // 4 + (ty - 2) // 4) % 2
+            for k, c in enumerate(shades):
+                if vertical:
+                    d.line((tx + k, ty, tx + k, ty + 3), fill=(*c, 255))
+                else:
+                    d.line((tx, ty + k, tx + 3, ty + k), fill=(*c, 255))
+    d.rectangle((1, 1, w - 2, 1), fill=(120, 114, 130, 255))
+    d.rectangle((1, h - 3, w - 2, h - 2), fill=(*accent, 255))
+    return img.crop((0, 0, w, h))
+
+
+def rec_lamp() -> Image.Image:
+    """录音指示灯「REC」：红色灯箱 + 3x5 点阵白字 + 外圈红色光晕。"""
+    glyphs = {"R": ["111", "101", "110", "101", "101"], "E": ["111", "100", "110", "100", "111"],
+              "C": ["111", "100", "100", "100", "111"]}
+    w, h = 19, 11
+    img = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=2, fill=(214, 60, 60, 70))
+    d.rectangle((1, 1, w - 2, h - 2), fill=OUTLINE)
+    d.rectangle((2, 2, w - 3, h - 3), fill=(196, 44, 48, 255))
+    d.line((2, 2, w - 3, 2), fill=(236, 96, 92, 255))
+    x = 4
+    for c in "REC":
+        for gy, row in enumerate(glyphs[c]):
+            for gx, bit in enumerate(row):
+                if bit == "1":
+                    d.point((x + gx, 3 + gy), fill=(255, 236, 226, 255))
+        x += 4
     return img
 
 
@@ -366,7 +431,6 @@ def build_anims() -> None:
     add("receptionist", load(ANIM_DIR + "animated_receptionist.png"), 16, 32, 5)
     add("monitor", load(ANIM_DIR + "animated_control_room_facebook_scrolling.png"), 16, 32, 4)
     add("speaker", load(ANIM_DIR + "animated_amplifier_big.png"), 16, 48, 6)
-    add("server", load(ANIM_DIR + "animated_control_room_server.png"), 16, 48, 3)
     add("doc_screen", load(ANIM_DIR + "animated_hospital_screen_color.png"), 32, 32, 3)
     add("coffee", load(ANIM_DIR + "animated_coffee.png"), 16, 32, 6)
     add("cat", load(ANIM_DIR + "animated_cat.png"), 48, 16, 6)
@@ -376,13 +440,6 @@ def build_anims() -> None:
     add("toytrain", load(ANIM_DIR + "animated_toytrain.png"), 96, 64, 10)
     add("arrow_down", gif_strip(UI_DIR + "UI_arrow_pointing_down_16x16.gif"), 16, 16, 8)
     add("arrow_up", gif_strip(UI_DIR + "UI_arrow_pointing_up.gif"), 16, 16, 8)
-    # 声纹屏：截取 X 光机监视器的波形区域（14 帧），作为 ASR 录音台的挂墙示波器
-    xray = load(ANIM_DIR + "animated_hospital_xraymachine.png")
-    frames = xray.width // 72
-    wave = Image.new("RGBA", (16 * frames, 16))
-    for i in range(frames):
-        wave.paste(xray.crop((i * 72, 6, i * 72 + 16, 22)), (i * 16, 0))
-    add("wave_screen", wave, 16, 16, 8)
 
 
 # ---------------------------------------------------------------- 房间绘制
@@ -523,6 +580,32 @@ class Room:
         d.rectangle((x0, y0, x1 - 1, y0 + 1), fill=(24, 22, 28, 255))
         for i, color in enumerate(((50, 46, 56), (58, 54, 64), (66, 61, 72), (72, 67, 78))):
             d.line((x0, y1 - 4 + i, x1 - 1, y1 - 4 + i), fill=(*color, 255))
+
+    def elevator_recess(self, x: int, y: int) -> None:
+        """电梯轿厢内部：电梯门全开时门框之间（门贴图内 x 4..28、y 8..32）是透明的，
+        原先直接露出背后的墙纸。这里在背景上画出亮着顶灯的不锈钢轿厢：后壁拉丝面板、扶手与地板。"""
+        x0, y0, x1, y1 = x + 4, y + 8, x + 28, y + 32
+        d = ImageDraw.Draw(self.bg)
+        floor_top = y1 - 7
+        # 后壁：浅钢灰，竖向拉丝面板缝
+        d.rectangle((x0, y0, x1 - 1, floor_top - 1), fill=(150, 156, 172, 255))
+        for px in range(x0 + 5, x1, 6):
+            d.line((px, y0 + 3, px, floor_top - 1), fill=(128, 134, 152, 255))
+            d.line((px + 1, y0 + 3, px + 1, floor_top - 1), fill=(170, 176, 190, 255))
+        # 顶灯与灯下阴影
+        d.rectangle((x0, y0, x1 - 1, y0 + 1), fill=(64, 60, 74, 255))
+        d.line((x0 + 4, y0 + 1, x1 - 5, y0 + 1), fill=(250, 244, 220, 255))
+        d.line((x0, y0 + 2, x1 - 1, y0 + 2), fill=(118, 122, 140, 255))
+        # 扶手
+        d.line((x0, y0 + 10, x1 - 1, y0 + 10), fill=(214, 218, 228, 255))
+        d.line((x0, y0 + 11, x1 - 1, y0 + 11), fill=(96, 100, 118, 255))
+        # 地板：深色防滑地板 + 墙脚线，越靠近门口越亮（顶灯照在门口）
+        d.rectangle((x0, floor_top, x1 - 1, y1 - 1), fill=(84, 78, 92, 255))
+        d.line((x0, floor_top, x1 - 1, floor_top), fill=(52, 48, 60, 255))
+        for i, c in enumerate(((92, 86, 100), (100, 94, 108), (108, 102, 116))):
+            d.line((x0, y1 - 3 + i, x1 - 1, y1 - 3 + i), fill=(*c, 255))
+        for px in range(x0 + 2, x1, 4):
+            d.point((px, floor_top + 3), fill=(110, 104, 118, 255))
 
     def decal(self, key: str, x: int, y: int) -> None:
         self.bg.alpha_composite(DECALS[key], (x, y))
@@ -743,6 +826,7 @@ def build_foyer() -> Room:
 
     # 电梯（上墙中央）：走近自动开门，走进去上楼到「我的房间」；固定深度 20，角色进入时画在门上。
     # 到达入口厅（开场、从我的房间下楼）时电梯开合一次
+    room.elevator_recess(t(9), 16)
     room.doors.append({"key": "elevator", "x": t(9), "y": 16, "radius": 30, "depth": 20})
     room.portals.append({"rect": [t(9) + 8, 22, 16, 12], "to": "room", "spawn": "fromFoyer"})
     room.signs.append({"x": t(10), "y": 10, "text": "HannisHub", "tone": "brand"})
@@ -790,7 +874,7 @@ DESK_COUNT = 6
 
 def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str, chair: str) -> None:
     """一个工位：长条木桌 + 桌面双屏滚动显示器（屏幕与键盘完整落在桌面内）+ 桌角小物 + 桌前转椅。
-    转椅为背对镜头的圆背办公椅，坐下时椅背挡住角色后背，只露出头和肩膀；站到椅子后方按 E。"""
+    转椅为背对镜头的高背办公椅（16x32，与角色等高），坐下时椅背挡住角色后背，只露出头和肩膀；站到椅子后方按 E。"""
     dw, dh = OBJECTS["work_desk"].size
     bottom = top + dh
     room.put("work_desk", x, bottom, foot=14)
@@ -805,13 +889,14 @@ def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str, chai
         room.put(accessory, x + dw - 4 - img.width, bottom - 13, solid=False, depth=bottom + 1)
     room.put("plant_desk" if accessory != "plant_desk" else "lamp_desk_cream", x + 3, bottom - 13, solid=False, depth=bottom + 1)
     cw = OBJECTS[chair].width
-    chair_bottom = bottom + 15
-    room.put(chair, cx - cw // 2, chair_bottom, solid=[cx - 4, chair_bottom - 4, 8, 4])
+    # 椅背上沿压住桌子前沿 3px：椅子塞在桌前，五星脚轮落在桌前地面上
+    chair_bottom = bottom + 28
+    room.put(chair, cx - cw // 2, chair_bottom, solid=[cx - 6, chair_bottom - 5, 12, 5])
     room.desks.append({
         "id": desk_id,
         "zone": [cx - 14, chair_bottom - 3, 28, 15],
-        # 坐下：脚底略高于椅子底边，圆椅背画在角色前面
-        "seat": {"x": cx, "y": chair_bottom - 3, "dir": "up"},
+        # 坐下：脚底在椅子底边上方 18px（角色上沿高出椅背 19px），椅背（深度为椅子底边）画在角色前面，只露出头和肩膀
+        "seat": {"x": cx, "y": chair_bottom - 18, "dir": "up"},
         "signX": cx, "signY": top - 7,
     })
 
@@ -845,8 +930,8 @@ def build_hall() -> Room:
 
     # ---- 左上：工位区（浅灰地毯上 3x2 共 6 个工位）
     room.rug((22, 54, 282, 216), floor_tex(0, 36), edge=(70, 68, 80), inner=(196, 194, 204))
-    accessories = ["lamp_desk_blue", "coffee", "plant_desk", "coffee", "lamp_desk_blue", "coffee"]
-    chairs = ["chair_office", "chair_office_brown", "chair_office_white", "chair_office_green", "chair_office", "chair_office_brown"]
+    accessories = ["lamp_desk_cream", "coffee", "plant_desk", "coffee", "lamp_desk_cream", "coffee"]
+    chairs = ["chair_office", "chair_office_orange", "chair_office_green", "chair_office_purple", "chair_office", "chair_office_orange"]
     n = 0
     for row, top in enumerate((66, 142)):
         for col in range(3):
@@ -855,28 +940,40 @@ def build_hall() -> Room:
     assert n == DESK_COUNT
     room.signs.append({"x": 151, "y": 228, "text": "工位区 · 站到椅子后按 E 坐下 / 认领", "tone": "muted"})
 
-    # ---- 右上：机器区。台前为高亮地台，站上去按 E 交互
+    # ---- 右上：机器区。两个工作间同一套做法：专属墙面 + 深色地毯（强调色内框）+ 靠墙设备 + 台前操作椅，
+    # 站上地毯按 E 交互。ASR 是录音棚（吸音棉墙、REC 灯、监听音箱、调音台、吊杆话筒、补光灯），
+    # OCR 是文档室（软木资料板、文档屏、扫描终端、复印机、文件柜）
     asr_x = door_x + 56
-    room.rug((asr_x - 8, 48, asr_x + 88, t(6.5)), floor_tex(8, 20), edge=(110, 54, 40), inner=(217, 119, 87))
-    room.anim("speaker", asr_x, 16)
-    room.prop("audio_desk", asr_x + 16, 16, foot=16)
-    room.anim("speaker", asr_x + 48, 16)
-    room.anim("server", asr_x + 64, 16)
-    room.anim("wave_screen", asr_x + 82, 22, depth=10)
-    room.prop("mic", asr_x + 34, 38, solid=False)
+    floor_y = t(6.5)
+    room.rug((asr_x - 8, 48, asr_x + 88, floor_y), floor_tex(12, 16), edge=(36, 32, 40), inner=(217, 119, 87))
+    room.bg.alpha_composite(acoustic_panel(42, 28, (217, 119, 87)), (asr_x - 6, 18))
+    room.bg.alpha_composite(acoustic_panel(42, 28, (217, 119, 87)), (asr_x + 42, 18))
+    room.bg.alpha_composite(rec_lamp(), (asr_x + 31, 19))
+    room.anim("speaker", asr_x - 2, 64 - 39)
+    room.put("audio_desk", asr_x + 25, 66, foot=14)
+    room.anim("speaker", asr_x + 66, 64 - 39)
+    room.put("chair_office", asr_x + 32, 92, solid=[asr_x + 34, 87, 12, 5])
+    room.put("mic", asr_x + 6, 90, solid=[asr_x + 9, 86, 8, 4])
+    room.put("studio_light", asr_x + 64, 100, solid=[asr_x + 70, 95, 8, 5])
     room.machines.append({
         "id": "asr", "title": "ASR 语音转写", "hint": "上传音频，转写为文字",
-        "zone": [asr_x - 6, 58, 92, t(6.5) - 58], "signX": asr_x + 40, "signY": 8,
+        "zone": [asr_x - 6, 58, 92, floor_y - 58], "signX": asr_x + 40, "signY": 8,
     })
     ocr_x = asr_x + 112
-    room.rug((ocr_x - 8, 48, ocr_x + 88, t(6.5)), floor_tex(8, 30), edge=(40, 60, 100), inner=(106, 155, 204))
-    room.prop("kiosk", ocr_x + 4, 16, foot=16)
-    room.anim("doc_screen", ocr_x + 22, 14, depth=10)
-    room.prop("copier", ocr_x + 56, 16, foot=16)
-    room.prop("trash", ocr_x + 72, 30, foot=8)
+    room.rug((ocr_x - 8, 48, ocr_x + 88, floor_y), floor_tex(12, 16), edge=(36, 32, 40), inner=(106, 155, 204))
+    room.anim("doc_screen", ocr_x + 27, 12, depth=10)
+    room.decal("cork_board", ocr_x + 60, 20)
+    room.put("kiosk", ocr_x - 3, 62, foot=14)
+    room.put("file_shelf", ocr_x + 14, 62, foot=12)
+    room.put("desk_plain", ocr_x + 28, 66, foot=14)
+    room.put("lamp_desk_cream", ocr_x + 30, 52, solid=False, depth=67)
+    room.put("copier", ocr_x + 63, 62, foot=14)
+    room.put("trash", ocr_x + 80, 62, foot=8)
+    room.put("chair_office_green", ocr_x + 37, 92, solid=[ocr_x + 39, 87, 12, 5])
+    room.put("plant_pot", ocr_x + 72, 100, foot=8)
     room.machines.append({
         "id": "ocr", "title": "OCR 文字识别", "hint": "解析文档、提取字段、图像问答",
-        "zone": [ocr_x - 6, 58, 92, t(6.5) - 58], "signX": ocr_x + 40, "signY": 8,
+        "zone": [ocr_x - 6, 58, 92, floor_y - 58], "signX": ocr_x + 40, "signY": 8,
     })
     room.put("plant_palm", w - 16 - 26, 62, foot=8)
 
@@ -885,7 +982,8 @@ def build_hall() -> Room:
     room.rug_round((cx - 60, cy - 42, cx + 60, cy + 42), floor_tex(8, 8), edge=(110, 54, 40), inner=(217, 119, 87))
     tb = cy + 12
     room.put("table_round", cx - 12, tb, foot=14)
-    room.anim("coffee", cx - 8, tb - 30, depth=tb + 1)
+    # 咖啡杯（帧内可见 y 17..26）落在圆桌桌面中央：桌面为贴图上部 14 行，杯底对齐桌面中线偏下
+    room.anim("coffee", cx - 8, tb - 24 + 12 - 26, depth=tb + 1)
     # 高脚凳：圆桌左右两侧各两张，都面朝圆桌（侧坐有真正的坐姿帧，正面 / 背面坐高脚凳会像站在凳子上）
     stools = [
         ("stool_yellow", cx - 27, cy + 2, "right"), ("stool_blue", cx - 27, cy + 22, "right"),
@@ -987,13 +1085,18 @@ def build_hall() -> Room:
     room.put("pool_full", pool_x, 352, foot=30)
     room.action("pool", "台球桌", "打一杆", [pool_x - 6, 352, 60, 14])
     room.put("pool_rack", pool_x + 66, 330, foot=8)
-    # 蛋椅的靠背在右侧（面朝左），侧坐
-    room.put("egg_blue", gx0 + 14, floor_bottom - 12, foot=10)
-    room.seat(gx0 + 21, floor_bottom - 11, "left", [gx0 + 12, floor_bottom - 12, 22, 12], title="坐蛋椅")
-    room.put("egg_red", gx1 - 30, floor_bottom - 12, foot=10)
-    room.seat(gx1 - 23, floor_bottom - 11, "left", [gx1 - 32, floor_bottom - 12, 22, 12], title="坐蛋椅")
+    # 下沿两组「蛋椅 - 小圆桌 - 蛋椅」，与中下茶水间的桌椅同一排、同样的摆法：两把蛋椅开口相对、侧坐面朝圆桌
+    tbm = floor_bottom - 10
+    for tx, color in ((gx0 + 50, "blue"), (gx1 - 52, "red")):
+        room.put("table_round_dark", tx - 12, tbm, foot=14)
+        left, right = f"egg_{color}_r", f"egg_{color}"
+        ew = OBJECTS[left].width
+        lx, rx = tx - 14 - ew, tx + 14
+        room.put(left, lx, tbm, solid=[lx + 2, tbm - 6, ew - 4, 6])
+        room.seat(lx + ew - 7, tbm + 1, "right", [lx - 2, tbm - 4, ew + 2, 14], title="坐蛋椅")
+        room.put(right, rx, tbm, solid=[rx + 2, tbm - 6, ew - 4, 6])
+        room.seat(rx + 7, tbm + 1, "left", [rx, tbm - 4, ew + 2, 14], title="坐蛋椅")
     room.put("lamp_floor_red", gx1 - 18, 290, foot=6)
-    room.put("plant_big", gx1 - 74, floor_bottom - 4, foot=10)
 
     room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 96, "dir": "down"}
     room.build_walls()
@@ -1026,13 +1129,20 @@ def build_room() -> Room:
     })
     room.prop("plant_pot", 158, 34, foot=8)
 
-    # 左下：书架与落地灯；右下：地毯上的扶手椅与小圆桌，桌边睡猫
-    room.prop("bookshelf", 16, 90, foot=16)
-    room.prop("lamp_floor", 50, 92, foot=8)
+    # 左下：书桌角。地毯上书桌（台灯、电脑）+ 右侧书架，桌前背面办公椅可坐；床占住左上，桌子放在床脚下方
+    room.rug((18, 92, 84, 140), floor_tex(12, 28), edge=(50, 60, 90), inner=(220, 230, 245))
+    room.put("desk_plain", 20, 106, foot=12)
+    room.put("plant_desk", 23, 92, solid=False, depth=107)
+    room.put("lamp_desk_cream", 38, 91, solid=False, depth=107)
+    room.put("bookshelf", 56, 106, foot=12)
+    room.put("chair_office", 28, 132, solid=[30, 127, 12, 5])
+    room.seat(36, 114, "up", [24, 129, 24, 14], title="坐下")
+    # 右下：地毯上一把蛋椅侧对小圆桌（开口朝向桌子，可以坐），桌边睡猫
     room.decal("rug_beige", 122, 102)
-    room.prop("armchair_blue", 116, 84, foot=14)
-    room.prop("table_round", 144, 94, foot=16)
-    room.anim("cat", 124, 128, depth=144)
+    room.put("egg_blue_r", 124, 126, solid=[126, 120, 15, 6])
+    room.seat(136, 127, "right", [120, 122, 21, 14], title="坐蛋椅")
+    room.put("table_round", 145, 126, foot=14)
+    room.anim("cat", 136, 128, depth=144)
 
     # 出口：门口地垫 + 「入口厅」标牌与向下箭头
     room.rug((exit_x0 + 2, h - 32, exit_x1 - 2, h - 18), floor_tex(12, 26), edge=(60, 40, 30))
