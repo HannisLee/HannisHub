@@ -5,6 +5,7 @@ logs/*.log
 logs/
 model_manager/data/asr_history/
 model_manager/data/asr_jobs/
+model_manager/data/asr_history.migrated/
 prompt_service/data/recordings/
 .claude/
 nohup.out

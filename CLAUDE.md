@@ -17,7 +17,8 @@
 - 前端设计：所有新增网页页面必须严格遵守根目录 `design.md`；使用其中的 CSS Variables、暖黑配色、衬线标题和无阴影卡片规范
 - 前端组织：页面放在 `frontend/app/`，通用组件放在 `frontend/components/layout/` 与 `frontend/components/ui/`，业务组件按模块放在对应文件夹，API 客户端放在 `frontend/lib/`
 - 旧版 `index.html` 页面（Hub 级位于 `legacy/`）在迁移验证期保留，不新增旧版页面功能
-- 配置：settings.json 存储所有配置，无数据库
+- 配置：settings.json 存储所有配置
+- 业务数据：按账号隔离的数据（ASR 转写、OCR 识别、个人偏好）存入 SQLite `data/hannishub.db`，统一经 `core/database.py` 访问；每行带 `owner` 并按当前会话账号过滤，不再按用户分目录；表结构变更只能在 `_MIGRATIONS` 末尾追加
 - 语言：代码注释和文档全部使用中文
 
 ## 工作流程
@@ -32,7 +33,8 @@
 
 ## 关键约束
 
-- 不要引入数据库、额外前端框架或不必要的大型依赖；统一前端固定使用既有 Next.js 工程
+- 数据库固定使用 Python 标准库 sqlite3，不要引入其他数据库、ORM、额外前端框架或不必要的大型依赖；统一前端固定使用既有 Next.js 工程
+- 测试不得读写线上 `data/`：使用 `HANNISHUB_DB_PATH` 指向临时库，浏览器端到端测试用 `scripts/e2e/launch_test_hub.py` 启动临时测试 Hub，不连接 8081
 - 不要修改 run.sh 中的端口号（8081）和绑定地址（0.0.0.0），除非用户明确要求
 - settings.json 中的路径使用 `~` 时，后端需要 `Path.expanduser()` 展开
 - extra_args 必须经过 `_validate_extra_args()` 校验

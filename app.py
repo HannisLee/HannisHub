@@ -123,6 +123,9 @@ async def lifespan(_: FastAPI):
     """由 Hub 统一管理子服务生命周期。"""
     await server_manager_app.start_scheduler()
     await prompt_service_app.audio_service.start()
+    # 旧版 JSON 存储的 ASR / OCR 记录一次性迁入 SQLite（归属管理员），之后再恢复中断任务
+    await run_in_threadpool(model_manager_app.migrate_legacy_asr_storage)
+    await run_in_threadpool(ocr_records.migrate_legacy_storage)
     await model_manager_app.recover_interrupted_asr_tasks()
     ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(model_manager_app.auto_start_watchdog())
@@ -855,6 +858,9 @@ async def users_delete(username: str, request: Request):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # 账号删除后清理其按账号保存的数据，避免以后同名新账号继承旧记录
+    await run_in_threadpool(model_manager_app.purge_asr_user, username)
+    await run_in_threadpool(ocr_records.purge_user, username)
     return JSONResponse({"ok": True})
 
 

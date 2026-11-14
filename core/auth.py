@@ -300,9 +300,13 @@ def update_settings_section(name: str, value: Any) -> None:
         _write_settings_unlocked(data)
 
 
+# 唯一管理员账号；旧版共享数据迁移进数据库时归属该账号
+ADMIN_USERNAME = "lihan"
+
+
 def is_terminal_admin(username: str | None) -> bool:
     """网页终端仅对 lihan 管理员开放。"""
-    return username == "lihan" and username in _user_map()
+    return username == ADMIN_USERNAME and username in _user_map()
 
 
 def current_username(session: dict[str, Any]) -> str | None:

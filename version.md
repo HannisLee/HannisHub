@@ -1259,3 +1259,16 @@
 - `AppShell` 新增 `immersiveForRegular` 与 `shell-context.tsx`；`navigation.ts` 新增 `isAdmin`、`REGULAR_HOME`。
 - 更新 spec.md（页面说明、目录、接口表、登录与权限）。
 - 验证：`tsc --noEmit`、eslint 通过，`npm run build` 成功；同步模块单元测试（假连接：私有房间不广播、出现/移动/隐藏/下线、宽限期内重连不下线、多开接管与不回显自己、资料更新、非法数据与限速）与权限测试（未登录拒绝、普通账号可连同步通道但不能连终端、受限页面跳转聊天大厅）通过；寻路在大厅与入口厅全部 716 个可走采样点均能到达出口；隔离测试服务（资料指向临时文件、用户名由 cookie 指定）+ 无头 Chrome 双账号实测：普通账号整页模式（桌面与手机宽度）、对方从电梯下楼出现、同房间走动、改名换装实时更新、走进电梯消失、关闭页面后自动从大厅走回电梯消失、同账号双标签只显示一个角色，无页面错误；未连接 8081 线上服务。
+
+### v0.2.104 — 2026-11-14
+- 引入 SQLite（Python 标准库 `sqlite3`，无新依赖）：新增 `core/database.py`，数据库位于 `data/hannishub.db`，WAL 模式、按 `PRAGMA user_version` 递增迁移，`HANNISHUB_DB_PATH` 可指向临时库；新增 `asr_records`、`ocr_records`、`user_settings` 三张表。
+- ASR 按账号隔离：此前转写历史与提炼提示词全员共享，任何账号都能看到、改名、删除别人的记录。现在历史元数据、转写全文与信息提取结果存入 `asr_records`（带 `owner`），全部接口按当前会话账号过滤，访问他人记录返回 404；提炼提示词改为按账号保存（管理员仍写 `ai_settings.json` 并作为默认值，其他账号写数据库，互不影响）。任务音频目录移到根目录 `data/asr_jobs/`。
+- OCR 改为数据库存储：记录与识别结果、PDF 中间解析结果存入 `ocr_records`，原始文件平铺在 `data/ocr_files/<记录 ID>/`，不再按用户哈希分目录。
+- 旧数据迁移：启动时把旧版共享 ASR 历史（28 条，含 3 条提炼结果）与 OCR 记录一次性导入数据库，全部归属管理员 `lihan`，其他账号从空记录开始；旧目录改名为 `asr_history.migrated` / `ocr_records.migrated` 留作备份，可重复执行不重复导入。
+- 删除账号时同步清理该账号的 ASR / OCR 记录、上传文件与个人偏好；`core/auth.py` 新增 `ADMIN_USERNAME` 常量。
+- 网页终端修复 Windows 浏览器无法粘贴：xterm.js 在非 macOS 平台把 Ctrl+V 当作控制字符 `^V` 并阻止浏览器默认行为，浏览器不会触发 paste 事件。新增 `frontend/lib/terminal-clipboard.ts`，通过 `attachCustomKeyEventHandler` 把 Ctrl+V / Ctrl+Shift+V / Shift+Insert（粘贴）、有选中时的 Ctrl+C / Ctrl+Insert（复制）与 Ctrl+Shift+C（复制，阻止打开开发者工具）让回浏览器原生剪贴板事件，不依赖 `navigator.clipboard`，HTTP 局域网地址同样可用；无选中时 Ctrl+C 仍是中断。
+- 网页终端输入改为非阻塞写入：PTY 输入缓冲写满时不再在事件循环里 sleep 重试（大段粘贴会让整个 Hub 卡住），改为待写缓冲 + `loop.add_writer` 分块续写，积压上限 16 MB。
+- OCR 页面支持 Ctrl+V 粘贴图片：剪贴板中的截图、复制的图片或文件直接成为待解析文件，截图类无名图片命名为「粘贴图片-时间.扩展名」；纯文字粘贴不拦截。上传区提示文案同步更新。
+- 测试：重写 `model_manager/test_asr.py` 为临时数据库并新增隔离、按账号提示词、账号清理与旧数据迁移用例；新增 `tests/test_ocr_records.py`（隔离、删除与清理、中断恢复、旧数据迁移、库版本）与 `frontend/tests/clipboard.test.mjs`（快捷键判断与剪贴板文件命名）；新增 `scripts/e2e/launch_test_hub.py`（临时 settings + 临时库 + 关闭 lifespan 的测试 Hub）与 `scripts/e2e/terminal_paste.test.cjs`（Playwright 模拟 Windows 浏览器的终端剪贴板端到端测试）。
+- 更新 spec.md（技术栈、目录、终端、OCR 页面、ASR 接口、隔离与迁移说明、数据库表结构、安全设计）、CLAUDE.md（允许并约束 SQLite、测试不得触碰线上数据）与 README。
+- 验证：Python 单元测试 50 项、前端 node 测试 9 项通过，`tsc --noEmit`、eslint 通过，`npm run build` 成功；迁移逻辑在真实数据副本上演练，28 条 ASR（全文与 3 条提炼完整）与 1 条 OCR 全部归属 lihan、其他账号为空；隔离测试 Hub（端口 18093，临时 settings 与临时库，未连接 8081）+ 无头 Chrome 模拟 Windows 浏览器：终端 12 项全部通过（Ctrl+V / Ctrl+Shift+V / Shift+Insert 粘贴，CRLF 多行含中文 emoji 制表符逐字一致，bracketed paste 不误执行，2.1 MB 粘贴完整且期间 Hub 响应 ≤13 ms，Ctrl+C 中断与复制区分，Ctrl+Shift+C 复制，非安全上下文粘贴），同一用例在修改前的代码上仅 3 项通过（复现无法粘贴）；直接 WebSocket 灌入 3.9 MB 输入时旧代码阻塞其他请求约 1.1 秒、新代码 ≤21 ms；OCR 粘贴截图、文字粘贴不被拦截、双账号 ASR / OCR 记录与提炼提示词互不可见均通过。

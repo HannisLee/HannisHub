@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody, uploadBinary } from "../../lib/api";
+import { clipboardFiles } from "../../lib/clipboard";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import type { CustomService, ManagedProcess, OcrRecord, OcrTask } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, PageHeader, ProgressBar } from "../ui/primitives";
@@ -112,7 +113,26 @@ export function OcrPanel() {
 
   useEffect(() => () => { if (pendingUrl) URL.revokeObjectURL(pendingUrl); }, [pendingUrl]);
 
-  function chooseFile(files: FileList | null) {
+  // Ctrl+V：剪贴板里有图片（截图、复制的图片）或文件时直接作为待解析文件；纯文字粘贴不拦截，输入框照常可用。
+  const chooseFileRef = useRef<(files: ArrayLike<File> | null) => void>(() => undefined);
+  const uploadingRef = useRef(false);
+  useEffect(() => {
+    chooseFileRef.current = chooseFile;
+    uploadingRef.current = uploadProgress !== null;
+  });
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      const files = clipboardFiles(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      if (uploadingRef.current) { setError("正在上传，请等待完成后再粘贴新文件"); return; }
+      chooseFileRef.current(files);
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+
+  function chooseFile(files: ArrayLike<File> | null) {
     const file = files?.[0];
     if (!file) return;
     if (!SUPPORTED_FORMATS.includes(extensionOf(file.name).toUpperCase())) {
@@ -285,7 +305,7 @@ export function OcrPanel() {
                 </button>
                 : <div className="upload-drop ocr-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); inputRef.current?.click(); } }}>
                   <span className="upload-mark">↑</span>
-                  <strong>拖入文档，或点击选择文件</strong>
+                  <strong>拖入文档、Ctrl+V 粘贴图片，或点击选择文件</strong>
                   <div className="ocr-format-tags" aria-label="支持的格式">{SUPPORTED_FORMATS.map(format => <span key={format}>{format}</span>)}</div>
                   <small>单个文件不超过 50 MB；PDF 仅支持文档解析，按页识别后合并。</small>
                 </div>}

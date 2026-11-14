@@ -16,7 +16,8 @@ HannisHub 是一个本地综合管理站。根应用负责统一登录、会话�
 | 进程管理 | subprocess + psutil |
 | GPU 监控 | nvidia-smi + psutil |
 | 模型下载 | huggingface_hub Python API（`hf_hub_download` 单文件 / `snapshot_download` 全量） |
-| 配置存储 | 根目录与各子服务分别使用 settings.json（无数据库） |
+| 配置存储 | 根目录与各子服务分别使用 settings.json |
+| 业务数据 | SQLite（Python 标准库 `sqlite3`，`data/hannishub.db`）：按账号隔离的 ASR 转写、OCR 识别记录与个人偏好；上传文件按记录 ID 平铺在 `data/` 下 |
 | 运行环境 | conda 环境 `llama-manager` |
 
 ## 项目结构
@@ -30,6 +31,7 @@ HannisHub/
 ├── ai_settings.json          # AI 连接与提示词配置（不入库）
 ├── core/                     # Hub 基础设施
 │   ├── auth.py               # 多用户登录配置、Argon2 密码哈希、会话中间件
+│   ├── database.py           # SQLite 数据库：连接、建表与按版本迁移（PRAGMA user_version）、个人偏好读写
 │   └── compression.py        # 选择性 gzip 中间件：只压缩长度已知的文本类响应
 ├── chatworld/                # 聊天世界后端（聊天室与聊天大厅）
 │   ├── chat_room.py          # 聊天室组件：公共聊天室消息、用户资料、在线状态与附件，存储于根目录 data/（不入库）
@@ -40,11 +42,11 @@ HannisHub/
 │   ├── app.py                # 子服务 FastAPI 后端
 │   ├── ai_settings.py        # AI 能力设置：API、密钥与提示词的本地 JSON 配置（读写根目录 ai_settings.json）
 │   ├── asr_audio.py          # ASR 音频工具：时长探测、静音检测、切片与导出
-│   ├── ocr_records.py        # OCR 识别记录：后台任务、字段提取与问答，存储于根目录 data/ocr_records/
+│   ├── ocr_records.py        # OCR 识别记录：后台任务、字段提取与问答；记录存 SQLite，原始文件在 data/ocr_files/<记录 ID>/
 │   ├── test_asr.py           # ASR 单元测试
 │   ├── index.html            # 子服务旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # 子服务配置与运行状态
-│   ├── data/                 # ASR 历史与任务数据
+│   ├── data/                 # 旧版共享 ASR 历史迁移后的备份 asr_history.migrated/（不入库）
 │   └── logs/                 # 子服务运行日志
 ├── server/                   # Server 子服务与服务器侧组件
 │   ├── app.py                # SSH 与定时任务后端
@@ -69,8 +71,9 @@ HannisHub/
 │   ├── lib/                  # API 请求、显式类型、格式化与导航
 │   ├── public/               # 前端静态资源
 │   └── out/                  # npm run build 生成的静态导出（不入库）
-├── scripts/                  # 外部服务启动脚本
-├── data/                     # 聊天室、OCR 等运行数据（不入库）
+├── scripts/                  # 外部服务启动脚本；e2e/ 为终端粘贴等浏览器端到端测试（只连接临时测试 Hub）
+├── tests/                    # 后端单元测试（权限、聊天大厅资料、OCR 记录隔离与迁移）
+├── data/                     # 运行数据（不入库）：hannishub.db（SQLite）、asr_jobs/、ocr_files/、聊天室与聊天大厅 JSON
 ├── docs/
 │   └── MEMORY.md             # 项目长期运行与兼容性记忆
 ├── spec.md                   # 本文件，架构文档
@@ -112,7 +115,7 @@ HannisHub/
   - **素材版本**：构建脚本在 `layout.json` 与 `avatar/parts.json` 中写入 `build`（输出内容的短哈希，内容不变则不变）。前端每次加载都绕过缓存重新获取这两个清单（`layout.json?t=时间戳`、`parts.json` 使用 `cache: "no-cache"`），其余素材地址统一带 `?v=<build>`（`assetUrl()`）。静态文件没有缓存头，浏览器可能复用旧文件；版本号保证图集图片与坐标表总是来自同一次构建，否则家具会显示成错误的贴图（位置错乱）。
   - 「形象与名字」保存遇到 404 / 405（后台进程尚未加载资料接口，请求落到根路径静态文件托管上）时提示「后台服务尚未更新，请重启后台服务后再保存」。
 - `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」。页面右下角另有可拖动的浮动提示词按钮（位置记忆在 `hannishub_prompt_float_position`），点击展开仅含输入框、复制、归档的面板，不提供润色；草稿暂存在 `hannishub_prompt_float_draft`（与提示词页草稿互不覆盖），归档调用提示词模块既有的 `POST /prompt/api/prompts`，写入 `prompt_service/settings.json`，与提示词页归档列表共用同一份数据
-- `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。
+- `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。原始文档区支持拖入、点击选择，以及在页面任意位置 Ctrl+V 粘贴剪贴板中的图片（截图、复制的图片）或文件；截图类无名图片自动命名为「粘贴图片-YYYYMMDD-HHMMSS.扩展名」，纯文字粘贴不拦截，字段 / 问题输入框照常可用。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
 - `/server/connections`、`/server/tasks`：远程服务器模块页面。该分组当前从侧栏隐藏，页面、组件与接口全部保留，直接访问 URL 仍可使用；“服务器文件”页仍依赖已保存的 SSH 连接
@@ -171,6 +174,9 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 6 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在内存，Hub 停止时全部结束；同时最多 10 个。
 - 权限：仅管理员可用——固定用户名 `lihan`。`/api/auth/status` 返回 `terminal` 布尔值，侧栏「设置」分组据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
 - `AuthMiddleware` 对 WebSocket 握手同样校验会话，未登录直接拒绝（此前 WebSocket 请求不经过登录校验）。
+- 输入写入：`input` 先追加到会话的待写缓冲，以 4 KB 为块非阻塞写入 PTY；PTY 输入缓冲写满时注册 `loop.add_writer`，等可写时继续，绝不在事件循环里等待。大段粘贴期间 Hub 其他请求与终端输出照常处理；待写积压超过 16 MB（shell 长时间不读输入）时丢弃新输入。
+- 剪贴板（`frontend/lib/terminal-clipboard.ts` + xterm `attachCustomKeyEventHandler`）：xterm.js 在非 macOS 平台会把 Ctrl+V 当作控制字符 `^V` 并阻止浏览器默认行为，导致 Windows 浏览器无法粘贴。前端把以下快捷键让回浏览器，由原生 `paste` / `copy` 事件完成，不依赖 `navigator.clipboard`，HTTP 局域网地址（非安全上下文）同样可用：Ctrl+V、Ctrl+Shift+V、Shift+Insert 粘贴；有选中文字时 Ctrl+C、Ctrl+Insert 复制，没有选中时 Ctrl+C 仍发送中断信号；Ctrl+Shift+C 始终阻止浏览器打开开发者工具，有选中时复制。粘贴遵循 bracketed paste，bash 提示符下多行粘贴需按回车才执行；Windows 剪贴板的 CRLF 换行由 xterm 统一转为回车。macOS 的 Cmd+V / Cmd+C 行为不变；输入法组字与 AltGr 组合不拦截。
+- 端到端测试：`scripts/e2e/launch_test_hub.py` 以临时 settings、临时数据库、关闭 lifespan 启动测试 Hub，`scripts/e2e/terminal_paste.test.cjs` 用 Playwright 模拟 Windows 浏览器（`navigator.platform = Win32`）验证上述快捷键、多行 CRLF / 中文 / emoji 粘贴逐字一致、bracketed paste、2 MB 大段粘贴完整且 Hub 保持响应，以及非安全上下文下的粘贴
 - 配置（根 `settings.json`，均可省略）：`"terminal": {"idle_timeout_hours": 6, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
 
 ### Hub API
@@ -262,7 +268,8 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 旧版单管理员字段 `auth.username` / `auth.password_hash` 在启动时自动迁移为第一个用户
 - 登录失败按 IP 和账号分别限速：5 分钟内失败 5 次后暂时拒绝，计数保存在进程内，重启后清空。反向代理须正确配置可信代理地址，避免全部请求共用代理 IP；不应信任客户端自行提供的转发头。
 - 写请求必须提供与请求地址同源的 `Origin` 或 `Referer`；开发环境跨源访问可通过 `HANNISHUB_DEV_ORIGINS` 显式配置。HTTPS 部署可设置 `HANNISHUB_HTTPS_ONLY=1` 为会话 Cookie 启用 Secure；代理须保留 Host 并正确传递 HTTPS 协议。
-- ASR 历史和提炼提示词仍为全体登录用户共享，OCR 记录按账号隔离。
+- ASR 转写历史、ASR 提炼提示词与 OCR 识别记录均按登录账号隔离：记录保存在 SQLite `data/hannishub.db`，每行带 `owner`（用户名），所有读取、改名、删除与提取都按当前会话账号过滤，访问其他账号的记录与不存在一样返回 404。管理员 `lihan` 的提炼提示词仍保存在 `ai_settings.json`，同时作为其他账号未自定义时的默认值；其他账号修改后保存在数据库 `user_settings` 表，互不影响。删除账号时同步清理该账号的 ASR / OCR 记录、上传文件与个人偏好，避免同名新账号继承。
+- 旧版数据迁移：Hub 启动时把旧版全员共享的 `model_manager/data/asr_history/`（records.json + 全文 txt）与 `data/ocr_records/<用户哈希>/` 一次性导入数据库，全部归属管理员 `lihan`，其他账号从空记录开始；旧目录改名为 `asr_history.migrated` / `ocr_records.migrated` 留作备份，旧任务目录 `model_manager/data/asr_jobs/` 移到 `data/asr_jobs/`。迁移可重复执行，已导入的记录 ID 会跳过。
 - 每个用户有 `session_version`，会话中同时记录用户名与版本；重置密码时版本递增，删除用户或版本不一致时会话立即失效。中间件按 `settings.json` 修改时间缓存用户表，避免每个请求重复解析
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
 - 会话使用 Starlette `SessionMiddleware` 与 `itsdangerous` 签名 Cookie
@@ -383,14 +390,14 @@ _download_lock   # 下载任务状态读写锁
 | POST | `/api/gpu-processes/stop` | 停止当前出现在 GPU 进程列表中的指定进程；受管进程走原停止链路，桌面图形进程受保护 |
 | GET | `/asr` | 返回固定地址的 ASR 专用音频转写页 |
 | GET | `/chat/{pid}` | 返回指定标准 LLM 服务的通用 OpenAI 兼容聊天页 |
-| GET | `/api/asr/history` | 返回本地 ASR 历史记录摘要（不含全文） |
-| GET | `/api/asr/history/{record_id}/text` | 读取指定本地 ASR 历史的全文 |
+| GET | `/api/asr/history` | 返回当前登录账号的 ASR 历史记录摘要（不含全文）；以下 history 与 extraction-settings 接口均只操作当前账号的数据，其他账号的记录返回 404 |
+| GET | `/api/asr/history/{record_id}/text` | 读取当前账号指定 ASR 历史的全文 |
 | GET | `/api/asr/history/{record_id}/extraction` | 读取指定 ASR 历史已保存的信息提取结果 |
 | POST | `/api/asr/history/{record_id}/extraction` | 使用统一 AI 设置中的模型与提示词提取指定转写的关键信息 |
 | PATCH | `/api/asr/history/{record_id}` | 修改指定 ASR 历史记录的自定义名称 |
-| DELETE | `/api/asr/history/{record_id}` | 删除已结束的 ASR 历史记录及其保存的全文 |
-| GET | `/api/asr/extraction-settings` | （兼容入口）读取统一 AI 设置中的 ASR 提炼提示词 |
-| PUT | `/api/asr/extraction-settings` | （兼容入口）保存统一 AI 设置中的 ASR 提炼提示词 |
+| DELETE | `/api/asr/history/{record_id}` | 删除当前账号已结束的 ASR 历史记录、全文及残留任务音频 |
+| GET | `/api/asr/extraction-settings` | 读取当前账号的 ASR 提炼提示词（未自定义时为管理员在 ai_settings.json 中的提示词） |
+| PUT | `/api/asr/extraction-settings` | 保存当前账号的 ASR 提炼提示词：管理员写入 ai_settings.json，其他账号写入数据库 |
 | GET | `/api/asr` | 获取唯一运行中的 ASR 实例信息及 `/health` 就绪状态 `ready` |
 | POST | `/api/asr/transcriptions` | 上传一个音频，创建历史 item 并在后台队列中转写，立即返回 `202` |
 | POST | `/api/start` | 启动已注册服务（model 为 `custom:<id>` 启 vLLM，或 `llama:<id>` 启 llama.cpp） |
@@ -518,7 +525,7 @@ _download_lock   # 下载任务状态读写锁
 5. 后端按顺序向该实例本机地址的 `/v1/audio/transcriptions` 发送 multipart 请求，自动从 `qwen-asr-serve` 命令读取模型路径，兼容 `text` 和 OpenAI `choices` 返回格式并去除 `<asr_text>` 标记；每个片段按时长传入 `max_completion_tokens`（每秒 12 个输出 token，下限 256、上限 8192），单片段请求超时 300 秒。长度超过 240 个有效字符且唯一字符占比低于 2% 的噪声重复输出会被判定为无效语音，正常英文转写不受影响；服务端仍返回“文件过大”时会再切分后重试该片段
 6. 浏览器通过 XMLHttpRequest 上传，逐文件显示真实的已上传字节数和百分比。服务端为每个上传文件立即创建历史 item，并把上传、排队、FFmpeg 分析、转写、完成或失败状态及对应阶段百分比写入历史索引；页面每 3 秒刷新，因此刷新页面后仍可查看后台任务进度。上传未结束时关闭页面会收到浏览器提示；关闭或断网导致上传中断时，历史记录标记为失败并提示重新上传，服务端保留的不完整数据不会被当作完整音频转写；删除失败记录时一并清理其任务文件。文件上传完成并进入队列后，关闭页面不影响后台转写
 7. 后台队列默认同时只运行 1 个任务，以避免单卡 vLLM 争抢资源。FFmpeg 静音分析从 `-progress pipe:2` 读取已处理音频时长并显示处理进度；转写阶段按已完成片段数显示进度，同时明确显示当前是在 FFmpeg 转码片段还是等待 ASR 返回。每个任务进入队列后均等待唯一受管 ASR 的 `/health` 返回成功才进行 FFmpeg 处理和转写，等待时展示初始化状态；最长等待 15 分钟，超时标记失败并保留原始音频。Hub 启动时先扫描上传、排队、处理和转写中的历史记录：上传中的记录标记为上传中断并提示重新上传，其他仍存在完整任务音频的记录重新排队并等待服务就绪，音频缺失的记录标记为错误
-8. 任务成功后删除临时音频和 FLAC 切片；转写失败时保留已完整上传的原始音频、清理可再生成的 FLAC 切片，便于之后重试。上传中断保留的文件是不完整数据，不能用于转写，可删除对应历史记录清理。成功转写的全文保存到 `data/asr_history/<记录 ID>.txt`，信息提取结果保存到 `data/asr_history/<记录 ID>.extracted.txt`，元数据保存到 `data/asr_history/records.json`，临时任务目录为 `data/asr_jobs/`，三者均不纳入 Git
+8. 任务成功后删除临时音频和 FLAC 切片；转写失败时保留已完整上传的原始音频、清理可再生成的 FLAC 切片，便于之后重试。上传中断保留的文件是不完整数据，不能用于转写，可删除对应历史记录清理。历史记录（元数据、转写全文与信息提取结果）保存在 SQLite `data/hannishub.db` 的 `asr_records` 表并按账号隔离，临时任务目录为根目录 `data/asr_jobs/<记录 ID>/`，均不纳入 Git
 9. 专用页以最新上传在前的时间倒序展示可展开 item，列表保存自定义名称、原始文件名、上传时间、时长、片段数、状态、阶段进度和是否已提取；已完成条目可在原文与信息提取结果间切换，并可修改记录名称或删除已结束的记录。展开文本使用全宽、更高的只读文本框，聚焦后 Ctrl/Cmd+A 只选中当前框内文本；“复制”按钮只复制当前展开框内容
 10. 统一前端把可保存的信息提取提示词放在转写历史之后，位于 ASR 页面最底部。默认提示词用于去除抖音音频转写的口头禅和冗余内容，保留关键事实、观点、步骤、数字和结论，且禁止编造原文未提供的信息
 
@@ -654,6 +661,16 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `file_manager.roots` | array | `["~"]` | 文件管理组件允许浏览与下载的顶层目录数组；路径保留 `~`，读取时展开 |
 | `file_favorites` | array | `[]` | 目录收藏，包含 `id`、`name`、`root_path` 和相对目录 `path` |
 
+### 根目录 data/hannishub.db（SQLite，不入 Git）
+
+由 `core/database.py` 管理，首次使用时自动建表，结构版本记录在 `PRAGMA user_version`，迁移脚本只追加不修改；环境变量 `HANNISHUB_DB_PATH` 可指向临时库（测试用）。
+
+| 表 | 主键 | 说明 |
+|----|------|------|
+| `asr_records` | `id`（`asr_<32 位十六进制>`） | ASR 转写历史：`owner`、名称、原始文件名、上传时间、时长、片段数、状态与进度、错误、`transcript` 全文、`extraction` 信息提取结果 |
+| `ocr_records` | `id`（32 位十六进制） | OCR 识别记录：`owner`、文件名与类型、任务 / 字段 / 问题、链路 `pipeline`、状态与进度、错误与警告、字数、耗时、页数、`result` 识别结果、`parsed` PDF 中间解析 Markdown；原始文件在 `data/ocr_files/<id>/source.<扩展名>` |
+| `user_settings` | (`owner`, `key`) | 按账号保存的个人偏好，当前用于 `asr_extraction_prompt` |
+
 ### 根目录 ai_settings.json（不入 Git）
 
 该文件由 AI 设置模块维护，包含给其他模块提供 AI 能力的敏感配置；文件本身与 `ai_settings.json.tmp` 均在 `.gitignore` 中：
@@ -779,6 +796,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 - protected_ports 防止误杀 SSH（端口 22）
 - PID 1 永远不会被 kill
 - 子服务与 Hub 的 settings.json 均使用原子写入防止损坏
+- SQLite 数据库使用 WAL 模式与 IMMEDIATE 事务，文件权限 600；SQL 一律参数化，可更新列名走白名单；记录 ID 校验格式后才拼接文件路径
 - Hub 使用 Argon2id 保存全部用户密码，不保存明文；登录时对不存在的用户名同样执行一次哈希校验，避免通过响应时间探测用户名
 - Hub 使用 HttpOnly 签名 Cookie 保存会话，`AuthMiddleware` 统一保护页面和 API
 - 管理后台绑定 `0.0.0.0:8081`，README 中提醒公网暴露风险

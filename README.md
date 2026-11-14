@@ -117,7 +117,7 @@ HannisHub/
 - `model_manager/settings.json`：模型管理配置和运行状态
 - `server/settings.json`：Server 配置
 - `prompt_service/settings.json`：提示词分组与归档数据
-- 所有配置均使用 JSON 文件，不引入数据库
+- 所有配置均使用 JSON 文件；按账号隔离的业务数据（ASR、OCR 记录）保存在 SQLite `data/hannishub.db`（Python 标准库，无需额外安装）
 - 管理后台默认绑定 `0.0.0.0:8081`；如通过公网访问，应在前置反向代理启用 HTTPS
 
 ## 旧版页面

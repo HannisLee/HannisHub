@@ -36,6 +36,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 REAPER_INTERVAL_SECONDS = 60
 READ_CHUNK = 65536
+# 输入写入 PTY 的单次块大小，以及尚未被 shell 读走的输入积压上限（防止异常客户端撑爆内存）
+WRITE_CHUNK = 4096
+MAX_PENDING_INPUT = 16 * 1024 * 1024
 MAX_TITLE_CHARS = 40
 CLOSE_RELEASED = 4000
 CLOSE_NOT_FOUND = 4404
@@ -93,6 +96,9 @@ class TerminalSession:
         self.scrollback_limit = max(64, int(load_config().get("scrollback_kb") or 512)) * 1024
         self.closed = False
         self._loop = asyncio.get_running_loop()
+        # 待写入 PTY 的输入；大段粘贴时 PTY 输入缓冲会写满，剩余部分等可写事件再继续
+        self._pending_input = bytearray()
+        self._writer_registered = False
 
         master_fd, slave_fd = os.openpty()
         self._set_winsize(slave_fd, self.rows, self.cols)
@@ -164,20 +170,45 @@ class TerminalSession:
     # ---------- 输入 ----------
 
     def write(self, data: str) -> None:
-        if self.closed:
+        """追加输入并尽量立即写入；写不完的部分交给事件循环的可写回调，绝不阻塞事件循环。
+
+        旧实现在 PTY 输入缓冲写满时 sleep 重试，会卡住整个事件循环，shell 的回显输出无人读取，
+        shell 写输出被阻塞后又不再读取输入，形成死锁——大段粘贴时整个 Hub 失去响应。
+        """
+        if self.closed or not data:
             return
-        payload = data.encode("utf-8", errors="replace")
         self.touch()
-        while payload:
+        payload = data.encode("utf-8", errors="replace")
+        if len(self._pending_input) + len(payload) > MAX_PENDING_INPUT:
+            # shell 长时间不读输入（例如被挂起）时丢弃本次输入，避免内存无限增长
+            return
+        self._pending_input += payload
+        self._flush_input()
+
+    def _flush_input(self) -> None:
+        while self._pending_input and not self.closed:
             try:
-                written = os.write(self.master_fd, payload)
+                written = os.write(self.master_fd, self._pending_input[:WRITE_CHUNK])
             except BlockingIOError:
-                # PTY 输入缓冲已满时短暂让出；正常键盘输入不会走到这里
-                time.sleep(0.005)
-                continue
+                break
             except OSError:
-                return
-            payload = payload[written:]
+                self._pending_input.clear()
+                break
+            del self._pending_input[:written]
+        if self._pending_input and not self.closed:
+            if not self._writer_registered:
+                self._loop.add_writer(self.master_fd, self._flush_input)
+                self._writer_registered = True
+        elif self._writer_registered:
+            self._stop_writer()
+
+    def _stop_writer(self) -> None:
+        if self._writer_registered:
+            self._writer_registered = False
+            try:
+                self._loop.remove_writer(self.master_fd)
+            except Exception:
+                pass
 
     def resize(self, cols: int, rows: int) -> None:
         if self.closed:
@@ -199,6 +230,8 @@ class TerminalSession:
         if self.closed:
             return
         self.closed = True
+        self._stop_writer()
+        self._pending_input.clear()
         try:
             self._loop.remove_reader(self.master_fd)
         except Exception:

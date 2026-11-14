@@ -21,6 +21,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from core import database
+from core.auth import ADMIN_USERNAME, current_username
 from model_manager import ai_settings
 from model_manager.asr_audio import (
     ASR_MAX_CHUNK_SECONDS,
@@ -116,16 +118,18 @@ GPU_PROTECTED_PROCESS_NAMES = {
 # 上传文件不再按扩展名限制。所有能够被 FFmpeg 解码的媒体都会在本地导出为
 # FLAC 切片后再送给 ASR 服务，扩展名仅用于保留原始文件名和帮助 FFmpeg 判断格式。
 ASR_MAX_FILENAME_SUFFIX_LENGTH = 16
-ASR_HISTORY_DIR = APP_DIR / "data" / "asr_history"
-ASR_HISTORY_INDEX_PATH = ASR_HISTORY_DIR / "records.json"
+# ASR 历史记录保存在根目录 data/hannishub.db 的 asr_records 表（按账号 owner 隔离）；
+# 以下为旧版共享 JSON 存储位置，仅用于启动时一次性迁移。
+LEGACY_ASR_HISTORY_DIR = APP_DIR / "data" / "asr_history"
+LEGACY_ASR_JOB_DIR = APP_DIR / "data" / "asr_jobs"
 ASR_EXTRACTION_PROMPT_KEY = "asr_extraction_prompt"
 ASR_DEFAULT_EXTRACTION_PROMPT = (
     "以下内容是一个抖音视频的音频转写。请去除口头禅、重复、无关寒暄和其他冗余内容，"
     "准确提炼视频真正要传达的关键信息。请用清晰、简洁的中文输出；保留必要的事实、观点、"
     "步骤、数字和结论，不要编造或补充原文没有的信息。"
 )
-_asr_history_lock = threading.RLock()
-ASR_JOB_DIR = APP_DIR / "data" / "asr_jobs"
+# 上传音频与 FLAC 切片的任务目录，按记录 ID 平铺，成功后删除
+ASR_JOB_DIR = APP_DIR.parent / "data" / "asr_jobs"
 ASR_MAX_CONCURRENT_TASKS = 1
 ASR_READY_TIMEOUT_SECONDS = 15 * 60
 ASR_READY_POLL_SECONDS = 2
@@ -2105,30 +2109,21 @@ def _transcribe_qwen3_asr(item: dict, input_path: Path, work_dir: Path, on_progr
     }
 
 
-def _load_asr_history() -> list[dict]:
-    """读取本地 ASR 历史索引，损坏或不存在时返回空列表。"""
-    try:
-        data = json.loads(ASR_HISTORY_INDEX_PATH.read_text(encoding="utf-8"))
-        records = data.get("records", []) if isinstance(data, dict) else []
-        return [item for item in records if isinstance(item, dict)]
-    except (json.JSONDecodeError, OSError):
-        return []
+_ASR_ACTIVE_STATUSES = ("uploading", "queued", "processing", "transcribing")
+# 允许由业务代码更新的列，防止拼接 SQL 时混入任意列名
+_ASR_UPDATABLE_COLUMNS = {
+    "name", "duration", "chunks", "text_length", "status", "progress", "progress_detail",
+    "error", "transcript", "extraction",
+}
 
 
-def _write_asr_history(records: list[dict]):
-    """原子写入 ASR 历史索引。"""
-    ASR_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=str(ASR_HISTORY_DIR), suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as output:
-            json.dump({"records": records}, output, ensure_ascii=False, indent=2)
-        os.replace(temp_path, ASR_HISTORY_INDEX_PATH)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+def _asr_request_owner(request: Request) -> str:
+    """读取当前登录账号作为 ASR 记录归属；中间件已拦截未登录请求，这里仍做兜底。"""
+    session = request.scope.get("session")
+    username = current_username(session) if isinstance(session, dict) else None
+    if not username:
+        raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return username
 
 
 def _asr_history_snapshot(record: dict) -> dict:
@@ -2149,79 +2144,67 @@ def _asr_history_snapshot(record: dict) -> dict:
         "progress": max(0, min(100, round(progress))),
         "progress_detail": record.get("progress_detail") or "",
         "error": record.get("error"),
-        "has_extraction": bool(record.get("extraction_file")),
+        "has_extraction": record.get("extraction") is not None,
     }
 
 
-def _asr_history_snapshots() -> list[dict]:
-    """按上传时间倒序返回历史记录摘要。"""
-    with _asr_history_lock:
-        records = _load_asr_history()
-    records.sort(key=lambda item: item.get("uploaded_at") or 0, reverse=True)
-    return [_asr_history_snapshot(record) for record in records]
+def _asr_history_snapshots(owner: str) -> list[dict]:
+    """按上传时间倒序返回指定账号的历史记录摘要（不读取全文列）。"""
+    with database.connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, original_filename, uploaded_at, duration, chunks, text_length, status, progress, "
+            "progress_detail, error, extraction IS NOT NULL AS has_extraction "
+            "FROM asr_records WHERE owner = ? ORDER BY uploaded_at DESC",
+            (owner,),
+        ).fetchall()
+    snapshots = []
+    for row in rows:
+        record = dict(row)
+        record["extraction"] = "" if record.pop("has_extraction") else None
+        snapshots.append(_asr_history_snapshot(record))
+    return snapshots
 
 
-def _create_asr_history_record(filename: str) -> dict:
-    """创建一个排队中的 ASR 历史记录；原始音频不进入历史目录。"""
+def _create_asr_history_record(filename: str, owner: str) -> dict:
+    """为指定账号创建一个上传中的 ASR 历史记录；原始音频只保存在任务目录。"""
     record_id = f"asr_{uuid.uuid4().hex}"
-    now = time.time()
-    name = Path(filename).stem.strip() or "未命名转写"
-    transcript_name = f"{record_id}.txt"
     record = {
         "id": record_id,
-        "name": name[:160],
+        "owner": owner,
+        "name": (Path(filename).stem.strip() or "未命名转写")[:160],
         "original_filename": filename,
-        "uploaded_at": now,
-        "duration": None,
-        "chunks": None,
-        "text_length": 0,
-        "transcript_file": transcript_name,
+        "uploaded_at": time.time(),
         "status": "uploading",
         "progress": 0,
         "progress_detail": "正在接收上传",
-        "error": None,
     }
-    with _asr_history_lock:
-        ASR_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-        records = _load_asr_history()
-        records.append(record)
-        _write_asr_history(records)
+    with database.connect() as conn:
+        conn.execute(
+            f"INSERT INTO asr_records({', '.join(record)}) VALUES ({', '.join('?' for _ in record)})",
+            tuple(record.values()),
+        )
     return _asr_history_snapshot(record)
 
 
 def _update_asr_history_record(record_id: str, changes: dict) -> dict:
-    """更新一条 ASR 历史记录并返回摘要。"""
-    with _asr_history_lock:
-        records = _load_asr_history()
-        for record in records:
-            if record.get("id") == record_id:
-                record.update(changes)
-                _write_asr_history(records)
-                return _asr_history_snapshot(record)
-    raise HTTPException(status_code=404, detail="转写历史不存在")
+    """按记录 ID 更新一条 ASR 历史记录并返回摘要（后台任务调用，不校验归属）。"""
+    columns = [key for key in changes if key in _ASR_UPDATABLE_COLUMNS]
+    with database.connect() as conn:
+        if columns:
+            conn.execute(
+                f"UPDATE asr_records SET {', '.join(f'{key} = ?' for key in columns)} WHERE id = ?",
+                (*[changes[key] for key in columns], record_id),
+            )
+        row = conn.execute("SELECT * FROM asr_records WHERE id = ?", (record_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="转写历史不存在")
+    return _asr_history_snapshot(dict(row))
 
 
 def _complete_asr_history_record(record_id: str, result: dict) -> dict:
     """保存完成后的全文并将历史记录改为已完成。"""
-    record = _find_asr_history_record(record_id)
-    transcript_name = Path(str(record.get("transcript_file") or "")).name
-    if not transcript_name:
-        raise RuntimeError("历史记录缺少转写文本路径")
-    with _asr_history_lock:
-        ASR_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-        transcript_path = ASR_HISTORY_DIR / transcript_name
-        fd, temp_path = tempfile.mkstemp(dir=str(ASR_HISTORY_DIR), suffix=".txt.tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as output:
-                output.write(result["text"])
-            os.replace(temp_path, transcript_path)
-        except Exception:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
     return _update_asr_history_record(record_id, {
+        "transcript": result["text"],
         "duration": result["duration"],
         "chunks": result["chunks"],
         "text_length": len(result["text"]),
@@ -2233,7 +2216,7 @@ def _complete_asr_history_record(record_id: str, result: dict) -> dict:
 
 
 def _make_asr_progress_reporter(record_id: str):
-    """创建限流的任务进度写入器，避免 FFmpeg 高频输出造成频繁写盘。"""
+    """创建限流的任务进度写入器，避免 FFmpeg 高频输出造成频繁写库。"""
     last_status = None
     last_progress = -1
     last_detail = ""
@@ -2270,7 +2253,7 @@ def _make_asr_progress_reporter(record_id: str):
 
 
 def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir: Path):
-    """按队列执行一个转写任务，并将结果写回本地历史。"""
+    """按队列执行一个转写任务，并将结果写回数据库。"""
     with _asr_task_semaphore:
         report_progress = _make_asr_progress_reporter(record_id)
         completed = False
@@ -2301,39 +2284,31 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
 
 
 async def recover_interrupted_asr_tasks():
-    """扫描服务重启前未完成的任务，重新排队并等待 ASR 就绪。"""
+    """扫描服务重启前未完成的任务（不分账号），重新排队并等待 ASR 就绪。"""
     recoverable = []
-    with _asr_history_lock:
-        records = _load_asr_history()
-        for record in records:
-            if record.get("status") not in ("uploading", "queued", "processing", "transcribing"):
-                continue
-            record_id = str(record.get("id") or "")
-            if record.get("status") == "uploading":
-                record.update({
-                    "status": "error",
-                    "progress_detail": "上传中断",
-                    "error": "上传未完成，服务已重启；请重新上传原始文件",
-                })
-                continue
-            work_dir = ASR_JOB_DIR / record_id
-            suffix = _asr_upload_suffix(str(record.get("original_filename") or "audio"))
-            input_path = work_dir / f"audio{suffix}"
-            if record_id and input_path.is_file():
-                record.update({
-                    "status": "queued",
-                    "progress": 0,
-                    "progress_detail": "服务重启后继续等待转写队列",
-                    "error": None,
-                })
-                recoverable.append((record_id, input_path, work_dir))
+    with database.transaction() as conn:
+        rows = conn.execute(
+            f"SELECT id, status, original_filename FROM asr_records WHERE status IN ({', '.join('?' for _ in _ASR_ACTIVE_STATUSES)})",
+            _ASR_ACTIVE_STATUSES,
+        ).fetchall()
+        for row in rows:
+            record_id = str(row["id"] or "")
+            if row["status"] == "uploading":
+                changes = ("error", "上传中断", "上传未完成，服务已重启；请重新上传原始文件")
             else:
-                record.update({
-                    "status": "error",
-                    "progress_detail": "服务重启后未找到音频",
-                    "error": "服务重启后未找到音频，无法继续转写",
-                })
-        _write_asr_history(records)
+                work_dir = ASR_JOB_DIR / record_id
+                input_path = work_dir / f"audio{_asr_upload_suffix(str(row['original_filename'] or 'audio'))}"
+                if record_id and input_path.is_file():
+                    changes = ("queued", "服务重启后继续等待转写队列", None)
+                    recoverable.append((record_id, input_path, work_dir))
+                else:
+                    changes = ("error", "服务重启后未找到音频", "服务重启后未找到音频，无法继续转写")
+            status, detail, error = changes
+            conn.execute(
+                "UPDATE asr_records SET status = ?, progress = CASE WHEN ? = 'queued' THEN 0 ELSE progress END, "
+                "progress_detail = ?, error = ? WHERE id = ?",
+                (status, status, detail, error, record_id),
+            )
 
     for record_id, input_path, work_dir in recoverable:
         task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, record_id, {}, input_path, work_dir))
@@ -2342,67 +2317,61 @@ async def recover_interrupted_asr_tasks():
     return len(recoverable)
 
 
-def _find_asr_history_record(record_id: str) -> dict:
-    """按 ID 获取一条历史记录。"""
-    with _asr_history_lock:
-        for record in _load_asr_history():
-            if record.get("id") == record_id:
-                return record
-    raise HTTPException(status_code=404, detail="转写历史不存在")
+def _find_asr_history_record(record_id: str, owner: str | None = None) -> dict:
+    """按 ID 获取一条历史记录（含全文）；指定 owner 时只返回该账号的记录，否则与不存在一样 404。"""
+    with database.connect() as conn:
+        if owner is None:
+            row = conn.execute("SELECT * FROM asr_records WHERE id = ?", (record_id,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM asr_records WHERE id = ? AND owner = ?", (record_id, owner)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="转写历史不存在")
+    return dict(row)
 
 
-def _read_asr_history_text_file(record: dict, field: str, missing_detail: str) -> str:
-    """读取历史记录关联的文本文件，文件名始终限制在历史目录内。"""
-    filename = Path(str(record.get(field) or "")).name
-    if not filename:
+def _read_asr_history_text(record: dict, field: str, missing_detail: str) -> str:
+    """读取历史记录的全文或提取结果列。"""
+    value = record.get(field)
+    if value is None:
         raise HTTPException(status_code=404, detail=missing_detail)
-    try:
-        return (ASR_HISTORY_DIR / filename).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=404, detail=missing_detail) from exc
+    return str(value)
 
 
-def _get_asr_extraction_prompt() -> str:
-    """读取统一 AI 设置中的 ASR 信息提取提示词。"""
+def _get_asr_extraction_prompt(owner: str) -> str:
+    """读取账号的 ASR 信息提取提示词：管理员使用 ai_settings.json（也是全站默认值），其他账号未自定义时沿用默认值。"""
+    if owner != ADMIN_USERNAME:
+        custom = database.get_user_setting(owner, ASR_EXTRACTION_PROMPT_KEY)
+        if custom:
+            return custom
     return ai_settings.get_asr_extraction_prompt()
 
 
-def _save_asr_extraction_prompt(prompt: str) -> str:
-    """保存统一 AI 设置中的 ASR 信息提取提示词。"""
-    return ai_settings.save_asr_extraction_prompt(prompt)
+def _save_asr_extraction_prompt(owner: str, prompt: object) -> str:
+    """保存账号的 ASR 信息提取提示词；普通账号保存到数据库，互不影响。"""
+    if owner == ADMIN_USERNAME:
+        return ai_settings.save_asr_extraction_prompt(prompt)
+    value = ai_settings.normalize_asr_extraction_prompt(prompt)
+    database.set_user_setting(owner, ASR_EXTRACTION_PROMPT_KEY, value)
+    return value
 
 
 def _save_asr_extraction(record_id: str, text: str) -> dict:
-    """保存一条 ASR 信息提取结果，并更新历史索引。"""
-    filename = f"{record_id}.extracted.txt"
-    ASR_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    target_path = ASR_HISTORY_DIR / filename
-    fd, temp_path = tempfile.mkstemp(dir=str(ASR_HISTORY_DIR), suffix=".txt.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as output:
-            output.write(text)
-        os.replace(temp_path, target_path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
-    return _update_asr_history_record(record_id, {"extraction_file": filename})
+    """保存一条 ASR 信息提取结果。"""
+    return _update_asr_history_record(record_id, {"extraction": text})
 
 
-async def _extract_asr_history(record_id: str) -> tuple[dict, str]:
+async def _extract_asr_history(record_id: str, owner: str) -> tuple[dict, str]:
     """调用已配置的 OpenAI 兼容 API，提取 ASR 转写中的关键信息。"""
-    record = _find_asr_history_record(record_id)
+    record = _find_asr_history_record(record_id, owner)
     if (record.get("status") or "completed") != "completed":
         raise HTTPException(status_code=409, detail="仅已完成的转写可以提取信息")
-    source_text = _read_asr_history_text_file(record, "transcript_file", "转写文本不存在")
+    source_text = _read_asr_history_text(record, "transcript", "转写文本不存在")
     if not source_text.strip():
         raise HTTPException(status_code=400, detail="转写文本为空，无法提取")
 
     result = await ai_settings.chat_completion(
         [
-            {"role": "system", "content": _get_asr_extraction_prompt()},
+            {"role": "system", "content": _get_asr_extraction_prompt(owner)},
             {"role": "user", "content": f"请处理以下音频转写：\n\n{source_text}"},
         ],
         temperature=0.2,
@@ -2412,33 +2381,97 @@ async def _extract_asr_history(record_id: str) -> tuple[dict, str]:
     return snapshot, text
 
 
-def _delete_asr_history_record(record_id: str) -> dict:
-    """删除已结束的 ASR 历史记录及其保存的转写全文。"""
-    with _asr_history_lock:
-        records = _load_asr_history()
-        for index, record in enumerate(records):
-            if record.get("id") != record_id:
+def _delete_asr_history_record(record_id: str, owner: str) -> dict:
+    """删除指定账号已结束的 ASR 历史记录，并清理中断上传或失败任务保留的音频。"""
+    with database.transaction() as conn:
+        row = conn.execute("SELECT * FROM asr_records WHERE id = ? AND owner = ?", (record_id, owner)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="转写历史不存在")
+        if row["status"] in _ASR_ACTIVE_STATUSES:
+            raise HTTPException(status_code=409, detail="转写进行中，暂时不能删除")
+        conn.execute("DELETE FROM asr_records WHERE id = ?", (record_id,))
+    if re.fullmatch(r"asr_[0-9a-f]{32}", record_id):
+        shutil.rmtree(ASR_JOB_DIR / record_id, ignore_errors=True)
+    return _asr_history_snapshot(dict(row))
+
+
+def purge_asr_user(owner: str) -> int:
+    """删除账号时清理其全部 ASR 记录、任务音频与个人提示词。"""
+    with database.transaction() as conn:
+        ids = [row["id"] for row in conn.execute("SELECT id FROM asr_records WHERE owner = ?", (owner,))]
+        conn.execute("DELETE FROM asr_records WHERE owner = ?", (owner,))
+    for record_id in ids:
+        if re.fullmatch(r"asr_[0-9a-f]{32}", record_id):
+            shutil.rmtree(ASR_JOB_DIR / record_id, ignore_errors=True)
+    database.purge_owner_settings(owner)
+    return len(ids)
+
+
+def migrate_legacy_asr_storage() -> int:
+    """把旧版共享的 ASR 历史（records.json + 全文 txt）迁移进数据库，全部归属管理员账号。
+
+    同时把旧任务目录 model_manager/data/asr_jobs 移到根目录 data/asr_jobs；迁移完成后旧历史目录改名为
+    asr_history.migrated 留作备份。重复执行是安全的（已存在的记录 ID 会跳过）。
+    """
+    migrated = 0
+    if LEGACY_ASR_JOB_DIR.is_dir():
+        ASR_JOB_DIR.mkdir(parents=True, exist_ok=True)
+        for job in LEGACY_ASR_JOB_DIR.iterdir():
+            if not (ASR_JOB_DIR / job.name).exists():
+                shutil.move(str(job), str(ASR_JOB_DIR / job.name))
+        try:
+            LEGACY_ASR_JOB_DIR.rmdir()
+        except OSError:
+            pass
+    index_path = LEGACY_ASR_HISTORY_DIR / "records.json"
+    if not index_path.is_file():
+        return 0
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.exception("ASR 旧历史索引无法读取，跳过迁移")
+        return 0
+    records = data.get("records", []) if isinstance(data, dict) else []
+
+    def read_text(record: dict, field: str) -> str | None:
+        filename = Path(str(record.get(field) or "")).name
+        if not filename:
+            return None
+        try:
+            return (LEGACY_ASR_HISTORY_DIR / filename).read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    with database.transaction() as conn:
+        for record in records:
+            if not isinstance(record, dict) or not record.get("id"):
                 continue
-            if record.get("status") in {"uploading", "queued", "processing", "transcribing"}:
-                raise HTTPException(status_code=409, detail="转写进行中，暂时不能删除")
-            deleted_record = records.pop(index)
-            _write_asr_history(records)
-            transcript_name = Path(str(deleted_record.get("transcript_file") or "")).name
-            extraction_name = Path(str(deleted_record.get("extraction_file") or "")).name
-            for filename in (transcript_name, extraction_name):
-                if not filename:
-                    continue
-                try:
-                    (ASR_HISTORY_DIR / filename).unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError as exc:
-                    raise HTTPException(status_code=500, detail="历史记录已删除，但清理转写文本失败") from exc
-            # 删除历史时同步清理中断上传或失败任务保留的文件。
-            if re.fullmatch(r"asr_[0-9a-f]{32}", record_id):
-                shutil.rmtree(ASR_JOB_DIR / record_id, ignore_errors=True)
-            return _asr_history_snapshot(deleted_record)
-    raise HTTPException(status_code=404, detail="转写历史不存在")
+            progress = record.get("progress")
+            values = {
+                "id": str(record["id"]),
+                "owner": ADMIN_USERNAME,
+                "name": str(record.get("name") or "未命名转写")[:160],
+                "original_filename": str(record.get("original_filename") or ""),
+                "uploaded_at": float(record.get("uploaded_at") or 0),
+                "duration": record.get("duration"),
+                "chunks": record.get("chunks"),
+                "text_length": int(record.get("text_length") or 0),
+                "status": str(record.get("status") or "completed"),
+                "progress": progress if isinstance(progress, (int, float)) else 0,
+                "progress_detail": str(record.get("progress_detail") or ""),
+                "error": record.get("error"),
+                "transcript": read_text(record, "transcript_file"),
+                "extraction": read_text(record, "extraction_file"),
+            }
+            migrated += conn.execute(
+                f"INSERT OR IGNORE INTO asr_records({', '.join(values)}) VALUES ({', '.join('?' for _ in values)})",
+                tuple(values.values()),
+            ).rowcount
+    backup = LEGACY_ASR_HISTORY_DIR.with_name("asr_history.migrated")
+    if not backup.exists():
+        LEGACY_ASR_HISTORY_DIR.rename(backup)
+    logger.info("ASR 旧历史已迁移进数据库：%s 条，归属 %s", migrated, ADMIN_USERNAME)
+    return migrated
 
 
 # ── API 端点 ──────────────────────────────────────────────
@@ -2475,69 +2508,64 @@ async def generic_chat_page(pid: int):
 
 
 @app.get("/api/asr/history")
-async def get_asr_history():
-    """获取本地保存的 ASR 转写历史摘要。"""
-    return JSONResponse({"records": _asr_history_snapshots()})
+async def get_asr_history(request: Request):
+    """获取当前账号的 ASR 转写历史摘要。"""
+    return JSONResponse({"records": _asr_history_snapshots(_asr_request_owner(request))})
 
 
 @app.get("/api/asr/history/{record_id}/text")
-async def get_asr_history_text(record_id: str):
-    """读取一条本地 ASR 转写历史的全文。"""
-    record = _find_asr_history_record(record_id)
-    text = _read_asr_history_text_file(record, "transcript_file", "转写文本不存在")
+async def get_asr_history_text(record_id: str, request: Request):
+    """读取当前账号一条 ASR 转写历史的全文。"""
+    record = _find_asr_history_record(record_id, _asr_request_owner(request))
+    text = _read_asr_history_text(record, "transcript", "转写文本不存在")
     return JSONResponse({"record": _asr_history_snapshot(record), "text": text})
 
 
 @app.get("/api/asr/history/{record_id}/extraction")
-async def get_asr_history_extraction(record_id: str):
-    """读取一条 ASR 历史已保存的信息提取结果。"""
-    record = _find_asr_history_record(record_id)
-    text = _read_asr_history_text_file(record, "extraction_file", "尚未提取信息")
+async def get_asr_history_extraction(record_id: str, request: Request):
+    """读取当前账号一条 ASR 历史已保存的信息提取结果。"""
+    record = _find_asr_history_record(record_id, _asr_request_owner(request))
+    text = _read_asr_history_text(record, "extraction", "尚未提取信息")
     return JSONResponse({"record": _asr_history_snapshot(record), "text": text})
 
 
 @app.post("/api/asr/history/{record_id}/extraction")
-async def extract_asr_history(record_id: str):
-    """调用 OpenAI 兼容模型提取一条 ASR 转写的关键信息。"""
-    record, text = await _extract_asr_history(record_id)
+async def extract_asr_history(record_id: str, request: Request):
+    """调用 OpenAI 兼容模型提取当前账号一条 ASR 转写的关键信息。"""
+    record, text = await _extract_asr_history(record_id, _asr_request_owner(request))
     return JSONResponse({"ok": True, "record": record, "text": text})
 
 
 @app.patch("/api/asr/history/{record_id}")
-async def update_asr_history_name(record_id: str, body: dict = None):
-    """更新本地 ASR 历史记录名称。"""
+async def update_asr_history_name(record_id: str, request: Request, body: dict = None):
+    """更新当前账号 ASR 历史记录名称。"""
+    owner = _asr_request_owner(request)
     name = str((body or {}).get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="记录名称不能为空")
     if len(name) > 160:
         raise HTTPException(status_code=400, detail="记录名称不能超过 160 个字符")
-    with _asr_history_lock:
-        records = _load_asr_history()
-        for record in records:
-            if record.get("id") == record_id:
-                record["name"] = name
-                _write_asr_history(records)
-                return JSONResponse({"ok": True, "record": _asr_history_snapshot(record)})
-    raise HTTPException(status_code=404, detail="转写历史不存在")
+    _find_asr_history_record(record_id, owner)
+    return JSONResponse({"ok": True, "record": _update_asr_history_record(record_id, {"name": name})})
 
 
 @app.delete("/api/asr/history/{record_id}")
-async def delete_asr_history(record_id: str):
-    """删除一条已结束的本地 ASR 转写历史。"""
-    record = _delete_asr_history_record(record_id)
+async def delete_asr_history(record_id: str, request: Request):
+    """删除当前账号一条已结束的 ASR 转写历史。"""
+    record = _delete_asr_history_record(record_id, _asr_request_owner(request))
     return JSONResponse({"ok": True, "record": record})
 
 
 @app.get("/api/asr/extraction-settings")
-async def get_asr_extraction_settings():
-    """读取 ASR 信息提取提示词。"""
-    return JSONResponse({"prompt": _get_asr_extraction_prompt()})
+async def get_asr_extraction_settings(request: Request):
+    """读取当前账号的 ASR 信息提取提示词。"""
+    return JSONResponse({"prompt": _get_asr_extraction_prompt(_asr_request_owner(request))})
 
 
 @app.put("/api/asr/extraction-settings")
-async def update_asr_extraction_settings(body: dict = None):
-    """更新 ASR 信息提取提示词。"""
-    prompt = _save_asr_extraction_prompt((body or {}).get("prompt"))
+async def update_asr_extraction_settings(request: Request, body: dict = None):
+    """更新当前账号的 ASR 信息提取提示词。"""
+    prompt = _save_asr_extraction_prompt(_asr_request_owner(request), (body or {}).get("prompt"))
     return JSONResponse({"ok": True, "prompt": prompt})
 
 
@@ -2575,8 +2603,9 @@ async def transcribe_with_qwen3_asr(request: Request):
     if content_length > ASR_MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="音频文件不能超过 4 GB")
 
+    owner = _asr_request_owner(request)
     try:
-        history_record = _create_asr_history_record(filename)
+        history_record = _create_asr_history_record(filename, owner)
         work_dir = ASR_JOB_DIR / history_record["id"]
         work_dir.mkdir(parents=True, exist_ok=True)
         input_path = work_dir / f"audio{suffix}"
