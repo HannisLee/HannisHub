@@ -29,7 +29,7 @@ SETTINGS_PATH = ROOT_DIR / "settings.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "admins": None,  # None 表示最早创建的用户
-    "idle_timeout_hours": 6,
+    "idle_timeout_hours": 15,
     "max_sessions": 10,
     "shell": None,  # None 表示使用 $SHELL，回退 /bin/bash
     "scrollback_kb": 512,
