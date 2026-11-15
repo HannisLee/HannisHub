@@ -258,6 +258,32 @@ async function check(name, fn) {
     }
   });
 
+  await check("鼠标接管时开启文字选择模式可直接拖选和复制", async () => {
+    await page.bringToFront();
+    await page.click(".terminal-view:not([hidden]) .xterm-screen");
+    await typeLine(page, "printf 'MODE_TEST_COPY\\n\\033[?1000h\\033[?1006h'");
+    await page.locator(".terminal-view:not([hidden]) .xterm.enable-mouse-events").waitFor();
+    await page.getByRole("button", { name: "文字选择 关" }).click();
+    const box = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll(".terminal-view:not([hidden]) .xterm-rows > div"));
+      const rect = rows.find(r => r.textContent.trim() === "MODE_TEST_COPY").getBoundingClientRect();
+      return { x: rect.left, y: rect.top + rect.height / 2 };
+    });
+    await page.mouse.move(box.x + 2, box.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 120, box.y, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.press("Control+Shift+C");
+    await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())).includes("MODE_TEST_COPY"), 3000, "选择模式复制");
+    await page.evaluate(() => {
+      window.mouseEventsObserved = 0;
+      document.querySelector(".terminal-view:not([hidden]) .xterm").addEventListener("mousedown", e => { if (e.button === 0) window.mouseEventsObserved++; });
+    });
+    await page.getByRole("button", { name: "文字选择 开" }).click();
+    await page.mouse.click(box.x + 40, box.y);
+    assert.equal(await page.evaluate(() => window.mouseEventsObserved), 1, "关闭后鼠标事件应到达终端");
+  });
+
   await page.evaluate(async () => {
     const r = await fetch("/api/terminal/sessions"); const d = await r.json();
     for (const s of d.sessions) await fetch(`/api/terminal/sessions/${s.id}`, { method: "DELETE" });

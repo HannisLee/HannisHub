@@ -63,6 +63,7 @@ export function TerminalWorkspace() {
   const [loaded, setLoaded] = useState(false);
   const [activeId, setActiveIdState] = useState<string | null>(null);
   const [connected, setConnected] = useState<Record<string, boolean>>({});
+  const [selectionModes, setSelectionModes] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -432,7 +433,7 @@ export function TerminalWorkspace() {
 
       <div className="terminal-stage">
         {sessions.map(session => (
-          <TerminalView key={session.id} sessionId={session.id} active={session.id === activeId} onEnded={onEnded} onActivity={onActivity} onStatus={onStatus} />
+          <TerminalView key={session.id} sessionId={session.id} active={session.id === activeId} selectionMode={!!selectionModes[session.id]} onEnded={onEnded} onActivity={onActivity} onStatus={onStatus} />
         ))}
         {loaded && sessions.length === 0 ? (
           <div className="terminal-empty">
@@ -447,6 +448,7 @@ export function TerminalWorkspace() {
           <span>PID {active.pid}</span>
           <span>{connected[active.id] ? "已连接" : "连接中…"}</span>
           <span>约 {formatRemaining(remaining)}后因无操作释放</span>
+          <button type="button" className="terminal-selection-toggle" aria-pressed={!!selectionModes[active.id]} title="开启后可直接拖选终端文字；关闭后鼠标操作交给终端程序" onClick={() => setSelectionModes(current => ({ ...current, [active.id]: !current[active.id] }))}>文字选择 {selectionModes[active.id] ? "开" : "关"}</button>
         </div>
       ) : null}
 

@@ -14,6 +14,7 @@ export type TerminalEndReason = "exit" | "released" | "closed" | "missing" | "fo
 interface TerminalViewProps {
   sessionId: string;
   active: boolean;
+  selectionMode: boolean;
   onEnded: (id: string, reason: TerminalEndReason) => void;
   onActivity: (id: string) => void;
   onStatus: (id: string, connected: boolean) => void;
@@ -59,11 +60,12 @@ function readTheme(): ITheme {
   };
 }
 
-export default function TerminalView({ sessionId, active, onEnded, onActivity, onStatus }: TerminalViewProps) {
+export default function TerminalView({ sessionId, active, selectionMode, onEnded, onActivity, onStatus }: TerminalViewProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string; message: string } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const rightClickSelection = useRef("");
+  const forwardingSelectionMouse = useRef(false);
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   // 回调放进 ref，避免父组件重渲染导致终端重建
@@ -84,6 +86,7 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: false,
+      macOptionClickForcesSelection: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -205,6 +208,19 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
   }, [menu]);
 
   return <div className="terminal-view" ref={hostRef} hidden={!active} onMouseDownCapture={event => {
+    if (forwardingSelectionMouse.current) return;
+    if (selectionMode && event.button === 0 && termRef.current?.modes.mouseTrackingMode !== "none" && event.target instanceof Element && event.target.closest(".xterm-screen")) {
+      // 利用 xterm 的强制选择机制，不更改终端程序的鼠标协议状态。
+      event.preventDefault();
+      event.stopPropagation();
+      rightClickSelection.current = "";
+      const original = event.nativeEvent;
+      forwardingSelectionMouse.current = true;
+      try {
+        event.target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window, detail: original.detail, screenX: original.screenX, screenY: original.screenY, clientX: original.clientX, clientY: original.clientY, button: original.button, buttons: original.buttons, shiftKey: true, altKey: /^Mac/.test(navigator.platform) }));
+      } finally { forwardingSelectionMouse.current = false; }
+      return;
+    }
     if (event.button !== 2) { rightClickSelection.current = ""; return; }
     const selection = window.getSelection();
     const nativeSelection = selection && hostRef.current?.contains(selection.anchorNode) && hostRef.current.contains(selection.focusNode) ? selection.toString() : "";
