@@ -1,7 +1,7 @@
 "use client";
 
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { API_PATHS } from "../../lib/api";
@@ -60,6 +60,7 @@ function readTheme(): ITheme {
 }
 
 export default function TerminalView({ sessionId, active, onEnded, onActivity, onStatus }: TerminalViewProps) {
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string; message: string } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -185,7 +186,7 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
 
   useEffect(() => {
     activeRef.current = active;
-    if (!active) return;
+    if (!active) { setMenu(null); return; }
     const frame = window.requestAnimationFrame(() => {
       fitRef.current?.fit();
       termRef.current?.focus();
@@ -193,5 +194,32 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
     return () => window.cancelAnimationFrame(frame);
   }, [active]);
 
-  return <div className="terminal-view" ref={hostRef} hidden={!active} />;
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = () => setMenu(null);
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { dismiss(); termRef.current?.focus(); } };
+    document.addEventListener("click", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
+  }, [menu]);
+
+  return <div className="terminal-view" ref={hostRef} hidden={!active} onContextMenuCapture={event => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: Math.max(0, Math.min(event.clientX, window.innerWidth - 180)), y: Math.max(0, Math.min(event.clientY, window.innerHeight - 130)), selection: termRef.current?.getSelection() || "", message: "" });
+  }}>
+    {menu ? <div className="terminal-context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} onContextMenu={event => event.preventDefault()}>
+      <button type="button" role="menuitem" disabled={!menu.selection} onClick={() => {
+        void copyToClipboard(menu.selection).then(copied => {
+          if (copied) { setMenu(null); termRef.current?.focus(); }
+          else setMenu(current => current && { ...current, message: "复制失败，请使用 Ctrl+Shift+C" });
+        });
+      }}>复制 <span>Ctrl+Shift+C</span></button>
+      <button type="button" role="menuitem" onClick={() => {
+        if (!navigator.clipboard?.readText) { setMenu(current => current && { ...current, message: "请使用 Ctrl+V 粘贴" }); return; }
+        void navigator.clipboard.readText().then(value => { termRef.current?.paste(value); setMenu(null); termRef.current?.focus(); }).catch(() => setMenu(current => current && { ...current, message: "请使用 Ctrl+V 粘贴" }));
+      }}>粘贴 <span>Ctrl+V</span></button>
+      {menu.message ? <p role="status">{menu.message}</p> : null}
+    </div> : null}
+  </div>;
 }

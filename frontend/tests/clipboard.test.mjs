@@ -28,9 +28,9 @@ test("终端粘贴快捷键交给浏览器原生粘贴", () => {
   assert.equal(clipboardShortcut({ ...key("м", { ctrlKey: true }), code: "KeyV" }, false), "paste");
 });
 
-test("Ctrl+C 只在有选中文字时复制，否则仍是中断信号", () => {
+test("Ctrl+C 始终是中断信号，复制使用其他快捷键", () => {
   assert.equal(clipboardShortcut(key("c", { ctrlKey: true }), false), null);
-  assert.equal(clipboardShortcut(key("c", { ctrlKey: true }), true), "copy");
+  assert.equal(clipboardShortcut(key("c", { ctrlKey: true }), true), null);
   assert.equal(clipboardShortcut(key("Insert", { ctrlKey: true }), true), "copy");
   assert.equal(clipboardShortcut(key("Insert", { ctrlKey: true }), false), null);
   assert.equal(clipboardShortcut(key("C", { ctrlKey: true, shiftKey: true }), false), "copy-command");

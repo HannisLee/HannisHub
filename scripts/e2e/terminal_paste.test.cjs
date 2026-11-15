@@ -176,23 +176,19 @@ async function check(name, fn) {
     assert.ok(!(await screen(page)).includes("SLEEP_NOT_42"), "sleep 没有被中断");
   });
 
-  await check("选中文字后 Ctrl+C 复制到剪贴板且不发送中断", async () => {
+  await check("选中文字后 Ctrl+C 仍中断前台程序", async () => {
     await page.keyboard.press("Control+L");
-    await typeLine(page, "printf 'COPY%sTARGET\\n' _ME_");
-    await waitFor(async () => (await screen(page)).includes("COPY_ME_TARGET"), 5000, "输出 COPY_ME_TARGET");
-    await setClipboard(page, "旧内容");
+    await typeLine(page, "printf 'SELECTED_INTERRUPT\\n'; sleep 30; echo SLEEP_NOT_$((40+2))");
+    await waitFor(async () => (await screen(page)).includes("SELECTED_INTERRUPT"), 5000, "终端输出");
     const box = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".terminal-view:not([hidden]) .xterm-rows > div"));
-      const row = rows.find(r => r.textContent.trim() === "COPY_ME_TARGET");
-      const rect = row.getBoundingClientRect();
-      return { x: rect.left, y: rect.top + rect.height / 2, w: rect.width };
+      const rect = rows.find(r => r.textContent.trim() === "SELECTED_INTERRUPT").getBoundingClientRect();
+      return { x: rect.left, y: rect.top + rect.height / 2 };
     });
     await page.mouse.dblclick(box.x + 20, box.y);
     await page.keyboard.press("Control+C");
-    await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())) === "COPY_ME_TARGET", 3000, "剪贴板内容为选中文字");
-    // 复制不应向 shell 发送 ^C：此时继续输入命令仍在同一行正常执行
-    await marker(page, "AFTER_COPY");
-    assert.ok(!(await screen(page)).includes("^C"), "复制时向 shell 发送了 ^C");
+    await marker(page, "SELECTED_INTERRUPTED");
+    assert.ok(!(await screen(page)).includes("SLEEP_NOT_42"));
   });
 
   await check("Ctrl+Shift+C 复制选中文字", async () => {
@@ -225,11 +221,11 @@ async function check(name, fn) {
     await waitFor(() => fileText(`${OUT}/insecure.txt`) === "insecure-paste-ok\n", 5000, "非安全上下文粘贴结果");
   });
 
-  await check("非安全上下文下选中文字可用 Ctrl+C 和 Ctrl+Shift+C 复制", async () => {
+  await check("非安全上下文下选中文字可用 Ctrl+Shift+C 和右键菜单复制", async () => {
     const p = insecure.page;
     await typeLine(p, "printf 'LAN%sCOPY\\n' _TEST_");
     await waitFor(async () => (await screen(p)).includes("LAN_TEST_COPY"), 5000, "终端输出");
-    for (const shortcut of ["Control+C", "Control+Shift+C"]) {
+    for (const shortcut of ["Control+Shift+C", "contextmenu"]) {
       await page.bringToFront();
       await setClipboard(page, "旧内容");
       await p.bringToFront();
@@ -239,7 +235,10 @@ async function check(name, fn) {
         return { x: rect.left, y: rect.top + rect.height / 2 };
       });
       await p.mouse.dblclick(box.x + 20, box.y);
-      await p.keyboard.press(shortcut);
+      if (shortcut === "contextmenu") {
+        await p.mouse.click(box.x + 20, box.y, { button: "right" });
+        await p.getByRole("menuitem", { name: /复制/ }).click();
+      } else await p.keyboard.press(shortcut);
       await page.bringToFront();
       await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())) === "LAN_TEST_COPY", 3000, shortcut);
     }

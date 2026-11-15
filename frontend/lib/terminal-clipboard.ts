@@ -10,7 +10,7 @@ export type ClipboardShortcut = "paste" | "copy" | "copy-command" | null;
  * 浏览器因此不会触发 paste 事件——这就是 Windows 浏览器无法粘贴的原因。这里把粘贴、复制快捷键
  * 让回给浏览器，由原生 paste 事件完成。复制则直接读取 xterm 选区，兼容 HTTP 局域网访问。
  * - Ctrl+V、Ctrl+Shift+V、Shift+Insert：粘贴
- * - Ctrl+C（有选中文字时）、Ctrl+Insert：复制；没有选中时 Ctrl+C 仍发送中断信号
+ * - Ctrl+C 始终发送中断信号；Ctrl+Insert 在有选中文字时复制
  * - Ctrl+Shift+C：复制（浏览器默认会打开开发者工具，始终阻止默认行为后主动触发复制）
  */
 export function clipboardShortcut(event: Pick<KeyboardEvent, "type" | "key" | "code" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey" | "isComposing">, hasSelection: boolean): ClipboardShortcut {
@@ -23,7 +23,7 @@ export function clipboardShortcut(event: Pick<KeyboardEvent, "type" | "key" | "c
   if (mod && !event.shiftKey && key === "insert") return hasSelection ? "copy" : null;
   if (mod && isKey("c")) {
     if (event.shiftKey) return "copy-command";
-    return hasSelection ? "copy" : null;
+    return event.metaKey && hasSelection ? "copy" : null;
   }
   return null;
 }
