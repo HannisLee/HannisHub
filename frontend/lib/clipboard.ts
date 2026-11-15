@@ -25,7 +25,7 @@ function legacyCopyText(value: string): boolean {
 /** 复制文本，返回是否成功。 */
 export function copyToClipboard(value: string): Promise<boolean> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(value).then(() => true).catch(() => false);
+    return navigator.clipboard.writeText(value).then(() => true).catch(() => legacyCopyText(value));
   }
   return Promise.resolve(legacyCopyText(value));
 }

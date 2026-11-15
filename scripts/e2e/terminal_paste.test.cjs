@@ -225,6 +225,26 @@ async function check(name, fn) {
     await waitFor(() => fileText(`${OUT}/insecure.txt`) === "insecure-paste-ok\n", 5000, "非安全上下文粘贴结果");
   });
 
+  await check("非安全上下文下选中文字可用 Ctrl+C 和 Ctrl+Shift+C 复制", async () => {
+    const p = insecure.page;
+    await typeLine(p, "printf 'LAN%sCOPY\\n' _TEST_");
+    await waitFor(async () => (await screen(p)).includes("LAN_TEST_COPY"), 5000, "终端输出");
+    for (const shortcut of ["Control+C", "Control+Shift+C"]) {
+      await page.bringToFront();
+      await setClipboard(page, "旧内容");
+      await p.bringToFront();
+      const box = await p.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll(".terminal-view:not([hidden]) .xterm-rows > div"));
+        const rect = rows.find(r => r.textContent.trim() === "LAN_TEST_COPY").getBoundingClientRect();
+        return { x: rect.left, y: rect.top + rect.height / 2 };
+      });
+      await p.mouse.dblclick(box.x + 20, box.y);
+      await p.keyboard.press(shortcut);
+      await page.bringToFront();
+      await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())) === "LAN_TEST_COPY", 3000, shortcut);
+    }
+  });
+
   await page.evaluate(async () => {
     const r = await fetch("/api/terminal/sessions"); const d = await r.json();
     for (const s of d.sessions) await fetch(`/api/terminal/sessions/${s.id}`, { method: "DELETE" });

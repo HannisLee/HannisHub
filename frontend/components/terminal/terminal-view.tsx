@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { API_PATHS } from "../../lib/api";
 import { clipboardShortcut } from "../../lib/terminal-clipboard";
+import { copyToClipboard } from "../../lib/clipboard";
 
 /** 终端结束原因：exit = shell 自己退出，released = 空闲回收，closed = 被关闭，missing = 已不存在 */
 export type TerminalEndReason = "exit" | "released" | "closed" | "missing" | "forbidden";
@@ -88,12 +89,12 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
     term.attachCustomKeyEventHandler(event => {
       const shortcut = clipboardShortcut(event, term.hasSelection());
       if (!shortcut) return true;
-      if (shortcut === "copy-command") {
+      if (shortcut === "copy" || shortcut === "copy-command") {
         event.preventDefault();
-        // 在按键手势内同步触发 copy 事件，由 xterm 的 copy 监听写入选中文字
-        if (term.hasSelection()) document.execCommand("copy");
+        // xterm 选区不是浏览器原生选区，直接复制其文本，兼容 HTTP 局域网访问。
+        if (term.hasSelection()) void copyToClipboard(term.getSelection());
       }
-      // 返回 false：xterm 不处理也不 preventDefault，浏览器继续触发原生 paste / copy
+      // 粘贴交给浏览器原生事件；复制已在上面处理。
       return false;
     });
     termRef.current = term;
