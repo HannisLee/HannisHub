@@ -50,6 +50,7 @@ export function OcrPanel() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   const selected = records.find(record => record.id === selectedId) || null;
   const ready = Boolean(process && health?.ready);
@@ -113,13 +114,20 @@ export function OcrPanel() {
 
   useEffect(() => () => { if (pendingUrl) URL.revokeObjectURL(pendingUrl); }, [pendingUrl]);
 
-  // Ctrl+V：剪贴板里有图片（截图、复制的图片）或文件时直接作为待解析文件；纯文字粘贴不拦截，输入框照常可用。
+  // Ctrl+V：剪贴板里有图片或文件时自动解析；纯文字粘贴不拦截。
   const chooseFileRef = useRef<(files: ArrayLike<File> | null) => void>(() => undefined);
   const uploadingRef = useRef(false);
+  const waitingForService = useRef(false);
+  const startParseRef = useRef<(file?: File) => Promise<void>>(async () => undefined);
   useEffect(() => {
     chooseFileRef.current = chooseFile;
-    uploadingRef.current = uploadProgress !== null;
+    startParseRef.current = startParse;
   });
+  useEffect(() => {
+    if (!ready || !pendingFile || !waitingForService.current) return;
+    waitingForService.current = false;
+    void startParseRef.current(pendingFile);
+  }, [ready, pendingFile]);
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
       const files = clipboardFiles(event.clipboardData);
@@ -135,6 +143,7 @@ export function OcrPanel() {
   function chooseFile(files: ArrayLike<File> | null) {
     const file = files?.[0];
     if (!file) return;
+    if (uploadingRef.current) { setError("正在上传，请等待完成后再选择新文件"); return; }
     if (!SUPPORTED_FORMATS.includes(extensionOf(file.name).toUpperCase())) {
       setError(`不支持该格式，请上传 ${SUPPORTED_FORMATS.join(" / ")} 文件`);
       return;
@@ -148,19 +157,32 @@ export function OcrPanel() {
     setPendingFile(file);
     setPendingUrl(URL.createObjectURL(file));
     setSelectedId("");
+    waitingForService.current = !ready && (task !== "vqa" || Boolean(question.trim()));
+    if (ready) void startParse(file);
+    else setNotice(waitingForService.current ? "等待 OCR 服务就绪后自动解析" : "请输入问题，服务就绪后点击重新解析");
   }
 
-  async function startParse() {
-    if (!pendingFile || uploadProgress !== null) return;
+  async function startParse(file?: File) {
+    if (uploadingRef.current || (!file && !pendingFile && !selected)) return;
+    if (!ready) { setError("OCR 服务未就绪"); return; }
     if (task === "vqa" && !question.trim()) { setError("请输入关于图像内容的问题"); return; }
     setError("");
     setNotice("");
+    uploadingRef.current = true;
     setUploadProgress(0);
     try {
+      let source = file || pendingFile;
+      if (!source && selected) {
+        const response = await fetch(`${API_PATHS.ocr}/records/${encodePath(selected.id)}/source`, { credentials: "include" });
+        if (!response.ok) throw new Error("无法读取原始文件，请重新选择文件");
+        const blob = await response.blob();
+        source = new File([blob], selected.filename, { type: blob.type });
+      }
+      if (!source) return;
       const params = new URLSearchParams({ task, fields: task === "kie" ? fields : "", question: task === "vqa" ? question : "" });
-      const data = await uploadBinary<{ record: OcrRecord }>(`${API_PATHS.ocr}/records?${params}`, pendingFile, {
-        "Content-Type": pendingFile.type || "application/octet-stream",
-        "x-file-name": encodeURIComponent(pendingFile.name),
+      const data = await uploadBinary<{ record: OcrRecord }>(`${API_PATHS.ocr}/records?${params}`, source, {
+        "Content-Type": source.type || "application/octet-stream",
+        "x-file-name": encodeURIComponent(source.name),
       }, setUploadProgress);
       setRecords(current => [data.record, ...current.filter(item => item.id !== data.record.id)]);
       setSelectedId(data.record.id);
@@ -170,11 +192,13 @@ export function OcrPanel() {
     } catch (value) {
       setError(errorMessage(value));
     } finally {
+      uploadingRef.current = false;
       setUploadProgress(null);
     }
   }
 
   function selectRecord(record: OcrRecord) {
+    waitingForService.current = false;
     setSelectedId(record.id);
     setPendingFile(null);
     setPendingUrl("");
@@ -187,6 +211,7 @@ export function OcrPanel() {
 
   /** 清除左栏文件与当前查看的记录，回到拖入上传状态。 */
   function clearSource() {
+    waitingForService.current = false;
     setPendingFile(null);
     setPendingUrl("");
     setSelectedId("");
@@ -230,6 +255,22 @@ export function OcrPanel() {
 
   const currentText = selected && resultText?.id === selected.id ? resultText.text : "";
   const jsonText = useMemo(() => selected ? JSON.stringify({ record: selected, content: currentText }, null, 2) : "", [selected, currentText]);
+
+  useEffect(() => {
+    function selectResult(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "a") return;
+      const result = resultRef.current;
+      const selection = window.getSelection();
+      if (!result || !selection || !(result.contains(document.activeElement) || (selection.anchorNode && result.contains(selection.anchorNode)))) return;
+      event.preventDefault();
+      const range = document.createRange();
+      range.selectNodeContents(result);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    document.addEventListener("keydown", selectResult);
+    return () => document.removeEventListener("keydown", selectResult);
+  }, []);
 
   async function copyResult() {
     try {
@@ -275,8 +316,8 @@ export function OcrPanel() {
           </div>
           {isPdfSelected && task !== "document" ? <span className="ocr-task-hint">PDF 会先逐页解析为 Markdown，再由「设置 · AI 能力」中当前启用的模型{task === "kie" ? "提取字段" : "回答问题"}</span> : null}
           <div className="ocr-run-actions">
-            <Button variant="secondary" onClick={() => inputRef.current?.click()}>↑ 上传文件</Button>
-            <Button onClick={() => void startParse()} disabled={!pendingFile || uploadProgress !== null || !ready} title={!ready ? "OCR 服务未就绪" : undefined}>{uploadProgress !== null ? `上传中 ${uploadProgress}%` : "开始解析 ↗"}</Button>
+            <Button variant="secondary" onClick={() => inputRef.current?.click()} disabled={uploadProgress !== null}>↑ 上传文件</Button>
+            <Button onClick={() => void startParse()} disabled={(!pendingFile && !selected) || uploadProgress !== null || !ready} title={!ready ? "OCR 服务未就绪" : undefined}>{uploadProgress !== null ? `上传中 ${uploadProgress}%` : "重新解析 ↗"}</Button>
           </div>
         </div>
         {task === "kie" ? <label className="ocr-task-input"><span>想提取哪些字段？<small>逗号分隔，留空提取主要信息</small></span><input value={fields} onChange={event => setFields(event.target.value)} placeholder="例如：日期、商户、总额、税额" maxLength={500} /></label> : null}
@@ -299,10 +340,10 @@ export function OcrPanel() {
             >
               {sourceUrl ? sourceIsPdf
                 ? <iframe title={`${sourceName} 预览`} src={sourceUrl} />
-                : <button className="ocr-source-image" type="button" onClick={() => void startParse()} disabled={!pendingFile || !ready} title={pendingFile ? "点击开始解析" : sourceName}>
+                : <div className="ocr-source-image" title={sourceName}>
                   {/* eslint-disable-next-line @next/next/no-img-element -- 本地预览与受保护接口图片无需 Next 图片优化 */}
                   <img src={sourceUrl} alt={sourceName} />
-                </button>
+                </div>
                 : <div className="upload-drop ocr-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); inputRef.current?.click(); } }}>
                   <span className="upload-mark">↑</span>
                   <strong>拖入文档、Ctrl+V 粘贴图片，或点击选择文件</strong>
@@ -312,7 +353,7 @@ export function OcrPanel() {
             </div>
             <div className="ocr-pane-foot">
               <span title={sourceName}>{sourceName || "选择文件"}</span>
-              <span>{pendingFile ? `${formatBytes(pendingFile.size)} · ${ready ? "准备就绪，点击开始解析" : "等待 OCR 服务就绪"}` : selected ? `${formatBytes(selected.size)} · ${TASK_LABELS[selected.task]}` : "准备就绪"}</span>
+              <span>{pendingFile ? `${formatBytes(pendingFile.size)} · ${uploadProgress !== null ? "正在上传" : ready ? "请点击重新解析" : "等待 OCR 服务就绪"}` : selected ? `${formatBytes(selected.size)} · ${TASK_LABELS[selected.task]}` : "准备就绪"}</span>
             </div>
           </div>
 
@@ -331,12 +372,12 @@ export function OcrPanel() {
               <span>Markdown · LaTeX · 表格</span>
             </div>
             <div className="ocr-result-body">
-              {!selected ? <div className="ocr-result-empty"><h2>信息，跃然纸上</h2><p>选择一份文档，点击「开始解析」，在这里查看可复制、可下载的结果。</p><div className="ocr-format-tags"><span>文字</span><span>表格</span><span>公式</span></div></div>
+              {!selected ? <div className="ocr-result-empty"><h2>信息，跃然纸上</h2><p>选择、拖入或粘贴文档后自动解析，在这里查看可复制、可下载的结果。</p><div className="ocr-format-tags"><span>文字</span><span>表格</span><span>公式</span></div></div>
                 : selected.status === "error" ? <div className="ocr-result-empty"><Badge tone="error">识别失败</Badge><p>{selected.error || "未知错误"}</p></div>
                 : selected.status !== "completed" ? <div className="ocr-result-empty"><p>{selected.progress_detail || "正在识别…"}</p><ProgressBar value={selected.progress || 0} /></div>
                 : !currentText ? <div className="ocr-result-empty"><p>正在读取结果…</p></div>
-                : view === "pretty" ? <OcrResultView text={currentText} />
-                : <pre className="ocr-code">{view === "json" ? jsonText : currentText}</pre>}
+                : <div ref={resultRef} tabIndex={0} aria-label="识别结果内容">{view === "pretty" ? <OcrResultView text={currentText} />
+                : <pre className="ocr-code">{view === "json" ? jsonText : currentText}</pre>}</div>}
             </div>
             <div className="ocr-pane-foot">
               <span>{selected?.warning || (selected?.status === "completed" ? `${(selected.chars || 0).toLocaleString()} 字符` : "选择文件，或从下方记录中查看")}</span>

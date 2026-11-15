@@ -190,7 +190,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 输入写入：`input` 先追加到会话的待写缓冲，以 4 KB 为块非阻塞写入 PTY；PTY 输入缓冲写满时注册 `loop.add_writer`，等可写时继续，绝不在事件循环里等待。大段粘贴期间 Hub 其他请求与终端输出照常处理；待写积压超过 16 MB（shell 长时间不读输入）时丢弃新输入。
 - 顶部命令条：命令组保存名称（最多 40 字）与 1–20 条命令（单条最多 2,000 字，按账号隔离存 SQLite `terminal_command_groups`，每账号最多 50 组）。点击后后端创建以命令组名命名的 PTY 会话，并通过同一非阻塞输入路径按原顺序写入命令。右上白色「新建」按钮打开非模态、可拖动的浮动配置框，可在终端执行并确认结果后直接复制命令逐行填写；「管理」按钮打开另一个同样可拖动的浮动管理框，集中修改 / 删除命令组。命令胶囊使用红色文字与红色细边框，名称完整展示、横向滚动，不截断、不显示命令数量。
 - 终端底部提供「文字选择」开关，默认关闭，每个会话在当前页面独立保持。开启后，即使终端程序接管鼠标，也可直接拖选文字并复制；关闭后鼠标操作交给终端程序。
-- 剪贴板（`frontend/lib/terminal-clipboard.ts` + xterm `attachCustomKeyEventHandler`）：Ctrl+V、Ctrl+Shift+V、Shift+Insert 交给浏览器原生粘贴，兼容 HTTP 局域网访问；Ctrl+C 始终发送中断信号，选中文本后可用 Ctrl+Shift+C 或右键菜单复制，Ctrl+Insert 与 macOS Cmd+C 也可复制。右键菜单在右键按下时保存选区；菜单粘贴受浏览器权限限制时提示使用 Ctrl+V。粘贴遵循 bracketed paste，Windows 剪贴板的 CRLF 换行由 xterm 转为回车；输入法组字与 AltGr 组合不拦截。
+- 剪贴板（`frontend/lib/terminal-clipboard.ts` + xterm `attachCustomKeyEventHandler`）：Ctrl+V、Ctrl+Shift+V、Shift+Insert 交给浏览器原生粘贴，兼容 HTTP 局域网访问；Ctrl+C 始终发送中断信号，选中文本后可用 Ctrl+Shift+C 或右键菜单复制，Ctrl+Insert 与 macOS Cmd+C 也可复制。右键菜单在右键按下时保存选区。粘贴遵循 bracketed paste，Windows 剪贴板的 CRLF 换行由 xterm 转为回车；输入法组字与 AltGr 组合不拦截。
 - 端到端测试：`scripts/e2e/launch_test_hub.py` 以临时 settings、临时数据库、关闭 lifespan 启动测试 Hub，`scripts/e2e/terminal_paste.test.cjs` 用 Playwright 模拟 Windows 浏览器（`navigator.platform = Win32`）验证上述快捷键、多行 CRLF / 中文 / emoji 粘贴逐字一致、bracketed paste、2 MB 大段粘贴完整且 Hub 保持响应，以及非安全上下文下的粘贴
 - 配置（根 `settings.json`，均可省略）：`"terminal": {"idle_timeout_hours": 15, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
 
@@ -936,7 +936,7 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 模型和视觉投影器存于 `/home/lihan/models/Xiaomi-OCR-0/`，官方仓库存于 `/home/lihan/run/Xiaomi-OCR-0/`。整页、公式和问答使用官方服务层；区域解析需要另装可选依赖。
 - 通过推理服务的 Open 独立打开小米 OCR 工作台时默认将页面放大至 125%，浏览器仍可自行调整缩放。
 
-- 统一前端 `/llama/ocr` 不再嵌入官方工作台，改为 `frontend/components/llama/ocr-panel.tsx` 自研页面，保留官方交互结构：顶部任务切换（文档解析 / 字段提取 / 图像问答，后两者分别显示字段与问题输入框）与「上传文件 / 开始解析」按钮，下方左右两栏「01 原始文档 / 02 识别结果」。左栏未选文件时为拖入上传区，并以标签展示支持格式（PNG / JPG / JPEG / WEBP / BMP / PDF，单文件 ≤ 50 MB）；选中后预览图片或 PDF，点击图片或「开始解析」提交。右栏提供 预览 / 原文 / JSON 视图与复制、下载（.md / .json）。已移除官方页面的 OCR 服务卡片、首屏标语、样例区与底部社区区块；服务状态与「启动服务」按钮移到页头右侧。
+- 统一前端 `/llama/ocr` 不再嵌入官方工作台，改为 `frontend/components/llama/ocr-panel.tsx` 自研页面：顶部切换文档解析 / 字段提取 / 图像问答，后两者分别显示字段与问题输入框；通过选择、拖入或粘贴文件自动上传解析，服务尚未就绪时等待服务就绪，图像问答须先填写问题。顶部「重新解析」可按当前任务参数重新解析当前文件或历史记录的原文件，并生成新记录。左栏预览图片或 PDF，支持 PNG / JPG / JPEG / WEBP / BMP / PDF（单文件 ≤ 50 MB）；右栏提供预览 / 原文 / JSON 视图与复制、下载（.md / .json），在结果内容中按 Ctrl+A 或 Command+A 只选中当前视图的结果。服务状态与「启动服务」按钮位于页头右侧。
 - 结果预览由 `ocr-result.tsx` 渲染：支持标题、段落、列表、管道表格、`$$` 公式块、PDF 分页标记，模型输出的 HTML 表格经 DOMParser 只提取单元格文本与合并属性后用 React 渲染，不注入原始 HTML；字段提取的 JSON 结果格式化显示。
 - PDF 选择字段提取或图像问答时走两段链路：先按 PDF 文档解析链路得到整份 Markdown（进度占 0–90%，中间结果保存为记录目录下 `parsed.md`），再把 Markdown 交给「设置 · AI 能力」当前启用的 OpenAI 兼容模型（`ai_settings.chat_completion`，temperature 0.1）完成字段提取（只输出 JSON，未找到的字段为 null，自动去掉代码块标记）或问答（只依据文档回答，未提及时明确说明）；解析结果超过 20 万字符或文本模型调用失败时记录标记失败并给出原因。图片的三种任务与 PDF 文档解析仍直接调用小米 OCR。页面不再禁用 PDF 的字段提取 / 图像问答，选中时在任务切换旁说明该链路，记录列表标注「先解析后文本处理」。
 - 识别由 Hub 后端 `model_manager/ocr_records.py` 在后台调用受管 OCR 实例（`model_manager.app.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注失败页码；全部页面失败时记录标记为失败并显示首个原因。全局最多 2 个任务并发，关闭页面不影响识别。
