@@ -63,6 +63,7 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string; message: string } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const rightClickSelection = useRef("");
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   // 回调放进 ref，避免父组件重渲染导致终端重建
@@ -203,10 +204,19 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
     return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
   }, [menu]);
 
-  return <div className="terminal-view" ref={hostRef} hidden={!active} onContextMenuCapture={event => {
+  return <div className="terminal-view" ref={hostRef} hidden={!active} onMouseDownCapture={event => {
+    if (event.button !== 2) { rightClickSelection.current = ""; return; }
+    const selection = window.getSelection();
+    const nativeSelection = selection && hostRef.current?.contains(selection.anchorNode) && hostRef.current.contains(selection.focusNode) ? selection.toString() : "";
+    // 在 xterm 或浏览器处理右键之前保存选区，避免其被右键事件清除。
+    rightClickSelection.current = termRef.current?.getSelection() || nativeSelection;
+    event.stopPropagation();
+  }} onContextMenuCapture={event => {
     event.preventDefault();
     event.stopPropagation();
-    setMenu({ x: Math.max(0, Math.min(event.clientX, window.innerWidth - 180)), y: Math.max(0, Math.min(event.clientY, window.innerHeight - 130)), selection: termRef.current?.getSelection() || "", message: "" });
+    const selection = rightClickSelection.current || termRef.current?.getSelection() || "";
+    rightClickSelection.current = "";
+    setMenu({ x: Math.max(0, Math.min(event.clientX, window.innerWidth - 180)), y: Math.max(0, Math.min(event.clientY, window.innerHeight - 130)), selection, message: "" });
   }}>
     {menu ? <div className="terminal-context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} onContextMenu={event => event.preventDefault()}>
       <button type="button" role="menuitem" disabled={!menu.selection} onClick={() => {

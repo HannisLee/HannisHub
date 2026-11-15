@@ -234,9 +234,23 @@ async function check(name, fn) {
         const rect = rows.find(r => r.textContent.trim() === "LAN_TEST_COPY").getBoundingClientRect();
         return { x: rect.left, y: rect.top + rect.height / 2 };
       });
-      await p.mouse.dblclick(box.x + 20, box.y);
       if (shortcut === "contextmenu") {
-        await p.mouse.click(box.x + 20, box.y, { button: "right" });
+        const cell = await p.evaluate(() => {
+          const row = document.querySelector(".terminal-view:not([hidden]) .xterm-rows > div");
+          const style = getComputedStyle(row);
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          ctx.font = `${style.fontSize} ${style.fontFamily}`;
+          return ctx.measureText("M").width;
+        });
+        await p.mouse.move(box.x + 2, box.y);
+        await p.mouse.down();
+        await p.mouse.move(box.x + cell * 13.2, box.y, { steps: 10 });
+        await p.mouse.up();
+      } else await p.mouse.dblclick(box.x + 20, box.y);
+      if (shortcut === "contextmenu") {
+        await p.mouse.click(box.x + 160, box.y, { button: "right" });
+        assert.equal(await p.getByRole("menuitem", { name: /复制/ }).isEnabled(), true, "选中后右键复制应可用");
         await p.getByRole("menuitem", { name: /复制/ }).click();
       } else await p.keyboard.press(shortcut);
       await page.bringToFront();
