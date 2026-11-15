@@ -194,7 +194,16 @@ def _detect_command_cwd(command: str) -> str:
 
 
 def _key_path(item: dict) -> str:
-    return str(Path(str(item.get("private_key_path") or "")).expanduser())
+    """返回私钥路径；项目目录迁移后旧绝对路径失效时，回退到本项目管理的同名密钥。"""
+    text = str(item.get("private_key_path") or "").strip()
+    if not text:
+        return ""
+    path = Path(text).expanduser()
+    if not path.is_file() and item.get("id"):
+        managed, _ = _managed_key_paths(str(item["id"]))
+        if managed.is_file():
+            return str(managed)
+    return str(path)
 
 
 def _open_ssh_client(item: dict):
@@ -258,7 +267,7 @@ def _system_ssh_command(item: dict, command: str) -> tuple[list[str], dict[str, 
         "ssh", "-p", str(item["port"]), "-o", "ConnectTimeout=12",
         "-o", "StrictHostKeyChecking=accept-new",
     ]
-    if item["auth_type"] == "key":
+    if item["auth_type"] == "key" and _key_path(item):
         args += ["-i", _key_path(item)]
     if item["auth_type"] == "password":
         if not shutil_which("sshpass"):
@@ -1352,6 +1361,11 @@ async def update_connection(connection_id: str, body: dict):
     settings = _read_settings()
     settings["connections"][connection_id] = item
     _write_settings(settings)
+    try:
+        from server.remote_files import drop_connection
+        drop_connection(connection_id)
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "connection": _connection_public(item)})
 
 
@@ -1365,6 +1379,11 @@ async def delete_connection(connection_id: str):
         raise HTTPException(status_code=409, detail="该服务器仍有定时任务，请先删除任务")
     deleted = settings["connections"].pop(connection_id)
     _write_settings(settings)
+    try:
+        from server.remote_files import drop_connection
+        drop_connection(connection_id)
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "connection": _connection_public(deleted)})
 
 

@@ -57,7 +57,8 @@ export const navigation: NavGroup[] = [
       { href: "/settings", label: "AI 能力", icon: "settings" },
       { href: "/settings/users", label: "用户管理", icon: "users" },
       { href: "/files", label: "文件游览", icon: "files" },
-      { href: "/files/server", label: "服务器文件", title: "服务器文件", icon: "downloads" },
+      // 服务器文件已整合进文件游览顶部的服务器连接切换栏，侧栏入口隐藏
+      // { href: "/files/server", label: "服务器文件", title: "服务器文件", icon: "downloads" },
       { href: "/files/documents", label: "文档查看", icon: "documents" },
       // 点云预览暂时从侧栏隐藏，页面与组件代码保留，取消注释即可恢复
       // { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },

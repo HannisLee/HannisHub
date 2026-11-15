@@ -20,6 +20,7 @@ interface ChunkedUploadOptions {
   relativePath: string;
   file: File;
   overwrite: boolean;
+  connectionId?: string;
   /** 已确认写入及正在传输的字节数之和 */
   onProgress: (loadedBytes: number) => void;
 }
@@ -35,13 +36,26 @@ function wait(ms: number): Promise<void> {
 }
 
 /** 分片并发上传单个文件：创建会话 → 并发写入各分片（失败自动重试）→ 服务端合并。 */
-export async function uploadFileInChunks({ rootIndex, directory, relativePath, file, overwrite, onProgress }: ChunkedUploadOptions): Promise<FileManagerUploadResponse> {
-  const params = new URLSearchParams({ root: String(rootIndex), path: directory });
-  const session = await apiFetch<UploadInitResponse>(`${API_PATHS.fileManager}/uploads?${params}`, {
+export async function uploadFileInChunks({
+  rootIndex,
+  directory,
+  relativePath,
+  file,
+  overwrite,
+  connectionId,
+  onProgress,
+}: ChunkedUploadOptions): Promise<FileManagerUploadResponse> {
+  const isRemote = Boolean(connectionId && connectionId !== "local");
+  const initUrl = isRemote
+    ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId!)}/uploads?${new URLSearchParams({ path: directory })}`
+    : `${API_PATHS.fileManager}/uploads?${new URLSearchParams({ root: String(rootIndex), path: directory })}`;
+  const session = await apiFetch<UploadInitResponse>(initUrl, {
     method: "POST",
     body: jsonBody({ file_path: relativePath, size: file.size, chunk_size: UPLOAD_CHUNK_BYTES, overwrite }),
   });
-  const base = `${API_PATHS.fileManager}/uploads/${encodeURIComponent(session.upload_id)}`;
+  const base = isRemote
+    ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId!)}/uploads/${encodeURIComponent(session.upload_id)}`
+    : `${API_PATHS.fileManager}/uploads/${encodeURIComponent(session.upload_id)}`;
   const inflight = new Map<number, number>();
   let confirmedBytes = 0;
   const report = () => onProgress(confirmedBytes + [...inflight.values()].reduce((sum, value) => sum + value, 0));

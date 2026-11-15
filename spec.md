@@ -163,12 +163,12 @@ HannisHub/
 | `frontend/components/terminal/` | 网页终端：顶部小高度命令条（已存状态、一键执行、白色新建按钮、管理浮动框与命令配置浮动框）、横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
-| `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
+| `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件；支持顶部常驻服务器连接切换条（本机与集群 SSH 连接快速切换、新建与管理连接）、常用目录（扫描目录）快速跳转与配置、内网集群跳板大文件分片并发上传与流式下载 |
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化、导航与剪贴板工具（`clipboard.ts`） |
 
 API 客户端统一使用同源相对路径并携带 Cookie：Hub 为 `/api`，模型管理为 `/llama-manager/api`，Server 为 `/server/api`，提示词为 `/prompt/api`。开发模式下 `next.config.ts` 将这些路径重写到 `HANNISHUB_BACKEND_ORIGIN`（默认 `http://127.0.0.1:8081`）；生产环境直接由同一个 FastAPI 源站处理。请求返回 `401` 时客户端携带当前路径跳转到 `/login`。
 
-主导航侧栏分组顺序为：总览、聊天大厅（内含「聊天大厅」「聊天室」与「工位待办」三个入口）、提示词、模型管理、设置（内含 AI 能力、用户管理、文件游览、服务器文件、文档查看与终端）。每个分组标题可点击折叠或展开；分组顺序与组内条目顺序均可拖动调整，分组标题右侧提供拖动把手。这些布局状态全部保存在浏览器 `localStorage` 的 `hannishub_nav_layout`（`groupOrder`、`itemOrder`、`collapsedGroups`），与后端导航定义解耦，刷新或重新打开页面后保持；清除该键即恢复默认顺序与全部展开。侧栏整体收起为图标列时忽略分组折叠并暂停拖动排序。侧栏还支持手动展开与收起。桌面端收起后为 72px 宽的图标小格，导航文字与分组标题隐藏，改为图标列加分组分隔线，悬停时显示名称；开关按钮位于侧栏顶部的品牌行，使用面板图标并在展开态显示「收起」、收起态显示「展开」。收起状态写入浏览器 `localStorage`（键 `hannishub_sidebar_collapsed`），刷新与跨页面跳转后保持同一形态，不再根据页面路径自动收起；窄屏（≤767px）侧栏固定为抽屉形态，由顶栏按钮控制开合，顶栏按钮在桌面端隐藏以保持单一入口。
+主导航侧栏分组顺序为：总览、聊天大厅（内含「聊天大厅」「聊天室」与「工位待办」三个入口）、提示词、模型管理、设置（内含 AI 能力、用户管理、文件游览、文档查看与终端；原独立服务器文件已收敛进文件游览顶部的服务器连接切换栏）。每个分组标题可点击折叠或展开；分组顺序与组内条目顺序均可拖动调整，分组标题右侧提供拖动把手。这些布局状态全部保存在浏览器 `localStorage` 的 `hannishub_nav_layout`（`groupOrder`、`itemOrder`、`collapsedGroups`），与后端导航定义解耦，刷新或重新打开页面后保持；清除该键即恢复默认顺序与全部展开。侧栏整体收起为图标列时忽略分组折叠并暂停拖动排序。侧栏还支持手动展开与收起。桌面端收起后为 72px 宽的图标小格，导航文字与分组标题隐藏，改为图标列加分组分隔线，悬停时显示名称；开关按钮位于侧栏顶部的品牌行，使用面板图标并在展开态显示「收起」、收起态显示「展开」。收起状态写入浏览器 `localStorage`（键 `hannishub_sidebar_collapsed`），刷新与跨页面跳转后保持同一形态，不再根据页面路径自动收起；窄屏（≤767px）侧栏固定为抽屉形态，由顶栏按钮控制开合，顶栏按钮在桌面端隐藏以保持单一入口。
 
 浏览器标签标题跟随当前模块变化，格式为「模块名 · HannisHub」，模块名取自 `frontend/lib/navigation.ts` 导航项的 `title`（未设置时回退到 `label`，首页为「总览」、提示词页为「提示词」、点云页为「点云预览」）。这些页面都不显示页面内标题，识别入口统一由侧栏、Topbar 面包屑和浏览器标签提供。
 
@@ -273,6 +273,18 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | DELETE | `/api/ocr/records/{record_id}` | 删除已结束的记录及其原始文件与结果；进行中返回 409 |
 | GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
 | GET | `/api/file-manager/resource?root=<index>&path=<relative_path>` | 内联返回受限目录内的原始资源，供 Markdown 相对图片与附件链接加载 |
+| GET | `/api/file-manager/connections` | 读取文件管理可用的连接列表，包含本机与已保存的 SSH 集群服务器连接 |
+| GET | `/api/file-manager/common-directories` | 读取已保存的常用目录列表（统一相对用户目录 `~`） |
+| PUT | `/api/file-manager/common-directories` | 保存常用目录列表，仅允许相对用户目录路径，拒绝 `..` 越界与敏感绝对路径 |
+| GET | `/api/file-manager/remote/{connection_id}/directory?path=<path>` | 通过常驻 SFTP 通道浏览内网集群服务器用户目录 `~` 内的文件与子项 |
+| GET | `/api/file-manager/remote/{connection_id}/markdown?path=<path>` | 读取远程集群服务器上的单个 Markdown 文档（限制 3 MB 内） |
+| GET | `/api/file-manager/remote/{connection_id}/download?path=<path>` | 经本机跳板流式下载远程服务器用户目录内的普通文件（支持 HTTP Range 断点续传） |
+| GET | `/api/file-manager/remote/{connection_id}/resource?path=<path>` | 内联返回远程服务器上的原始静态资源（沙箱 CSP），供 Markdown 相对图片与附件加载 |
+| POST | `/api/file-manager/remote/{connection_id}/upload?path=<path>&overwrite=<bool>` | 以原始请求体上传小文件到远程服务器用户目录，文件相对路径放在 `x-file-path` 头 |
+| POST | `/api/file-manager/remote/{connection_id}/uploads?path=<path>` | 创建远程分片上传会话，在远端预分配临时文件，支持多片并发并发写入 |
+| PUT | `/api/file-manager/remote/{connection_id}/uploads/{upload_id}/chunks/{index}` | 写入远程分片，按偏移直接写入远端临时文件 |
+| POST | `/api/file-manager/remote/{connection_id}/uploads/{upload_id}/complete` | 远程分片全部到齐后在远端原子改名替换为目标文件 |
+| DELETE | `/api/file-manager/remote/{connection_id}/uploads/{upload_id}?reason=<text>` | 取消远程分片上传并清理远端临时文件 |
 | GET | `/api/point-clouds/file?root=<index>&path=<relative_path>` | 兼容旧版点云文件地址；新预览器直接使用文件管理下载接口，仍拒绝越界路径 |
 
 ### AI 能力设置

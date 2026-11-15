@@ -5,18 +5,28 @@ import { useRouter } from "next/navigation";
 import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import { UPLOAD_CHUNK_BYTES, uploadFileInChunks } from "../../lib/file-manager-upload";
-import { BROWSER_LOCATION_KEY, readBrowserLocation, fileUploadItems, collectDataTransferFiles, uploadableRelativePath, type FileUploadItem } from "../../lib/file-manager-browser";
+import {
+  BROWSER_LOCATION_KEY,
+  readBrowserLocation,
+  fileUploadItems,
+  collectDataTransferFiles,
+  uploadableRelativePath,
+  type FileUploadItem,
+} from "../../lib/file-manager-browser";
 import type {
+  FileConnection,
   FileManagerDirectoryResponse,
   FileManagerDatePlyResponse,
   FileManagerEntry,
-  FileManagerFavorite,
   FileManagerPlyResponse,
   FileManagerSyncResponse,
   FileManagerUploadResponse,
 } from "../../lib/types";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, PageHeader, ProgressBar } from "../ui/primitives";
 import { PointCloudViewer, type PointCloudSource } from "./point-cloud-viewer";
+import { FileConnectionBar } from "./file-connection-bar";
+
+const ACTIVE_CONN_KEY = "hannishub_file_active_connection";
 
 const POINT_CLOUD_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts", "las", "laz"]);
 const VIEWABLE_EXTENSIONS = new Set(["ply", "pcd", "xyz", "xyzn", "xyzrgb", "pts"]);
@@ -77,6 +87,14 @@ function selectedFile(rootIndex: number, path: string): SelectedFile {
 export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) {
   const router = useRouter();
   const pointCloudMode = mode === "point-cloud";
+
+  // 连接与常用目录
+  const [connections, setConnections] = useState<FileConnection[]>([
+    { id: "local", name: "本机", type: "local" },
+  ]);
+  const [activeConnectionId, setActiveConnectionId] = useState<string>("local");
+  const [commonDirectories, setCommonDirectories] = useState<string[]>([]);
+
   const [roots, setRoots] = useState<string[]>([]);
   const [resolvedRoots, setResolvedRoots] = useState<string[]>([]);
   const [selectedRootIndex, setSelectedRootIndex] = useState(0);
@@ -97,11 +115,6 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [sortAscending, setSortAscending] = useState(true);
   const [previewFiles, setPreviewFiles] = useState<[SelectedFile | null, SelectedFile | null]>([null, null]);
   const [activePreview, setActivePreview] = useState<0 | 1>(0);
-  const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
-  const [favoriteError, setFavoriteError] = useState("");
-  const [favoriteBusy, setFavoriteBusy] = useState(false);
-  const [editingId, setEditingId] = useState("");
-  const [editName, setEditName] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncTarget, setSyncTarget] = useState("all");
@@ -114,6 +127,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const [overwriteUploads, setOverwriteUploads] = useState(false);
   const [draggingUploads, setDraggingUploads] = useState(false);
   const [error, setError] = useState("");
+
   const requestId = useRef(0);
   const dateRequestId = useRef(0);
   const initialDateSearchStarted = useRef(false);
@@ -122,41 +136,106 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const uploadLock = useRef(false);
-  const currentDirectoryRef = useRef({ root: selectedRootIndex, path });
+  const currentDirectoryRef = useRef({ root: selectedRootIndex, path, conn: activeConnectionId });
 
-  const loadDirectory = useCallback(async (rootIndex: number, nextPath: string, refresh = false) => {
-    const currentRequest = ++requestId.current;
-    const key = `${rootIndex}:${nextPath}`;
-    const cached = directoryCache.current.get(key);
-    const cachedPly = pointCloudMode ? plyCache.current.get(key) : null;
-    if (!refresh && cached && cached.expires_at > Date.now() / 1000 && (!pointCloudMode || (cachedPly && cachedPly.expires_at > Date.now() / 1000))) {
-      setDirectory(cached);
-      if (pointCloudMode) setPlyFiles(cachedPly || null);
-      setLoading(false);
-      setError("");
-      return;
-    }
-    setLoading(true);
-    setDirectory(null);
-    if (pointCloudMode) setPlyFiles(null);
+  const isRemote = activeConnectionId !== "local";
+  const activeConnection = connections.find(c => c.id === activeConnectionId);
+
+  // 载入可用连接列表
+  const loadConnections = useCallback(async () => {
     try {
-      const separator = refresh ? "&refresh=true" : "";
-      const directoryRequest = apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?root=${rootIndex}&path=${encodeURIComponent(nextPath)}${separator}`);
-      const plyRequest = pointCloudMode ? apiFetch<FileManagerPlyResponse>(`${API_PATHS.fileManager}/ply-files?root=${rootIndex}&path=${encodeURIComponent(nextPath)}`) : Promise.resolve(null);
-      const [data, plyData] = await Promise.all([directoryRequest, plyRequest]);
-      if (currentRequest !== requestId.current) return;
-      directoryCache.current.set(key, data);
-      if (plyData) plyCache.current.set(key, plyData);
-      setDirectory(data);
-      if (pointCloudMode) setPlyFiles(plyData);
-      setError("");
-    } catch (value) {
-      if (currentRequest === requestId.current) setError(errorMessage(value));
-    } finally {
-      if (currentRequest === requestId.current) setLoading(false);
+      const data = await apiFetch<{ connections: FileConnection[] }>(`${API_PATHS.fileManager}/connections`);
+      if (data.connections?.length) {
+        setConnections(data.connections);
+      }
+    } catch {
+      // 容错降级
     }
-  }, [pointCloudMode]);
+  }, []);
 
+  // 载入常用目录列表
+  const loadCommonDirectories = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ directories: string[] }>(`${API_PATHS.fileManager}/common-directories`);
+      if (Array.isArray(data.directories)) {
+        setCommonDirectories(data.directories);
+      }
+    } catch {
+      // 容错
+    }
+  }, []);
+
+  // 保存常用目录
+  const handleSaveCommonDirectories = useCallback(async (dirs: string[]) => {
+    const res = await apiFetch<{ directories: string[] }>(`${API_PATHS.fileManager}/common-directories`, {
+      method: "PUT",
+      body: jsonBody({ directories: dirs }),
+    });
+    setCommonDirectories(res.directories || []);
+  }, []);
+
+  useEffect(() => {
+    void loadConnections();
+    void loadCommonDirectories();
+  }, [loadConnections, loadCommonDirectories]);
+
+  // 读取目录内容（区分本机与远程 SSH）
+  const loadDirectory = useCallback(
+    async (rootIndex: number, nextPath: string, connId: string, refresh = false) => {
+      const currentRequest = ++requestId.current;
+      const key = `${connId}:${rootIndex}:${nextPath}`;
+      const cached = directoryCache.current.get(key);
+      const cachedPly = pointCloudMode && connId === "local" ? plyCache.current.get(key) : null;
+
+      if (!refresh && cached && cached.expires_at > Date.now() / 1000 && (!pointCloudMode || (cachedPly && cachedPly.expires_at > Date.now() / 1000))) {
+        setDirectory(cached);
+        if (pointCloudMode) setPlyFiles(cachedPly || null);
+        setLoading(false);
+        setError("");
+        return;
+      }
+
+      setLoading(true);
+      setDirectory(null);
+      if (pointCloudMode) setPlyFiles(null);
+
+      try {
+        let directoryRequest: Promise<FileManagerDirectoryResponse>;
+        if (connId !== "local") {
+          // 远程服务器：相对路径位于用户目录 ~
+          directoryRequest = apiFetch<FileManagerDirectoryResponse>(
+            `${API_PATHS.fileManager}/remote/${encodeURIComponent(connId)}/directory?path=${encodeURIComponent(nextPath)}`
+          );
+        } else {
+          // 本机受限目录
+          const separator = refresh ? "&refresh=true" : "";
+          directoryRequest = apiFetch<FileManagerDirectoryResponse>(
+            `${API_PATHS.fileManager}/directory?root=${rootIndex}&path=${encodeURIComponent(nextPath)}${separator}`
+          );
+        }
+
+        const plyRequest =
+          pointCloudMode && connId === "local"
+            ? apiFetch<FileManagerPlyResponse>(`${API_PATHS.fileManager}/ply-files?root=${rootIndex}&path=${encodeURIComponent(nextPath)}`)
+            : Promise.resolve(null);
+
+        const [data, plyData] = await Promise.all([directoryRequest, plyRequest]);
+        if (currentRequest !== requestId.current) return;
+        directoryCache.current.set(key, data);
+        if (plyData) plyCache.current.set(key, plyData);
+        setDirectory(data);
+        if (pointCloudMode) setPlyFiles(plyData);
+        setError("");
+      } catch (value) {
+        if (currentRequest === requestId.current) setError(errorMessage(value));
+      } finally {
+        if (currentRequest === requestId.current) setLoading(false);
+      }
+    },
+    [pointCloudMode]
+  );
+
+  // 本机 settings 载入
   useEffect(() => {
     let active = true;
     apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
@@ -165,58 +244,54 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
         const nextRoots = value.roots || [];
         const nextResolvedRoots = value.resolved_roots || nextRoots;
         setResolvedRoots(nextResolvedRoots);
+        setRoots(nextRoots);
+
         if (!pointCloudMode) {
+          // 检查上次记录的连接与路径
+          try {
+            const savedConn = window.localStorage.getItem(ACTIVE_CONN_KEY);
+            if (savedConn && savedConn !== "local") {
+              setActiveConnectionId(savedConn);
+              setPath("");
+              return;
+            }
+          } catch {
+            // 忽略存储异常
+          }
+
           let saved: ReturnType<typeof readBrowserLocation> = null;
-          try { saved = readBrowserLocation(window.localStorage, nextResolvedRoots); } catch { /* 浏览器禁用存储时使用默认目录。 */ }
+          try {
+            saved = readBrowserLocation(window.localStorage, nextResolvedRoots);
+          } catch {
+            /* 忽略 */
+          }
           if (saved) {
             try {
-              const data = await apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(saved.rootIndex), path: saved.path })}`);
+              const data = await apiFetch<FileManagerDirectoryResponse>(
+                `${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(saved.rootIndex), path: saved.path })}`
+              );
               if (!active) return;
-              directoryCache.current.set(`${saved.rootIndex}:${saved.path}`, data);
+              directoryCache.current.set(`local:${saved.rootIndex}:${saved.path}`, data);
               setSelectedRootIndex(saved.rootIndex);
               setPath(saved.path);
             } catch {
-              // 已删除的目录或失效链接回退到顶层目录。
-              if (!active) return;
+              // 回退
             }
           }
         }
-        if (pointCloudMode) {
-          const params = new URLSearchParams(window.location.search);
-          const requestedRoot = Number(params.get("root"));
-          const requestedFile = params.get("file") || "";
-          if (params.has("root") && Number.isInteger(requestedRoot) && requestedRoot >= 0 && requestedRoot < nextRoots.length && VIEWABLE_EXTENSIONS.has(requestedFile.split(".").at(-1)?.toLowerCase() || "")) {
-            setSelectedRootIndex(requestedRoot);
-            setPath(requestedFile.split("/").slice(0, -1).join("/"));
-            setPreviewFiles([selectedFile(requestedRoot, requestedFile), null]);
-            setActivePreview(1);
-          } else {
-            const defaultRoot = nextRoots.findIndex(root => root === "~" || root === "~/reproduce" || root.endsWith("/reproduce"));
-            if (defaultRoot >= 0) {
-              setSelectedRootIndex(defaultRoot);
-              const root = nextRoots[defaultRoot];
-              const prefix = root === "~/reproduce" || root.endsWith("/reproduce") ? "" : "reproduce/";
-              setPath(`${prefix}${DEFAULT_DIRECTORY}`);
-            }
-          }
-        }
-        setRoots(nextRoots);
-        if (!nextRoots.length) setLoading(false);
       })
-      .catch(value => { if (active) setError(errorMessage(value)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      .catch(value => {
+        if (active) setError(errorMessage(value));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [pointCloudMode]);
 
-  useEffect(() => {
-    if (!pointCloudMode) return;
-    let active = true;
-    apiFetch<{ favorites: FileManagerFavorite[] }>(`${API_PATHS.fileManager}/favorites`)
-      .then(value => { if (active) setFavorites(value.favorites); })
-      .catch(value => { if (active) setFavoriteError(errorMessage(value)); });
-    return () => { active = false; };
-  }, [pointCloudMode]);
-
+  // 点云模式日期配置
   useEffect(() => {
     if (!pointCloudMode) return;
     const timer = window.setTimeout(() => {
@@ -231,54 +306,68 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     if (!pointCloudMode) return;
     let active = true;
     apiFetch<{ folders: string[] }>(`${API_PATHS.fileManager}/date-search-folders`)
-      .then(value => { if (active) { setDateFoldersText(value.folders.join("\n")); setDateFoldersReady(true); } })
-      .catch(value => { if (active) setDateError(errorMessage(value)); });
-    return () => { active = false; };
+      .then(value => {
+        if (active) {
+          setDateFoldersText(value.folders.join("\n"));
+          setDateFoldersReady(true);
+        }
+      })
+      .catch(value => {
+        if (active) setDateError(errorMessage(value));
+      });
+    return () => {
+      active = false;
+    };
   }, [pointCloudMode]);
 
+  // 连接、根目录或路径变化时触发读取
   useEffect(() => {
-    if (!roots.length) return;
-    void loadDirectory(selectedRootIndex, path);
-  }, [roots, selectedRootIndex, path, loadDirectory]);
+    if (activeConnectionId === "local" && !roots.length) return;
+    void loadDirectory(selectedRootIndex, path, activeConnectionId);
+  }, [roots, selectedRootIndex, path, activeConnectionId, loadDirectory]);
 
   useEffect(() => {
-    currentDirectoryRef.current = { root: selectedRootIndex, path };
-  }, [selectedRootIndex, path]);
+    currentDirectoryRef.current = { root: selectedRootIndex, path, conn: activeConnectionId };
+  }, [selectedRootIndex, path, activeConnectionId]);
 
+  // 记录最后一次浏览状态
   useEffect(() => {
-    if (pointCloudMode || loading || !directory || directory.root_index !== selectedRootIndex || directory.path !== path) return;
-    const root = resolvedRoots[selectedRootIndex];
-    if (!root) return;
+    if (pointCloudMode || loading || !directory || directory.path !== path) return;
     try {
-      window.localStorage.setItem(BROWSER_LOCATION_KEY, JSON.stringify({ root, path }));
-    } catch { /* 存储不可用时不影响文件浏览。 */ }
-  }, [pointCloudMode, loading, directory, selectedRootIndex, path, resolvedRoots]);
+      window.localStorage.setItem(ACTIVE_CONN_KEY, activeConnectionId);
+      if (activeConnectionId === "local" && directory.root_index === selectedRootIndex) {
+        const root = resolvedRoots[selectedRootIndex];
+        if (root) {
+          window.localStorage.setItem(BROWSER_LOCATION_KEY, JSON.stringify({ root, path }));
+        }
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }, [pointCloudMode, loading, directory, selectedRootIndex, path, resolvedRoots, activeConnectionId]);
 
+  // 排序与筛选条目
   const filteredEntries = useMemo(() => {
-    if (pointCloudMode) return [
-      ...(directory?.entries.filter(entry => entry.type === "directory") || []),
-      ...(plyFiles?.entries || []),
-    ];
-    // 文件夹始终排在文件前面，组内再按所选列排序。
+    if (pointCloudMode && activeConnectionId === "local") {
+      return [...(directory?.entries.filter(entry => entry.type === "directory") || []), ...(plyFiles?.entries || [])];
+    }
     const direction = sortAscending ? 1 : -1;
-    const byName = (left: FileManagerEntry, right: FileManagerEntry) => left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
+    const byName = (left: FileManagerEntry, right: FileManagerEntry) =>
+      left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
     return [...(directory?.entries || [])].sort((left, right) => {
       const group = Number(left.type !== "directory") - Number(right.type !== "directory");
       if (group) return group;
       let result = 0;
-      if (sortKey === "type") result = entryTypeLabel(left).localeCompare(entryTypeLabel(right), "zh-CN") || left.extension.localeCompare(right.extension);
+      if (sortKey === "type")
+        result =
+          entryTypeLabel(left).localeCompare(entryTypeLabel(right), "zh-CN") ||
+          left.extension.localeCompare(right.extension);
       else if (sortKey === "modified") result = left.modified - right.modified;
       return (result || byName(left, right)) * direction;
     });
-  }, [directory, plyFiles, pointCloudMode, sortKey, sortAscending]);
+  }, [directory, plyFiles, pointCloudMode, activeConnectionId, sortKey, sortAscending]);
+
   const pathSegments = useMemo(() => (path ? path.split("/") : []), [path]);
-  const currentFavorite = favorites.find(item => item.root_path === roots[selectedRootIndex] && item.path === path);
-  const previewDetails = previewFiles.map(previewFile => ({
-    favorite: previewFile ? favorites
-      .filter(item => item.root_path === roots[previewFile.rootIndex] && (previewFile.path.startsWith(`${item.path}/`) || item.path === ""))
-      .sort((left, right) => right.path.length - left.path.length)[0] : undefined,
-    path: previewFile ? `${resolvedRoots[previewFile.rootIndex] || roots[previewFile.rootIndex] || ""}/${previewFile.path}` : "",
-  }));
 
   function goToDirectory(nextPath: string, rootIndex = selectedRootIndex) {
     if (nextPath === path && rootIndex === selectedRootIndex) return;
@@ -289,6 +378,16 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
       setUploadError("");
     }
     setPath(nextPath);
+  }
+
+  function handleSwitchConnection(connId: string) {
+    if (connId === activeConnectionId) return;
+    setActiveConnectionId(connId);
+    setPath("");
+    setDirectory(null);
+    setUploads([]);
+    setUploadMessage("");
+    setUploadError("");
   }
 
   function openPreview(entry: FileManagerEntry) {
@@ -304,48 +403,30 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     return pathSegments.slice(0, index + 1).join("/");
   }
 
-  async function updateFavorites(request: Promise<{ favorites: FileManagerFavorite[] }>) {
-    setFavoriteBusy(true);
-    setFavoriteError("");
-    try {
-      const result = await request;
-      setFavorites(result.favorites);
-      setEditingId("");
-    } catch (value) {
-      setFavoriteError(errorMessage(value));
-    } finally {
-      setFavoriteBusy(false);
-    }
-  }
-
-  function addCurrentFavorite() {
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: selectedRootIndex, path }) }));
-  }
-
-  function saveFavoriteName() {
-    if (!editingId || !editName.trim()) return;
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(editingId)}`, { method: "PATCH", body: jsonBody({ name: editName.trim() }) }));
-  }
-
-  function removeFavorite(id: string) {
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" }));
-  }
-
   function updateUpload(id: string, patch: Partial<UploadState>) {
-    setUploads(current => current.map(item => item.id === id ? { ...item, ...patch } : item));
+    setUploads(current => current.map(item => (item.id === id ? { ...item, ...patch } : item)));
   }
 
+  // 上传处理（支持拖拽文件夹保留层级与分片上传）
   async function startUpload(collectItems: () => Promise<FileUploadItem[]>) {
-    if (!roots.length || uploadLock.current) return;
+    if (uploadLock.current) return;
+    if (activeConnectionId === "local" && !roots.length) return;
+
     uploadLock.current = true;
     const targetRoot = selectedRootIndex;
     const targetPath = path;
     const overwrite = overwriteUploads;
-    const targetLabel = `${resolvedRoots[targetRoot] || roots[targetRoot]}${targetPath ? `/${targetPath}` : ""}`;
+    const connId = activeConnectionId;
+    const targetLabel =
+      connId === "local"
+        ? `${resolvedRoots[targetRoot] || roots[targetRoot]}${targetPath ? `/${targetPath}` : ""}`
+        : `${activeConnection?.name || "远程服务器"} ~${targetPath ? `/${targetPath}` : ""}`;
+
     setUploadError("");
     setUploads([]);
     setUploading(true);
     setUploadMessage(`正在读取文件和文件夹… 目标：${targetLabel}`);
+
     try {
       const items = await collectItems();
       const selected = items.filter(item => uploadableRelativePath(item.relativePath));
@@ -354,7 +435,7 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
         setUploadError("未发现可上传文件。空文件夹、缓存目录和无效路径会被跳过。");
         return;
       }
-      // 队列与进度回调复用同一组 ID，避免时间变化后无法找到原条目。
+
       const batchId = Date.now();
       const queue = selected.map((item, index) => ({
         id: `${batchId}-${index}`,
@@ -372,26 +453,58 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
         const id = queue[index].id;
         setUploadMessage(`正在上传 ${index + 1} / ${selected.length} 个文件 · 目标：${targetLabel}`);
         updateUpload(id, { status: "正在上传", detail: `0% · ${formatBytes(item.file.size)}` });
+
         try {
           let result: FileManagerUploadResponse;
           if (item.file.size > UPLOAD_CHUNK_BYTES) {
-            // 大文件分片并发上传，避免单个请求体超过反向代理上限。
+            // 大文件分片并发上传
             result = await uploadFileInChunks({
-              rootIndex: targetRoot, directory: targetPath, relativePath: item.relativePath, file: item.file, overwrite,
+              rootIndex: targetRoot,
+              directory: targetPath,
+              relativePath: item.relativePath,
+              file: item.file,
+              overwrite,
+              connectionId: connId,
               onProgress: loaded => {
-                const progress = Math.min(100, Math.round(loaded / item.file.size * 100));
-                updateUpload(id, { progress, status: progress === 100 ? "等待服务器合并" : "分片上传中", detail: `${progress}% · ${formatBytes(loaded)} / ${formatBytes(item.file.size)}` });
+                const progress = Math.min(100, Math.round((loaded / item.file.size) * 100));
+                updateUpload(id, {
+                  progress,
+                  status: progress === 100 ? "等待服务器合并" : "分片上传中",
+                  detail: `${progress}% · ${formatBytes(loaded)} / ${formatBytes(item.file.size)}`,
+                });
               },
             });
           } else {
-            const params = new URLSearchParams({ root: String(targetRoot), path: targetPath, overwrite: String(overwrite) });
-            result = await uploadBinary<FileManagerUploadResponse>(`${API_PATHS.fileManager}/upload?${params}`, item.file, {
-              "Content-Type": item.file.type || "application/octet-stream",
-              "x-file-path": encodeURIComponent(item.relativePath),
-            }, progress => {
-              updateUpload(id, { progress, status: progress === 100 ? "等待服务器写入" : "正在上传", detail: `${progress}% · ${formatBytes(item.file.size)}` });
-            });
+            // 小文件单请求上传
+            const uploadUrl =
+              connId !== "local"
+                ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(connId)}/upload?${new URLSearchParams({
+                    path: targetPath,
+                    overwrite: String(overwrite),
+                  })}`
+                : `${API_PATHS.fileManager}/upload?${new URLSearchParams({
+                    root: String(targetRoot),
+                    path: targetPath,
+                    overwrite: String(overwrite),
+                  })}`;
+
+            result = await uploadBinary<FileManagerUploadResponse>(
+              uploadUrl,
+              item.file,
+              {
+                "Content-Type": item.file.type || "application/octet-stream",
+                "x-file-path": encodeURIComponent(item.relativePath),
+              },
+              progress => {
+                updateUpload(id, {
+                  progress,
+                  status: progress === 100 ? "等待服务器写入" : "正在上传",
+                  detail: `${progress}% · ${formatBytes(item.file.size)}`,
+                });
+              }
+            );
           }
+
           successCount += 1;
           updateUpload(id, { progress: 100, status: "已上传", detail: `${formatBytes(result.size ?? item.file.size)} · 已写入` });
         } catch (value) {
@@ -401,8 +514,12 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
 
       directoryCache.current.clear();
       plyCache.current.clear();
-      if (currentDirectoryRef.current.root === targetRoot && currentDirectoryRef.current.path === targetPath) {
-        await loadDirectory(targetRoot, targetPath, true);
+      if (
+        currentDirectoryRef.current.conn === connId &&
+        currentDirectoryRef.current.root === targetRoot &&
+        currentDirectoryRef.current.path === targetPath
+      ) {
+        await loadDirectory(targetRoot, targetPath, connId, true);
       }
       const failureCount = selected.length - successCount;
       setUploadMessage(`上传结束：成功 ${successCount} 个，失败 ${failureCount} 个 · 目标：${targetLabel}`);
@@ -422,21 +539,26 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
   }
 
   const totalUploadBytes = uploads.reduce((sum, item) => sum + item.size, 0);
-  // 完成项只参与总进度与汇总，明细仅保留待上传、上传中及失败的文件。
   const visibleUploads = uploads.filter(item => item.status !== "已上传");
-  const uploadedBytes = uploads.reduce((sum, item) => sum + item.size * item.progress / 100, 0);
-  const overallUploadProgress = totalUploadBytes ? Math.round(uploadedBytes / totalUploadBytes * 100)
-    : uploads.length ? Math.round(uploads.filter(item => item.status === "已上传").length / uploads.length * 100) : 0;
+  const uploadedBytes = uploads.reduce((sum, item) => sum + (item.size * item.progress) / 100, 0);
+  const overallUploadProgress = totalUploadBytes
+    ? Math.round((uploadedBytes / totalUploadBytes) * 100)
+    : uploads.length
+    ? Math.round((uploads.filter(item => item.status === "已上传").length / uploads.length) * 100)
+    : 0;
 
   async function syncCache() {
     setSyncing(true);
     setSyncMessage("");
     try {
       const targets = syncTarget === "all" ? ["RadioGS-perlight", "RadioGS-stage1"] : [syncTarget];
-      const result = await apiFetch<FileManagerSyncResponse>(`${API_PATHS.fileManager}/sync`, { method: "POST", body: jsonBody({ targets }) });
+      const result = await apiFetch<FileManagerSyncResponse>(`${API_PATHS.fileManager}/sync`, {
+        method: "POST",
+        body: jsonBody({ targets }),
+      });
       directoryCache.current.clear();
       plyCache.current.clear();
-      await loadDirectory(selectedRootIndex, path, true);
+      await loadDirectory(selectedRootIndex, path, activeConnectionId, true);
       setSyncMessage(`已缓存 ${result.directory_count.toLocaleString()} 个目录`);
     } catch (value) {
       setError(errorMessage(value));
@@ -445,31 +567,44 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
     }
   }
 
-  const searchDate = useCallback(async (saveFolders: boolean) => {
-    initialDateSearchStarted.current = true;
-    const currentRequest = ++dateRequestId.current;
-    const folders = dateFoldersText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    setDateBusy(true);
-    setDateError("");
-    setDateResults(null);
-    try {
-      if (saveFolders) {
-        const saved = await apiFetch<{ folders: string[] }>(`${API_PATHS.fileManager}/date-search-folders`, {
-          method: "PUT", body: jsonBody({ folders }),
+  const searchDate = useCallback(
+    async (saveFolders: boolean) => {
+      initialDateSearchStarted.current = true;
+      const currentRequest = ++dateRequestId.current;
+      const folders = dateFoldersText
+        .split(/\r?\n/)
+        .map(value => value.trim())
+        .filter(Boolean);
+      setDateBusy(true);
+      setDateError("");
+      setDateResults(null);
+      try {
+        if (saveFolders) {
+          const saved = await apiFetch<{ folders: string[] }>(`${API_PATHS.fileManager}/date-search-folders`, {
+            method: "PUT",
+            body: jsonBody({ folders }),
+          });
+          if (currentRequest === dateRequestId.current) setDateFoldersText(saved.folders.join("\n"));
+        }
+        const result = await apiFetch<FileManagerDatePlyResponse>(`${API_PATHS.fileManager}/ply-by-date`, {
+          method: "POST",
+          body: jsonBody({
+            start_date: startDate,
+            end_date: endDate,
+            iteration_mode: iterationMode,
+            iteration: iterationMode === "exact" ? Number(iterationQuery) : null,
+            refresh: saveFolders,
+          }),
         });
-        if (currentRequest === dateRequestId.current) setDateFoldersText(saved.folders.join("\n"));
+        if (currentRequest === dateRequestId.current) setDateResults(result);
+      } catch (value) {
+        if (currentRequest === dateRequestId.current) setDateError(errorMessage(value));
+      } finally {
+        if (currentRequest === dateRequestId.current) setDateBusy(false);
       }
-      const result = await apiFetch<FileManagerDatePlyResponse>(`${API_PATHS.fileManager}/ply-by-date`, {
-        method: "POST", body: jsonBody({ start_date: startDate, end_date: endDate, iteration_mode: iterationMode,
-          iteration: iterationMode === "exact" ? Number(iterationQuery) : null, refresh: saveFolders }),
-      });
-      if (currentRequest === dateRequestId.current) setDateResults(result);
-    } catch (value) {
-      if (currentRequest === dateRequestId.current) setDateError(errorMessage(value));
-    } finally {
-      if (currentRequest === dateRequestId.current) setDateBusy(false);
-    }
-  }, [dateFoldersText, startDate, endDate, iterationMode, iterationQuery]);
+    },
+    [dateFoldersText, startDate, endDate, iterationMode, iterationQuery]
+  );
 
   useEffect(() => {
     if (!pointCloudMode || !dateFoldersReady || !startDate || !endDate || initialDateSearchStarted.current) return;
@@ -497,143 +632,340 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
 
   function previewDateFile(rootIndex: number, filePath: string) {
     loadPreview(selectedFile(rootIndex, filePath));
-    window.requestAnimationFrame(() => document.querySelector(".file-manager-compare")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    window.requestAnimationFrame(() =>
+      document.querySelector(".file-manager-compare")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
   }
 
   function loadPreview(file: SelectedFile) {
-    setPreviewFiles(current => current.map((item, index) => index === activePreview ? file : item) as [SelectedFile | null, SelectedFile | null]);
+    setPreviewFiles(
+      current =>
+        current.map((item, index) => (index === activePreview ? file : item)) as [
+          SelectedFile | null,
+          SelectedFile | null
+        ]
+    );
   }
 
   function clearPreview(index: 0 | 1) {
-    setPreviewFiles(current => current.map((item, itemIndex) => itemIndex === index ? null : item) as [SelectedFile | null, SelectedFile | null]);
+    setPreviewFiles(
+      current =>
+        current.map((item, itemIndex) => (itemIndex === index ? null : item)) as [
+          SelectedFile | null,
+          SelectedFile | null
+        ]
+    );
     if (expandedPreview === index) setExpandedPreview(null);
   }
 
   function swapPreviews() {
     setPreviewFiles(current => [current[1], current[0]]);
-    setActivePreview(current => current === 0 ? 1 : 0);
-    setExpandedPreview(current => current === null ? null : current === 0 ? 1 : 0);
+    setActivePreview(current => (current === 0 ? 1 : 0));
+    setExpandedPreview(current => (current === null ? null : current === 0 ? 1 : 0));
   }
+
+  // 获得条目的直接下载地址
+  function getEntryDownloadUrl(entry: FileManagerEntry): string {
+    if (entry.download_url) return entry.download_url;
+    if (isRemote) {
+      return `${API_PATHS.fileManager}/remote/${encodeURIComponent(activeConnectionId)}/download?${new URLSearchParams({
+        path: entry.path,
+      })}`;
+    }
+    return downloadUrl(selectedRootIndex, entry.path);
+  }
+
+  const currentDisplayRootName = isRemote
+    ? activeConnection?.name || "用户根目录 (~)"
+    : roots[selectedRootIndex]?.split("/").filter(Boolean).at(-1) || "顶层目录";
 
   return (
     <>
-      {!pointCloudMode ? <PageHeader kicker="文件管理 / Files" title="文件游览" description="浏览已开放的目录，选择点云文件后进入预览。" /> : null}
+      {!pointCloudMode ? (
+        <PageHeader
+          kicker="文件管理 / Files"
+          title="文件游览"
+          description="浏览本机或集群内网服务器的用户目录，支持文件夹拖入、大文件分片并发上传与跳板下载。"
+        />
+      ) : null}
+
+      {/* 顶部服务器连接与常用目录切换栏 */}
+      <FileConnectionBar
+        connections={connections}
+        activeConnectionId={activeConnectionId}
+        onSelectConnection={handleSwitchConnection}
+        commonDirectories={commonDirectories}
+        onSelectCommonDirectory={dir => goToDirectory(dir)}
+        onRefreshConnections={loadConnections}
+        onSaveCommonDirectories={handleSaveCommonDirectories}
+      />
+
       {error ? <ErrorState message={error} /> : null}
+
       <div className="file-manager-workspace">
-        {pointCloudMode ? <>
-          <Card className="file-manager-compare">
-            <CardHeader
-              title="点云对比预览"
-              description={`当前载入目标：${activePreview === 0 ? "左侧 A" : "右侧 B"}。两侧视角可分别拖动、缩放和平移。`}
-              actions={<div className="file-manager-compare-actions">
-                <div className="file-manager-preview-target" aria-label="选择预览载入目标">
-                  <button type="button" aria-pressed={activePreview === 0} onClick={() => setActivePreview(0)}>左侧 A</button>
-                  <button type="button" aria-pressed={activePreview === 1} onClick={() => setActivePreview(1)}>右侧 B</button>
-                </div>
-                <Button variant="quiet" size="sm" type="button" onClick={swapPreviews} disabled={!previewFiles[0] && !previewFiles[1]}>交换左右</Button>
-              </div>}
-            />
-            <div className="file-manager-compare-grid">
-              {([0, 1] as const).map(index => {
-                const previewFile = previewFiles[index];
-                const expanded = expandedPreview === index;
-                return <section
-                  className={`file-manager-preview${activePreview === index ? " is-active" : ""}${expanded ? " is-expanded" : ""}${previewFile ? "" : " is-empty"}`}
-                  key={index}
-                  onPointerDownCapture={() => setActivePreview(index)}
-                  aria-label={`${index === 0 ? "左侧 A" : "右侧 B"} 点云预览`}
-                >
-                  <div className="file-manager-preview-head">
-                    <button type="button" className="file-manager-preview-label" aria-pressed={activePreview === index} onClick={() => setActivePreview(index)}>
-                      <span>{index === 0 ? "A" : "B"}</span>{index === 0 ? "左侧预览" : "右侧预览"}
-                    </button>
-                    {previewFile ? <Button variant="quiet" size="sm" type="button" onClick={() => clearPreview(index)}>清空</Button> : null}
+        {pointCloudMode ? (
+          <>
+            <Card className="file-manager-compare">
+              <CardHeader
+                title="点云对比预览"
+                description={`当前载入目标：${activePreview === 0 ? "左侧 A" : "右侧 B"}。两侧视角可分别拖动、缩放和平移。`}
+                actions={
+                  <div className="file-manager-compare-actions">
+                    <div className="file-manager-preview-target" aria-label="选择预览载入目标">
+                      <button type="button" aria-pressed={activePreview === 0} onClick={() => setActivePreview(0)}>
+                        左侧 A
+                      </button>
+                      <button type="button" aria-pressed={activePreview === 1} onClick={() => setActivePreview(1)}>
+                        右侧 B
+                      </button>
+                    </div>
+                    <Button variant="quiet" size="sm" type="button" onClick={swapPreviews} disabled={!previewFiles[0] && !previewFiles[1]}>
+                      交换左右
+                    </Button>
                   </div>
-                  {previewFile ? <PointCloudViewer
-                    key={`${previewFile.rootIndex}:${previewFile.path}`}
-                    file={previewFile}
-                    filePath={previewDetails[index].path}
-                    favoriteName={previewDetails[index].favorite?.name}
-                    expanded={expanded}
-                    onToggleExpanded={() => setExpandedPreview(value => value === index ? null : index)}
-                  /> : <div className="point-cloud-canvas-wrap point-cloud-empty"><EmptyState title={`${index === 0 ? "左侧 A" : "右侧 B"} 等待选择`} detail={`先选中此视图，再从下方日期结果或文件夹中载入点云。`} /></div>}
-                </section>;
-              })}
-            </div>
-          </Card>
-          <Card className="file-manager-date-search">
-            <CardHeader title="按日期查找 PLY" description={`默认查看近 7 天；点击“预览”会载入${activePreview === 0 ? "左侧 A" : "右侧 B"}。`} />
-            <form onSubmit={event => { event.preventDefault(); void searchDate(true); }}>
-              <div className="file-manager-date-presets" aria-label="常用日期范围">
-                <button type="button" aria-pressed={datePreset === "week"} onClick={() => selectDatePreset("week")}>近 7 天</button>
-                <button type="button" aria-pressed={datePreset === "today"} onClick={() => selectDatePreset("today")}>今天</button>
-              </div>
-              <div className="file-manager-date-controls">
-                <label>开始日期<input type="date" value={startDate} onChange={event => { setStartDate(event.target.value); setDatePreset("custom"); invalidateDateResults(); }} required /></label>
-                <label>结束日期<input type="date" value={endDate} onChange={event => { setEndDate(event.target.value); setDatePreset("custom"); invalidateDateResults(); }} required /></label>
-                <label>迭代过滤<select value={iterationMode} onChange={event => { setIterationMode(event.target.value as "latest" | "exact" | "all"); invalidateDateResults(); }}>
-                  <option value="latest">每组最新迭代</option><option value="exact">指定迭代</option><option value="all">全部 PLY</option>
-                </select></label>
-                {iterationMode === "exact" ? <label>迭代次数<input type="number" min="0" step="1" value={iterationQuery} onChange={event => { setIterationQuery(event.target.value); invalidateDateResults(); }} required /></label> : null}
-                <Button variant="secondary" size="sm" type="submit" disabled={dateBusy || !dateFoldersText.trim() || !startDate || !endDate}>{dateBusy ? "正在查找…" : "查找 PLY"}</Button>
-              </div>
-              <details className="file-manager-date-folder-settings"><summary>探查位置 · {dateFoldersText.split(/\r?\n/).filter(value => value.trim()).length} 个文件夹</summary>
-                <label className="file-manager-date-folders">每行一个绝对路径或 ~/ 路径
-                  <textarea value={dateFoldersText} onChange={event => { setDateFoldersText(event.target.value); invalidateDateResults(); }} rows={4} placeholder="~/reproduce/RadioGS-stage1" spellCheck={false} />
-                </label>
-              </details>
-            </form>
-            <p className="file-manager-date-hint">按实验文件夹名开头的日期查找，例如 0921-05-…。路径在查找时保存到服务端，须位于已开放目录内。</p>
-            {dateError ? <ErrorState message={dateError} /> : null}
-            {dateResults ? <>
-              <div className="file-manager-date-summary">{dateResults.start_date} 至 {dateResults.end_date} · 找到 {dateResults.entries.length} 个 PLY · {dateResults.cached ? "使用目录缓存" : "已扫描目录"}</div>
-              {dateResults.entries.length ? <div className="file-manager-date-results">
-                {dateResults.entries.map(entry => {
-                  const fullPath = `${resolvedRoots[entry.root_index] || roots[entry.root_index]}/${entry.path}`;
-                  const selectedIndex = previewFiles.findIndex(file => file?.rootIndex === entry.root_index && file.path === entry.path);
-                  return <div className={`file-manager-date-result${selectedIndex >= 0 ? " is-selected" : ""}`} key={`${entry.root_index}:${entry.path}`}>
-                    <div className="file-manager-date-result-info"><strong>{entry.experiment_date} · {entry.date_folder}{entry.iteration_number !== null ? ` · iter ${entry.iteration_number}` : ""}{selectedIndex >= 0 ? ` · 已在 ${selectedIndex === 0 ? "A" : "B"}` : ""}</strong><code title={fullPath}>{fullPath}</code><small>{formatBytes(entry.size)} · {formatDate(entry.modified)}</small></div>
-                    <div className="file-manager-entry-actions">
-                      <Button variant="secondary" size="sm" type="button" onClick={() => previewDateFile(entry.root_index, entry.path)}>预览至 {activePreview === 0 ? "A" : "B"}</Button>
-                      <a className="button button-secondary button-sm" href={downloadUrl(entry.root_index, entry.path)} download title={`下载 ${entry.name}`}>下载</a>
-                    </div>
-                  </div>;
+                }
+              />
+              <div className="file-manager-compare-grid">
+                {([0, 1] as const).map(index => {
+                  const previewFile = previewFiles[index];
+                  const expanded = expandedPreview === index;
+                  return (
+                    <section
+                      className={`file-manager-preview${activePreview === index ? " is-active" : ""}${expanded ? " is-expanded" : ""}${
+                        previewFile ? "" : " is-empty"
+                      }`}
+                      key={index}
+                      onPointerDownCapture={() => setActivePreview(index)}
+                      aria-label={`${index === 0 ? "左侧 A" : "右侧 B"} 点云预览`}
+                    >
+                      <div className="file-manager-preview-head">
+                        <button
+                          type="button"
+                          className="file-manager-preview-label"
+                          aria-pressed={activePreview === index}
+                          onClick={() => setActivePreview(index)}
+                        >
+                          <span>{index === 0 ? "A" : "B"}</span>
+                          {index === 0 ? "左侧预览" : "右侧预览"}
+                        </button>
+                        {previewFile ? (
+                          <Button variant="quiet" size="sm" type="button" onClick={() => clearPreview(index)}>
+                            清空
+                          </Button>
+                        ) : null}
+                      </div>
+                      {previewFile ? (
+                        <PointCloudViewer
+                          key={`${previewFile.rootIndex}:${previewFile.path}`}
+                          file={previewFile}
+                          filePath={`${resolvedRoots[previewFile.rootIndex] || roots[previewFile.rootIndex] || ""}/${previewFile.path}`}
+                          expanded={expanded}
+                          onToggleExpanded={() => setExpandedPreview(value => (value === index ? null : index))}
+                        />
+                      ) : (
+                        <div className="point-cloud-canvas-wrap point-cloud-empty">
+                          <EmptyState
+                            title={`${index === 0 ? "左侧 A" : "右侧 B"} 等待选择`}
+                            detail={`先选中此视图，再从下方日期结果或文件夹中载入点云。`}
+                          />
+                        </div>
+                      )}
+                    </section>
+                  );
                 })}
-              </div> : <EmptyState title="所选日期没有匹配的 PLY" detail="可扩大日期范围，或将迭代过滤改为“全部 PLY”。" />}
-            </> : null}
-          </Card>
-          <Card className="file-manager-favorites">
-            <CardHeader title="收藏目录" actions={<Button variant="secondary" size="sm" onClick={() => currentFavorite ? (setEditingId(currentFavorite.id), setEditName(currentFavorite.name)) : addCurrentFavorite()} disabled={!roots.length || !directory || loading || favoriteBusy}>{currentFavorite ? "修改当前目录名称" : "收藏当前目录"}</Button>} />
-            {favoriteError ? <ErrorState message={favoriteError} /> : null}
-            {favorites.length ? <div className="file-manager-favorite-list">
-              {favorites.map(favorite => {
-                const rootIndex = roots.indexOf(favorite.root_path);
-                return <div className={`file-manager-favorite${favorite.id === currentFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
-                  {editingId === favorite.id ? <form className="file-manager-favorite-edit" onSubmit={event => { event.preventDefault(); saveFavoriteName(); }}>
-                    <input className="search-input" value={editName} maxLength={80} autoFocus onChange={event => setEditName(event.target.value)} aria-label="收藏名称" disabled={favoriteBusy} />
-                    <Button variant="secondary" size="sm" type="submit" disabled={!editName.trim() || favoriteBusy}>保存</Button>
-                    <Button variant="quiet" size="sm" type="button" onClick={() => setEditingId("")} disabled={favoriteBusy}>取消</Button>
-                  </form> : <>
-                    <button className="file-manager-favorite-main" type="button" onClick={() => goToDirectory(favorite.path, rootIndex)} disabled={rootIndex < 0} title={`${favorite.root_path}/${favorite.path}`}><strong>{favorite.name}</strong><small>{favorite.root_path}/{favorite.path}</small></button>
-                    <div className="file-manager-favorite-actions">
-                      <Button variant="quiet" size="sm" onClick={() => { setEditingId(favorite.id); setEditName(favorite.name); }}>改名</Button>
-                      <Button variant="quiet" size="sm" onClick={() => removeFavorite(favorite.id)} disabled={favoriteBusy}>移除</Button>
+              </div>
+            </Card>
+
+            <Card className="file-manager-date-search">
+              <CardHeader
+                title="按日期查找 PLY"
+                description={`默认查看近 7 天；点击“预览”会载入${activePreview === 0 ? "左侧 A" : "右侧 B"}。`}
+              />
+              <form
+                onSubmit={event => {
+                  event.preventDefault();
+                  void searchDate(true);
+                }}
+              >
+                <div className="file-manager-date-presets" aria-label="常用日期范围">
+                  <button type="button" aria-pressed={datePreset === "week"} onClick={() => selectDatePreset("week")}>
+                    近 7 天
+                  </button>
+                  <button type="button" aria-pressed={datePreset === "today"} onClick={() => selectDatePreset("today")}>
+                    今天
+                  </button>
+                </div>
+                <div className="file-manager-date-controls">
+                  <label>
+                    开始日期
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={event => {
+                        setStartDate(event.target.value);
+                        setDatePreset("custom");
+                        invalidateDateResults();
+                      }}
+                      required
+                    />
+                  </label>
+                  <label>
+                    结束日期
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={event => {
+                        setEndDate(event.target.value);
+                        setDatePreset("custom");
+                        invalidateDateResults();
+                      }}
+                      required
+                    />
+                  </label>
+                  <label>
+                    迭代过滤
+                    <select
+                      value={iterationMode}
+                      onChange={event => {
+                        setIterationMode(event.target.value as "latest" | "exact" | "all");
+                        invalidateDateResults();
+                      }}
+                    >
+                      <option value="latest">每组最新迭代</option>
+                      <option value="exact">指定迭代</option>
+                      <option value="all">全部 PLY</option>
+                    </select>
+                  </label>
+                  {iterationMode === "exact" ? (
+                    <label>
+                      迭代次数
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={iterationQuery}
+                        onChange={event => {
+                          setIterationQuery(event.target.value);
+                          invalidateDateResults();
+                        }}
+                        required
+                      />
+                    </label>
+                  ) : null}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="submit"
+                    disabled={dateBusy || !dateFoldersText.trim() || !startDate || !endDate}
+                  >
+                    {dateBusy ? "正在查找…" : "查找 PLY"}
+                  </Button>
+                </div>
+                <details className="file-manager-date-folder-settings">
+                  <summary>探查位置 · {dateFoldersText.split(/\r?\n/).filter(value => value.trim()).length} 个文件夹</summary>
+                  <label className="file-manager-date-folders">
+                    每行一个绝对路径或 ~/ 路径
+                    <textarea
+                      value={dateFoldersText}
+                      onChange={event => {
+                        setDateFoldersText(event.target.value);
+                        invalidateDateResults();
+                      }}
+                      rows={4}
+                      placeholder="~/reproduce/RadioGS-stage1"
+                      spellCheck={false}
+                    />
+                  </label>
+                </details>
+              </form>
+              <p className="file-manager-date-hint">按实验文件夹名开头的日期查找，例如 0921-05-…。路径在查找时保存到服务端，须位于已开放目录内。</p>
+              {dateError ? <ErrorState message={dateError} /> : null}
+              {dateResults ? (
+                <>
+                  <div className="file-manager-date-summary">
+                    {dateResults.start_date} 至 {dateResults.end_date} · 找到 {dateResults.entries.length} 个 PLY ·{" "}
+                    {dateResults.cached ? "使用目录缓存" : "已扫描目录"}
+                  </div>
+                  {dateResults.entries.length ? (
+                    <div className="file-manager-date-results">
+                      {dateResults.entries.map(entry => {
+                        const fullPath = `${resolvedRoots[entry.root_index] || roots[entry.root_index]}/${entry.path}`;
+                        const selectedIndex = previewFiles.findIndex(
+                          file => file?.rootIndex === entry.root_index && file.path === entry.path
+                        );
+                        return (
+                          <div
+                            className={`file-manager-date-result${selectedIndex >= 0 ? " is-selected" : ""}`}
+                            key={`${entry.root_index}:${entry.path}`}
+                          >
+                            <div className="file-manager-date-result-info">
+                              <strong>
+                                {entry.experiment_date} · {entry.date_folder}
+                                {entry.iteration_number !== null ? ` · iter ${entry.iteration_number}` : ""}
+                                {selectedIndex >= 0 ? ` · 已在 ${selectedIndex === 0 ? "A" : "B"}` : ""}
+                              </strong>
+                              <code title={fullPath}>{fullPath}</code>
+                              <small>
+                                {formatBytes(entry.size)} · {formatDate(entry.modified)}
+                              </small>
+                            </div>
+                            <div className="file-manager-entry-actions">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                type="button"
+                                onClick={() => previewDateFile(entry.root_index, entry.path)}
+                              >
+                                预览至 {activePreview === 0 ? "A" : "B"}
+                              </Button>
+                              <a
+                                className="button button-secondary button-sm"
+                                href={downloadUrl(entry.root_index, entry.path)}
+                                download
+                                title={`下载 ${entry.name}`}
+                              >
+                                下载
+                              </a>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </>}
-                </div>;
-              })}
-            </div> : <p className="file-manager-favorites-empty">收藏常用目录后，可以从这里快速跳转并修改显示名称。</p>}
-          </Card>
-        </> : null}
+                  ) : (
+                    <EmptyState title="所选日期没有匹配的 PLY" detail="可扩大日期范围，或将迭代过滤改为“全部 PLY”。" />
+                  )}
+                </>
+              ) : null}
+            </Card>
+          </>
+        ) : null}
+
         {!pointCloudMode ? (
           <Card className="file-manager-upload">
             <CardHeader
               title="上传到当前目录"
-              description={`目标：${resolvedRoots[selectedRootIndex] || roots[selectedRootIndex] || "未选择"}${path ? `/${path}` : ""}`}
+              description={`目标：${
+                isRemote
+                  ? `${activeConnection?.name || "远程服务器"} ~${path ? `/${path}` : ""}`
+                  : `${resolvedRoots[selectedRootIndex] || roots[selectedRootIndex] || "未选择"}${path ? `/${path}` : ""}`
+              }`}
               actions={
                 <div className="file-manager-upload-actions">
-                  <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading || !roots.length}>选择文件</Button>
-                  <Button variant="secondary" size="sm" onClick={() => directoryInputRef.current?.click()} disabled={uploading || !roots.length}>选择文件夹</Button>
+                  <Button
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || (activeConnectionId === "local" && !roots.length)}
+                  >
+                    选择文件
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => directoryInputRef.current?.click()}
+                    disabled={uploading || (activeConnectionId === "local" && !roots.length)}
+                  >
+                    选择文件夹
+                  </Button>
                 </div>
               }
             />
@@ -642,7 +974,11 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               className="visually-hidden"
               type="file"
               multiple
-              onChange={event => { const items = fileUploadItems(event.target.files); void startUpload(() => Promise.resolve(items)); event.target.value = ""; }}
+              onChange={event => {
+                const items = fileUploadItems(event.target.files);
+                void startUpload(() => Promise.resolve(items));
+                event.target.value = "";
+              }}
             />
             <input
               ref={directoryInputRef}
@@ -650,31 +986,64 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
               type="file"
               multiple
               {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
-              onChange={event => { const items = fileUploadItems(event.target.files); void startUpload(() => Promise.resolve(items)); event.target.value = ""; }}
+              onChange={event => {
+                const items = fileUploadItems(event.target.files);
+                void startUpload(() => Promise.resolve(items));
+                event.target.value = "";
+              }}
             />
             <div
               className={`upload-drop file-manager-upload-drop${draggingUploads ? " is-dragover" : ""}`}
               role="button"
               tabIndex={0}
-              aria-disabled={uploading || !roots.length}
-              onClick={() => { if (!uploading && roots.length) fileInputRef.current?.click(); }}
-              onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (!uploading && roots.length) fileInputRef.current?.click(); } }}
-              onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = uploading || !roots.length ? "none" : "copy"; setDraggingUploads(!uploading && Boolean(roots.length)); }}
+              aria-disabled={uploading || (activeConnectionId === "local" && !roots.length)}
+              onClick={() => {
+                if (!uploading && (activeConnectionId !== "local" || roots.length)) fileInputRef.current?.click();
+              }}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (!uploading && (activeConnectionId !== "local" || roots.length)) fileInputRef.current?.click();
+                }
+              }}
+              onDragOver={event => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = uploading || (activeConnectionId === "local" && !roots.length) ? "none" : "copy";
+                setDraggingUploads(!uploading && (activeConnectionId !== "local" || Boolean(roots.length)));
+              }}
               onDragLeave={() => setDraggingUploads(false)}
-              onDrop={event => { void handleUploadDrop(event); }}
+              onDrop={event => {
+                void handleUploadDrop(event);
+              }}
             >
               <span className="upload-mark">↑</span>
               <strong>拖入文件或文件夹，或点击选择文件</strong>
-              <small>文件夹会保留内部相对结构；同名文件默认拒绝，单文件最大 4 GB。</small>
+              <small>文件夹会保留内部相对结构；同名文件默认拒绝，单文件最大 4 GB（大文件经跳板分片并发写入）。</small>
             </div>
             <label className="file-manager-upload-option">
-              <input type="checkbox" checked={overwriteUploads} onChange={event => setOverwriteUploads(event.target.checked)} disabled={uploading} />
+              <input
+                type="checkbox"
+                checked={overwriteUploads}
+                onChange={event => setOverwriteUploads(event.target.checked)}
+                disabled={uploading}
+              />
               覆盖当前目录内的同名文件
             </label>
-            {uploadMessage ? <div className="file-manager-upload-summary" role="status" aria-live="polite">
-              <span>{uploadMessage}</span>
-              {uploads.length ? <><ProgressBar value={overallUploadProgress} /><small>总体传输 {overallUploadProgress}% · {formatBytes(uploadedBytes)} / {formatBytes(totalUploadBytes)}</small></> : uploading ? <LoadingState label="正在读取文件夹，请稍候…" /> : null}
-            </div> : null}
+            {uploadMessage ? (
+              <div className="file-manager-upload-summary" role="status" aria-live="polite">
+                <span>{uploadMessage}</span>
+                {uploads.length ? (
+                  <>
+                    <ProgressBar value={overallUploadProgress} />
+                    <small>
+                      总体传输 {overallUploadProgress}% · {formatBytes(uploadedBytes)} / {formatBytes(totalUploadBytes)}
+                    </small>
+                  </>
+                ) : uploading ? (
+                  <LoadingState label="正在读取文件夹，请稍候…" />
+                ) : null}
+              </div>
+            ) : null}
             {uploadError ? <ErrorState message={uploadError} /> : null}
             {visibleUploads.length ? (
               <div className="upload-list" aria-label="未完成及失败的上传文件">
@@ -682,7 +1051,9 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                   <div className="upload-row" key={item.id}>
                     <div>
                       <strong title={item.relativePath}>{item.relativePath}</strong>
-                      <span className={item.status === "上传失败" ? "error-text" : undefined} title={`${item.status} · ${item.detail}`}>{item.status} · {item.detail}</span>
+                      <span className={item.status === "上传失败" ? "error-text" : undefined} title={`${item.status} · ${item.detail}`}>
+                        {item.status} · {item.detail}
+                      </span>
                     </div>
                     <ProgressBar value={item.progress} />
                   </div>
@@ -691,90 +1062,251 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
             ) : null}
           </Card>
         ) : null}
+
         <Card className="file-manager-browser">
           <CardHeader
-            title={pointCloudMode ? directory ? `按文件夹探查 · ${filteredEntries.length}` : "按文件夹探查" : directory ? `当前目录 · ${filteredEntries.length}` : "当前目录"}
-            description={directory ? directory.path.split("/").at(-1) || directory.root_path : "读取已开放的顶层目录。"}
-            actions={pointCloudMode ? (
-              <div className="file-manager-toolbar is-point-cloud">
-                <select value={syncTarget} onChange={event => setSyncTarget(event.target.value)} aria-label="同步范围" disabled={syncing}>
-                  <option value="all">同步两个项目</option>
-                  <option value="RadioGS-perlight">RadioGS-perlight</option>
-                  <option value="RadioGS-stage1">RadioGS-stage1</option>
-                </select>
-                <Button variant="secondary" size="sm" onClick={() => void syncCache()} disabled={syncing || !roots.length}>{syncing ? "正在同步…" : "同步目录"}</Button>
-              </div>
-            ) : undefined}
+            title={
+              pointCloudMode
+                ? directory
+                  ? `按文件夹探查 · ${filteredEntries.length}`
+                  : "按文件夹探查"
+                : directory
+                ? `当前目录 · ${filteredEntries.length}`
+                : "当前目录"
+            }
+            description={
+              directory
+                ? isRemote
+                  ? `${activeConnection?.name || "服务器"} ~${directory.path ? `/${directory.path}` : ""}`
+                  : directory.path.split("/").at(-1) || directory.root_path
+                : isRemote
+                ? `连接到 ${activeConnection?.name || "远程服务器"} 用户目录…`
+                : "读取已开放的顶层目录。"
+            }
+            actions={
+              pointCloudMode && !isRemote ? (
+                <div className="file-manager-toolbar is-point-cloud">
+                  <select value={syncTarget} onChange={event => setSyncTarget(event.target.value)} aria-label="同步范围" disabled={syncing}>
+                    <option value="all">同步两个项目</option>
+                    <option value="RadioGS-perlight">RadioGS-perlight</option>
+                    <option value="RadioGS-stage1">RadioGS-stage1</option>
+                  </select>
+                  <Button variant="secondary" size="sm" onClick={() => void syncCache()} disabled={syncing || !roots.length}>
+                    {syncing ? "正在同步…" : "同步目录"}
+                  </Button>
+                </div>
+              ) : undefined
+            }
           />
           <div className="file-manager-meta">
             {directory ? (
               <>
-                <span><Badge tone={directory.cached ? "success" : "info"}>{directory.cached ? "缓存" : "已同步"}</Badge> {formatDate(directory.generated_at)}</span>
-                <span>{directory.cache_ttl_seconds / 60} 分钟缓存</span>
+                <span>
+                  <Badge tone={isRemote ? "info" : directory.cached ? "success" : "info"}>
+                    {isRemote ? `SFTP · ${activeConnection?.name || "远程"}` : directory.cached ? "缓存" : "已同步"}
+                  </Badge>{" "}
+                  {formatDate(directory.generated_at)}
+                </span>
+                <span>{isRemote ? "用户主目录 (~)" : `${directory.cache_ttl_seconds / 60} 分钟缓存`}</span>
                 <span>最多 {directory.max_entries} 项</span>
                 {syncMessage ? <span>{syncMessage}</span> : null}
               </>
-            ) : <span>正在读取目录状态…</span>}
+            ) : (
+              <span>正在读取目录状态…</span>
+            )}
           </div>
-          <button className="file-manager-up" type="button" onClick={() => goToDirectory(pathSegments.slice(0, -1).join("/"))} disabled={!path}>← 返回上级</button>
+          <button className="file-manager-up" type="button" onClick={() => goToDirectory(pathSegments.slice(0, -1).join("/"))} disabled={!path}>
+            ← 返回上级
+          </button>
           <nav className="file-manager-breadcrumb" aria-label="目录路径">
-            <button type="button" onClick={() => goToDirectory("")} disabled={!path} aria-current={!path ? "page" : undefined}>{roots[selectedRootIndex]?.split("/").filter(Boolean).at(-1) || "顶层目录"}</button>
-            {pathSegments.map((segment, index) => <span key={pathAt(index)}><b>/</b><button type="button" onClick={() => goToDirectory(pathAt(index))} disabled={index === pathSegments.length - 1} aria-current={index === pathSegments.length - 1 ? "page" : undefined}>{segment}</button></span>)}
+            <button type="button" onClick={() => goToDirectory("")} disabled={!path} aria-current={!path ? "page" : undefined}>
+              {currentDisplayRootName}
+            </button>
+            {pathSegments.map((segment, index) => (
+              <span key={pathAt(index)}>
+                <b>/</b>
+                <button
+                  type="button"
+                  onClick={() => goToDirectory(pathAt(index))}
+                  disabled={index === pathSegments.length - 1}
+                  aria-current={index === pathSegments.length - 1 ? "page" : undefined}
+                >
+                  {segment}
+                </button>
+              </span>
+            ))}
           </nav>
 
-          {loading ? <LoadingState label="正在读取目录…" /> : !roots.length ? <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" /> : filteredEntries.length ? (
-            pointCloudMode ? (
-            <div className="file-manager-list">
-              {filteredEntries.map((entry: FileManagerEntry) => (
-                <div className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} key={entry.path}>
-                  <button className="file-manager-entry-main" type="button" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}>
-                    <span className="file-manager-entry-mark">{entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}</span>
-                    <span className="file-manager-entry-details">
-                      <strong title={entry.name}>{entry.name}</strong>
-                      {pointCloudMode && entry.type === "file" ? <span className="file-manager-entry-relative" title={entry.relative_path}>{entry.relative_path}</span> : null}
-                      <small>
-                        {entry.type === "directory" ? entry.symlink ? "软链接文件夹" : "文件夹" : entry.type === "file" ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` : "不支持的链接或特殊文件"}
-                      </small>
+          {loading ? (
+            <LoadingState label={isRemote ? `正在连接 ${activeConnection?.name || "远程服务器"} 读取目录…` : "正在读取目录…"} />
+          ) : !isRemote && !roots.length ? (
+            <EmptyState title="没有已暴露的文件夹" detail="请在服务端配置可浏览目录。" />
+          ) : filteredEntries.length ? (
+            pointCloudMode && !isRemote ? (
+              <div className="file-manager-list">
+                {filteredEntries.map((entry: FileManagerEntry) => (
+                  <div
+                    className={`file-manager-entry${pointCloudMode && entry.type === "file" ? " is-recursive-ply" : ""}${
+                      previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""
+                    }`}
+                    key={entry.path}
+                  >
+                    <button
+                      className="file-manager-entry-main"
+                      type="button"
+                      onClick={() => (entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry))}
+                      disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}
+                    >
+                      <span className="file-manager-entry-mark">
+                        {entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}
+                      </span>
+                      <span className="file-manager-entry-details">
+                        <strong title={entry.name}>{entry.name}</strong>
+                        {pointCloudMode && entry.type === "file" ? (
+                          <span className="file-manager-entry-relative" title={entry.relative_path}>
+                            {entry.relative_path}
+                          </span>
+                        ) : null}
+                        <small>
+                          {entry.type === "directory"
+                            ? entry.symlink
+                              ? "软链接文件夹"
+                              : "文件夹"
+                            : entry.type === "file"
+                            ? `${formatBytes(entry.size)} · ${formatDate(entry.modified)}`
+                            : "不支持的链接或特殊文件"}
+                        </small>
+                      </span>
+                    </button>
+                    <span className="file-manager-entry-actions">
+                      {entry.symlink ? <Badge tone="info">软链接</Badge> : null}
+                      {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? (
+                        <button
+                          className="button button-secondary button-sm"
+                          type="button"
+                          onClick={() => openPreview(entry)}
+                        >{`预览至 ${activePreview === 0 ? "A" : "B"}`}</button>
+                      ) : null}
+                      {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? (
+                        <span className="muted-line">暂不支持预览</span>
+                      ) : null}
+                      {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? (
+                        <a
+                          className="button button-secondary button-sm"
+                          href={getEntryDownloadUrl(entry)}
+                          download
+                          title={`下载 ${entry.name}`}
+                          aria-label={`下载 ${entry.name}`}
+                        >
+                          下载
+                        </a>
+                      ) : null}
                     </span>
-                  </button>
-                  <span className="file-manager-entry-actions">
-                    {entry.symlink ? <Badge tone="info">软链接</Badge> : null}
-                    {entry.type === "file" && VIEWABLE_EXTENSIONS.has(entry.extension) ? <button className="button button-secondary button-sm" type="button" onClick={() => openPreview(entry)}>{`预览至 ${activePreview === 0 ? "A" : "B"}`}</button> : null}
-                    {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? <span className="muted-line">暂不支持预览</span> : null}
-                    {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="file-manager-table" role="table" aria-label="当前目录文件">
-              <div className="file-manager-table-head" role="row">
-                {([["name", "文件名"], ["type", "类型"], ["modified", "修改时间"]] as [SortKey, string][]).map(([key, label]) => (
-                  <button key={key} type="button" role="columnheader" className={sortKey === key ? "is-active" : undefined} aria-sort={sortKey === key ? sortAscending ? "ascending" : "descending" : "none"} onClick={() => { if (sortKey === key) setSortAscending(value => !value); else { setSortKey(key); setSortAscending(key !== "modified"); } }}>
-                    {label}<span aria-hidden="true">{sortKey === key ? sortAscending ? " ↑" : " ↓" : ""}</span>
-                  </button>
+                  </div>
                 ))}
-                <span role="columnheader">大小</span>
-                <span role="columnheader" className="file-manager-table-action">操作</span>
               </div>
-              {filteredEntries.map((entry: FileManagerEntry) => (
-                <div className={`file-manager-table-row${previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path) ? " is-selected" : ""}`} role="row" key={entry.path}>
-                  <button className="file-manager-table-name" type="button" role="cell" onClick={() => entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry)} disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))} title={entry.name}>
-                    <span className="file-manager-entry-mark">{entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}</span>
-                    <strong>{entry.name}</strong>
-                  </button>
-                  <span role="cell">{entryTypeLabel(entry)}</span>
-                  <span role="cell">{formatDate(entry.modified)}</span>
-                  <span role="cell">{entry.type === "file" ? formatBytes(entry.size) : "—"}</span>
-                  <span role="cell" className="file-manager-table-action">
-                    {entry.type === "file" ? <a className="button button-secondary button-sm" href={downloadUrl(selectedRootIndex, entry.path)} download title={`下载 ${entry.name}`} aria-label={`下载 ${entry.name}`}>下载</a> : null}
+            ) : (
+              <div className="file-manager-table" role="table" aria-label="当前目录文件">
+                <div className="file-manager-table-head" role="row">
+                  {([
+                    ["name", "文件名"],
+                    ["type", "类型"],
+                    ["modified", "修改时间"],
+                  ] as [SortKey, string][]).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="columnheader"
+                      className={sortKey === key ? "is-active" : undefined}
+                      aria-sort={sortKey === key ? (sortAscending ? "ascending" : "descending") : "none"}
+                      onClick={() => {
+                        if (sortKey === key) setSortAscending(value => !value);
+                        else {
+                          setSortKey(key);
+                          setSortAscending(key !== "modified");
+                        }
+                      }}
+                    >
+                      {label}
+                      <span aria-hidden="true">{sortKey === key ? (sortAscending ? " ↑" : " ↓") : ""}</span>
+                    </button>
+                  ))}
+                  <span role="columnheader">大小</span>
+                  <span role="columnheader" className="file-manager-table-action">
+                    操作
                   </span>
                 </div>
-              ))}
+                {filteredEntries.map((entry: FileManagerEntry) => (
+                  <div
+                    className={`file-manager-table-row${
+                      previewFiles.some(file => file?.rootIndex === selectedRootIndex && file.path === entry.path)
+                        ? " is-selected"
+                        : ""
+                    }`}
+                    role="row"
+                    key={entry.path}
+                  >
+                    <button
+                      className="file-manager-table-name"
+                      type="button"
+                      role="cell"
+                      onClick={() => (entry.type === "directory" ? goToDirectory(entry.path) : openPreview(entry))}
+                      disabled={entry.type !== "directory" && (entry.type !== "file" || !VIEWABLE_EXTENSIONS.has(entry.extension))}
+                      title={entry.name}
+                    >
+                      <span className="file-manager-entry-mark">
+                        {entry.type === "directory" ? (entry.symlink ? "⇢" : "◇") : entry.type === "file" ? "·" : "×"}
+                      </span>
+                      <strong>{entry.name}</strong>
+                    </button>
+                    <span role="cell">{entryTypeLabel(entry)}</span>
+                    <span role="cell">{formatDate(entry.modified)}</span>
+                    <span role="cell">{entry.type === "file" ? formatBytes(entry.size) : "—"}</span>
+                    <span role="cell" className="file-manager-table-action">
+                      {entry.type === "file" ? (
+                        <a
+                          className="button button-secondary button-sm"
+                          href={getEntryDownloadUrl(entry)}
+                          download
+                          title={`下载 ${entry.name}`}
+                          aria-label={`下载 ${entry.name}`}
+                        >
+                          下载
+                        </a>
+                      ) : null}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            <EmptyState
+              title={
+                isRemote
+                  ? "此目录为空"
+                  : roots.length
+                  ? pointCloudMode
+                    ? "此目录没有文件夹或 PLY 文件"
+                    : "此目录为空"
+                  : "没有已暴露的目录"
+              }
+              detail={
+                isRemote
+                  ? "可以返回上级目录，或在顶部点击“常用目录”快速跳转。"
+                  : roots.length
+                  ? pointCloudMode
+                    ? "可以返回上级目录，或选择常用目录。"
+                    : "可以返回上级目录。"
+                  : "服务端尚未配置可浏览目录。"
+              }
+            />
+          )}
+          {directory?.truncated ? (
+            <div className="inline-message">
+              <Badge tone="warning">已截断</Badge>
+              <span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span>
             </div>
-          )
-          ) : <EmptyState title={roots.length ? pointCloudMode ? "此目录没有文件夹或 PLY 文件" : "此目录为空" : "没有已暴露的目录"} detail={roots.length ? pointCloudMode ? "可以返回上级目录，或选择其他收藏目录。" : "可以返回上级目录。" : "服务端尚未配置可浏览目录。"} />}
-          {directory?.truncated ? <div className="inline-message"><Badge tone="warning">已截断</Badge><span>当前目录条目超过 {directory.max_entries} 个，只显示前 {directory.max_entries} 项。</span></div> : null}
+          ) : null}
         </Card>
       </div>
     </>

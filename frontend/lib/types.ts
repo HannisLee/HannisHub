@@ -156,6 +156,17 @@ export interface FileManagerFavorite {
   path: string;
 }
 
+export interface FileConnection {
+  id: string;
+  name: string;
+  type: "local" | "ssh";
+  host?: string;
+  port?: number;
+  username?: string;
+  auth_type?: string;
+  last_test_ok?: boolean | null;
+}
+
 export interface FileManagerGitPullResponse {
   root_index: number;
   path: string;

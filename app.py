@@ -66,6 +66,7 @@ from server.file_manager import (
     sync_roots,
 )
 from server.point_cloud import resolve_cloud_file
+from server import remote_files
 import prompt_service.app as prompt_service_app
 import server.app as server_manager_app
 
@@ -133,6 +134,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        remote_files.close_all()
         auto_start_task.cancel()
         terminal_reaper.cancel()
         await terminal_manager.manager.shutdown_all()
@@ -645,6 +647,129 @@ async def file_manager_resource(
     """返回受限目录中的原始资源，供 Markdown 内的相对图片与链接引用。"""
     file_path = resolve_file(root, path)
     return FileResponse(file_path, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/file-manager/connections")
+async def file_manager_connections():
+    """返回文件管理可用的连接列表（包含本机与已保存的 SSH 服务器连接）。"""
+    return JSONResponse({"connections": await run_in_threadpool(remote_files.list_file_connections)})
+
+
+@app.get("/api/file-manager/common-directories")
+async def file_manager_common_directories():
+    """读取已保存的常用目录列表。"""
+    return JSONResponse({"directories": await run_in_threadpool(remote_files.get_common_directories)})
+
+
+@app.put("/api/file-manager/common-directories")
+async def update_file_manager_common_directories(payload: dict[str, Any] = Body(...)):
+    """保存常用目录列表。"""
+    return JSONResponse({"directories": await run_in_threadpool(remote_files.save_common_directories, payload.get("directories"))})
+
+
+@app.get("/api/file-manager/remote/{connection_id}/directory")
+async def file_manager_remote_directory(
+    connection_id: str,
+    path: str = Query("", max_length=4_096),
+):
+    """返回远程服务器用户目录内指定路径的直接子项。"""
+    return JSONResponse(await run_in_threadpool(remote_files.list_directory, connection_id, path))
+
+
+@app.get("/api/file-manager/remote/{connection_id}/markdown")
+async def file_manager_remote_markdown(
+    connection_id: str,
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """读取远程服务器上的单个 Markdown 文档内容。"""
+    return JSONResponse(await run_in_threadpool(remote_files.read_markdown, connection_id, path))
+
+
+@app.get("/api/file-manager/remote/{connection_id}/download")
+async def file_manager_remote_download(
+    request: Request,
+    connection_id: str,
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """经跳板流式下载远程服务器用户目录内的普通文件。"""
+    return await run_in_threadpool(
+        remote_files.file_response,
+        connection_id,
+        path,
+        request.headers.get("range"),
+        inline=False,
+    )
+
+
+@app.get("/api/file-manager/remote/{connection_id}/resource")
+async def file_manager_remote_resource(
+    request: Request,
+    connection_id: str,
+    path: str = Query(..., min_length=1, max_length=4_096),
+):
+    """返回远程服务器中的原始资源（供 Markdown 内联图片等引用）。"""
+    return await run_in_threadpool(
+        remote_files.file_response,
+        connection_id,
+        path,
+        request.headers.get("range"),
+        inline=True,
+    )
+
+
+@app.post("/api/file-manager/remote/{connection_id}/upload")
+async def file_manager_remote_upload(
+    request: Request,
+    connection_id: str,
+    path: str = Query("", max_length=4_096),
+    overwrite: bool = Query(False),
+):
+    """以原始请求体上传小文件到远程服务器目录，相对路径放在 x-file-path 头。"""
+    file_path = unquote(request.headers.get("x-file-path", ""))
+    return JSONResponse(await remote_files.upload_file(connection_id, path, file_path, request, overwrite=overwrite))
+
+
+@app.post("/api/file-manager/remote/{connection_id}/uploads")
+async def file_manager_remote_upload_init(
+    request: Request,
+    connection_id: str,
+    path: str = Query("", max_length=4_096),
+    payload: dict[str, Any] = Body(...),
+):
+    """在远程服务器上创建分片上传会话。"""
+    return JSONResponse(await run_in_threadpool(remote_files.init_chunked_upload, connection_id, path, payload, request))
+
+
+@app.put("/api/file-manager/remote/{connection_id}/uploads/{upload_id}/chunks/{index}")
+async def file_manager_remote_upload_chunk(
+    request: Request,
+    connection_id: str,
+    upload_id: str,
+    index: int,
+):
+    """写入远程分片。"""
+    return JSONResponse(await remote_files.upload_chunk(upload_id, index, request))
+
+
+@app.post("/api/file-manager/remote/{connection_id}/uploads/{upload_id}/complete")
+async def file_manager_remote_upload_complete(
+    request: Request,
+    connection_id: str,
+    upload_id: str,
+):
+    """在远程服务器合并分片文件。"""
+    return JSONResponse(await run_in_threadpool(remote_files.complete_chunked_upload, upload_id, request))
+
+
+@app.delete("/api/file-manager/remote/{connection_id}/uploads/{upload_id}")
+async def file_manager_remote_upload_abort(
+    request: Request,
+    connection_id: str,
+    upload_id: str,
+    reason: str = Query("", max_length=200),
+):
+    """取消远程分片上传并清理临时文件。"""
+    return JSONResponse(await run_in_threadpool(remote_files.abort_chunked_upload, upload_id, request, reason))
 
 
 @app.get("/api/chat-lobby/profile")

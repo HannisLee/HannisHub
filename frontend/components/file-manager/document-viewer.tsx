@@ -3,14 +3,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
-import type { FileManagerDirectoryResponse, FileManagerEntry, FileManagerFavorite, FileManagerGitPullResponse, MarkdownDocument } from "../../lib/types";
+import type {
+  FileConnection,
+  FileManagerDirectoryResponse,
+  FileManagerEntry,
+  MarkdownDocument,
+} from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
+import { FileConnectionBar } from "./file-connection-bar";
 
 type MarkdownLinkHandler = (path: string) => void;
 
 const DEFAULT_DOCUMENT_FOLDER = "/home/lihan/reproduce/RadioGS-stage1";
 const DOCUMENT_LOCATION_KEY = "hannishub_document_viewer_location";
-const PROJECT_DOCUMENT_SUFFIX = "LIHAN/DOC";
+const ACTIVE_CONN_KEY = "hannishub_doc_active_connection";
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkdn"]);
 
 interface SavedDocumentLocation {
@@ -58,7 +64,10 @@ function compareDocumentEntries(left: FileManagerEntry, right: FileManagerEntry)
   return left.name.localeCompare(right.name, "zh-CN", { numeric: true });
 }
 
-function resourceUrl(rootIndex: number, path: string): string {
+function resourceUrl(rootIndex: number, path: string, connectionId?: string): string {
+  if (connectionId && connectionId !== "local") {
+    return `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId)}/resource?${new URLSearchParams({ path })}`;
+  }
   return `${API_PATHS.fileManager}/resource?${new URLSearchParams({ root: String(rootIndex), path })}`;
 }
 
@@ -84,6 +93,7 @@ function inlineMarkdown(
   sourcePath: string,
   onOpenMarkdown: MarkdownLinkHandler,
   keyPrefix: string,
+  connectionId?: string,
 ): ReactNode[] {
   const tokenPattern = /(!?\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
   const result: ReactNode[] = [];
@@ -98,27 +108,56 @@ function inlineMarkdown(
     const link = token.match(/^\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
     if (image) {
       const imagePath = normalizeLocalReference(image[2], sourcePath);
-      result.push(imagePath
-        // Markdown 相对图片没有固定尺寸，保留原始比例以兼容文档资源。
-        // eslint-disable-next-line @next/next/no-img-element
-        ? <img className="markdown-image" key={key} src={resourceUrl(rootIndex, imagePath)} alt={image[1]} loading="lazy" />
-        : <span className="markdown-missing-image" key={key}>图片：{image[1] || image[2]}</span>);
+      result.push(
+        imagePath ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="markdown-image"
+            key={key}
+            src={resourceUrl(rootIndex, imagePath, connectionId)}
+            alt={image[1]}
+            loading="lazy"
+          />
+        ) : (
+          <span className="markdown-missing-image" key={key}>
+            图片：{image[1] || image[2]}
+          </span>
+        )
+      );
     } else if (link) {
       const localPath = normalizeLocalReference(link[2], sourcePath);
       if (localPath?.match(/\.(md|markdown|mdown|mkdn)$/i)) {
-        result.push(<button className="markdown-link-button" type="button" key={key} onClick={() => onOpenMarkdown(localPath)}>{link[1]}</button>);
+        result.push(
+          <button className="markdown-link-button" type="button" key={key} onClick={() => onOpenMarkdown(localPath)}>
+            {link[1]}
+          </button>
+        );
       } else if (localPath) {
-        result.push(<a className="markdown-link" key={key} href={resourceUrl(rootIndex, localPath)} target="_blank" rel="noreferrer">{link[1]}</a>);
+        result.push(
+          <a className="markdown-link" key={key} href={resourceUrl(rootIndex, localPath, connectionId)} target="_blank" rel="noreferrer">
+            {link[1]}
+          </a>
+        );
       } else {
         const href = link[2].replace(/^<|>$/g, "");
-        result.push(<a className="markdown-link" key={key} href={href} target={href.startsWith("#") ? undefined : "_blank"} rel={href.startsWith("#") ? undefined : "noreferrer"}>{link[1]}</a>);
+        result.push(
+          <a
+            className="markdown-link"
+            key={key}
+            href={href}
+            target={href.startsWith("#") ? undefined : "_blank"}
+            rel={href.startsWith("#") ? undefined : "noreferrer"}
+          >
+            {link[1]}
+          </a>
+        );
       }
     } else if (token.startsWith("`")) {
       result.push(<code key={key}>{token.slice(1, -1)}</code>);
     } else if (token.startsWith("**") || token.startsWith("__")) {
-      result.push(<strong key={key}>{inlineMarkdown(token.slice(2, -2), rootIndex, sourcePath, onOpenMarkdown, `${key}-strong`)}</strong>);
+      result.push(<strong key={key}>{inlineMarkdown(token.slice(2, -2), rootIndex, sourcePath, onOpenMarkdown, `${key}-strong`, connectionId)}</strong>);
     } else {
-      result.push(<em key={key}>{inlineMarkdown(token.slice(1, -1), rootIndex, sourcePath, onOpenMarkdown, `${key}-em`)}</em>);
+      result.push(<em key={key}>{inlineMarkdown(token.slice(1, -1), rootIndex, sourcePath, onOpenMarkdown, `${key}-em`, connectionId)}</em>);
     }
     cursor = match.index + token.length;
   }
@@ -138,11 +177,18 @@ function isBlockStart(line: string): boolean {
   return /^\s*(#{1,6}\s+|```|~~~|>\s?|[-*+]\s+|\d+\.\s+|([-*_])(?:\s*\2){2,}\s*$)/.test(line);
 }
 
-function MarkdownContent({ content, rootIndex, sourcePath, onOpenMarkdown }: {
+function MarkdownContent({
+  content,
+  rootIndex,
+  sourcePath,
+  onOpenMarkdown,
+  connectionId,
+}: {
   content: string;
   rootIndex: number;
   sourcePath: string;
   onOpenMarkdown: MarkdownLinkHandler;
+  connectionId?: string;
 }) {
   const lines = content.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
@@ -153,7 +199,7 @@ function MarkdownContent({ content, rootIndex, sourcePath, onOpenMarkdown }: {
     const ending = lines.slice(1).findIndex(line => line.trim() === "---");
     if (ending >= 0) index = ending + 2;
   }
-  const inline = (text: string, key: string) => inlineMarkdown(text, rootIndex, sourcePath, onOpenMarkdown, key);
+  const inline = (text: string, key: string) => inlineMarkdown(text, rootIndex, sourcePath, onOpenMarkdown, key, connectionId);
 
   while (index < lines.length) {
     const line = lines[index];
@@ -224,6 +270,13 @@ function MarkdownContent({ content, rootIndex, sourcePath, onOpenMarkdown }: {
 }
 
 export function DocumentViewer() {
+  // 连接与常用目录
+  const [connections, setConnections] = useState<FileConnection[]>([
+    { id: "local", name: "本机", type: "local" },
+  ]);
+  const [activeConnectionId, setActiveConnectionId] = useState<string>("local");
+  const [commonDirectories, setCommonDirectories] = useState<string[]>([]);
+
   const [roots, setRoots] = useState<string[]>([]);
   const [resolvedRoots, setResolvedRoots] = useState<string[]>([]);
   const [rootIndex, setRootIndex] = useState(0);
@@ -239,24 +292,51 @@ export function DocumentViewer() {
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [loadingPicker, setLoadingPicker] = useState(false);
   const [error, setError] = useState("");
-  const [favorites, setFavorites] = useState<FileManagerFavorite[]>([]);
-  const [favoriteError, setFavoriteError] = useState("");
-  const [favoriteBusy, setFavoriteBusy] = useState(false);
-  const [pullBusy, setPullBusy] = useState(false);
-  const [pullMessage, setPullMessage] = useState("");
-  const [pullError, setPullError] = useState("");
-  const [refreshToken, setRefreshToken] = useState(0);
-  const restoredDirectoryRef = useRef<FileManagerDirectoryResponse | null>(null);
-  const pulledFavoriteIdsRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    let active = true;
-    apiFetch<{ favorites: FileManagerFavorite[] }>(`${API_PATHS.fileManager}/favorites`)
-      .then(value => { if (active) setFavorites(value.favorites); })
-      .catch(value => { if (active) setFavoriteError(errorMessage(value)); });
-    return () => { active = false; };
+  const restoredDirectoryRef = useRef<FileManagerDirectoryResponse | null>(null);
+
+  const isRemote = activeConnectionId !== "local";
+  const activeConnection = connections.find(c => c.id === activeConnectionId);
+
+  // 载入可用连接
+  const loadConnections = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ connections: FileConnection[] }>(`${API_PATHS.fileManager}/connections`);
+      if (data.connections?.length) {
+        setConnections(data.connections);
+      }
+    } catch {
+      // 容错降级
+    }
   }, []);
 
+  // 载入常用目录
+  const loadCommonDirectories = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ directories: string[] }>(`${API_PATHS.fileManager}/common-directories`);
+      if (Array.isArray(data.directories)) {
+        setCommonDirectories(data.directories);
+      }
+    } catch {
+      // 容错
+    }
+  }, []);
+
+  // 保存常用目录
+  const handleSaveCommonDirectories = useCallback(async (dirs: string[]) => {
+    const res = await apiFetch<{ directories: string[] }>(`${API_PATHS.fileManager}/common-directories`, {
+      method: "PUT",
+      body: jsonBody({ directories: dirs }),
+    });
+    setCommonDirectories(res.directories || []);
+  }, []);
+
+  useEffect(() => {
+    void loadConnections();
+    void loadCommonDirectories();
+  }, [loadConnections, loadCommonDirectories]);
+
+  // 本机 settings 载入
   useEffect(() => {
     let active = true;
     apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
@@ -268,22 +348,47 @@ export function DocumentViewer() {
         let nextFolder = "";
         let nextDocumentPath = "";
         let nextDirectory: FileManagerDirectoryResponse | null = null;
+
+        try {
+          const savedConn = window.localStorage.getItem(ACTIVE_CONN_KEY);
+          if (savedConn && savedConn !== "local") {
+            setActiveConnectionId(savedConn);
+            setFolder("");
+            setRoots(nextRoots);
+            setResolvedRoots(nextResolvedRoots);
+            return;
+          }
+        } catch {
+          // 忽略
+        }
+
         let saved: SavedDocumentLocation | null = null;
-        try { saved = readSavedDocumentLocation(window.localStorage, nextResolvedRoots); } catch { /* 浏览器禁用存储时使用默认目录。 */ }
+        try {
+          saved = readSavedDocumentLocation(window.localStorage, nextResolvedRoots);
+        } catch {
+          /* 忽略 */
+        }
         if (saved) {
           try {
-            const data = await apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(nextResolvedRoots.indexOf(saved.root)), path: saved.folder })}`);
+            const data = await apiFetch<FileManagerDirectoryResponse>(
+              `${API_PATHS.fileManager}/directory?${new URLSearchParams({
+                root: String(nextResolvedRoots.indexOf(saved.root)),
+                path: saved.folder,
+              })}`
+            );
             if (!active) return;
             nextRootIndex = data.root_index;
             nextFolder = data.path;
             nextDirectory = data;
             nextDocumentPath = data.entries.some(entry => entry.path === saved?.document) ? saved.document : "";
           } catch {
-            // 上次目录被删除或链接失效时回退到默认目录。
+            // 回退
           }
         }
         if (!nextDirectory) {
-          const defaultRootIndex = nextResolvedRoots.findIndex(root => DEFAULT_DOCUMENT_FOLDER === root || DEFAULT_DOCUMENT_FOLDER.startsWith(`${root.replace(/\/+$/, "")}/`));
+          const defaultRootIndex = nextResolvedRoots.findIndex(
+            root => DEFAULT_DOCUMENT_FOLDER === root || DEFAULT_DOCUMENT_FOLDER.startsWith(`${root.replace(/\/+$/, "")}/`)
+          );
           if (defaultRootIndex >= 0) {
             const rootPath = nextResolvedRoots[defaultRootIndex].replace(/\/+$/, "");
             nextRootIndex = defaultRootIndex;
@@ -302,14 +407,21 @@ export function DocumentViewer() {
         }
         if (!nextRoots.length) setLoadingFiles(false);
       })
-      .catch(value => { if (active) { setError(errorMessage(value)); setLoadingFiles(false); } });
-    return () => { active = false; };
+      .catch(value => {
+        if (active) {
+          setError(errorMessage(value));
+          setLoadingFiles(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
+  // 读取目录条目（区分本机与远程 SSH）
   useEffect(() => {
-    if (!roots.length) return;
-    if (restoredDirectoryRef.current) {
-      // 初始化时已校验并取回上次目录，这里直接复用，避免同一次打开重复请求。
+    if (activeConnectionId === "local" && !roots.length) return;
+    if (activeConnectionId === "local" && restoredDirectoryRef.current) {
       const value = restoredDirectoryRef.current;
       restoredDirectoryRef.current = null;
       setDirectory(value);
@@ -326,8 +438,15 @@ export function DocumentViewer() {
       setLoadingFiles(false);
       return;
     }
+
     let active = true;
-    apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: folder })}`)
+    setLoadingFiles(true);
+    const directoryUrl =
+      activeConnectionId !== "local"
+        ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(activeConnectionId)}/directory?path=${encodeURIComponent(folder)}`
+        : `${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: folder })}`;
+
+    apiFetch<FileManagerDirectoryResponse>(directoryUrl)
       .then(value => {
         if (!active) return;
         setDirectory(value);
@@ -342,42 +461,82 @@ export function DocumentViewer() {
         });
         setError("");
       })
-      .catch(value => { if (active) setError(errorMessage(value)); })
-      .finally(() => { if (active) setLoadingFiles(false); });
-    return () => { active = false; };
-  }, [roots, rootIndex, folder, refreshToken]);
+      .catch(value => {
+        if (active) setError(errorMessage(value));
+      })
+      .finally(() => {
+        if (active) setLoadingFiles(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [roots, rootIndex, folder, activeConnectionId]);
 
+  // 读取 Markdown 内容（区分本机与远程 SSH）
   useEffect(() => {
     if (!selectedPath) return;
     let active = true;
-    apiFetch<MarkdownDocument>(`${API_PATHS.fileManager}/markdown?${new URLSearchParams({ root: String(rootIndex), path: selectedPath })}`)
-      .then(value => { if (active) setMarkdownDocument(value); })
-      .catch(value => { if (active) setError(errorMessage(value)); })
-      .finally(() => { if (active) setLoadingDocument(false); });
-    return () => { active = false; };
-  }, [rootIndex, selectedPath]);
+    setLoadingDocument(true);
+    const markdownUrl =
+      activeConnectionId !== "local"
+        ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(activeConnectionId)}/markdown?path=${encodeURIComponent(selectedPath)}`
+        : `${API_PATHS.fileManager}/markdown?${new URLSearchParams({ root: String(rootIndex), path: selectedPath })}`;
 
+    apiFetch<MarkdownDocument>(markdownUrl)
+      .then(value => {
+        if (active) setMarkdownDocument(value);
+      })
+      .catch(value => {
+        if (active) setError(errorMessage(value));
+      })
+      .finally(() => {
+        if (active) setLoadingDocument(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [rootIndex, selectedPath, activeConnectionId]);
+
+  // 记录最后一次浏览状态
   useEffect(() => {
-    if (!roots.length || !directory || directory.root_index !== rootIndex || directory.path !== folder || loadingDocument) return;
-    const openedDocument = markdownDocument
-      && markdownDocument.root_index === rootIndex
-      && markdownDocument.path.split("/").slice(0, -1).join("/") === folder
-      ? markdownDocument.path
-      : "";
     try {
-      window.localStorage.setItem(DOCUMENT_LOCATION_KEY, JSON.stringify({ root: resolvedRoots[rootIndex], folder, document: openedDocument }));
-    } catch { /* 存储不可写时仅跳过记录。 */ }
-  }, [roots, resolvedRoots, rootIndex, folder, directory, markdownDocument, loadingDocument]);
+      window.localStorage.setItem(ACTIVE_CONN_KEY, activeConnectionId);
+      if (activeConnectionId === "local" && roots.length && directory && directory.root_index === rootIndex && directory.path === folder && !loadingDocument) {
+        const openedDocument =
+          markdownDocument && markdownDocument.root_index === rootIndex && markdownDocument.path.split("/").slice(0, -1).join("/") === folder
+            ? markdownDocument.path
+            : "";
+        window.localStorage.setItem(DOCUMENT_LOCATION_KEY, JSON.stringify({ root: resolvedRoots[rootIndex], folder, document: openedDocument }));
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }, [roots, resolvedRoots, rootIndex, folder, directory, markdownDocument, loadingDocument, activeConnectionId]);
 
+  // 文件夹选择器数据加载
   useEffect(() => {
-    if (!pickerOpen || !roots.length) return;
+    if (!pickerOpen) return;
     let active = true;
-    apiFetch<FileManagerDirectoryResponse>(`${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: pickerPath })}`)
-      .then(value => { if (active) setPickerDirectory(value); })
-      .catch(value => { if (active) setError(errorMessage(value)); })
-      .finally(() => { if (active) setLoadingPicker(false); });
-    return () => { active = false; };
-  }, [pickerOpen, roots, rootIndex, pickerPath]);
+    setLoadingPicker(true);
+    const pickerUrl =
+      activeConnectionId !== "local"
+        ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(activeConnectionId)}/directory?path=${encodeURIComponent(pickerPath)}`
+        : `${API_PATHS.fileManager}/directory?${new URLSearchParams({ root: String(rootIndex), path: pickerPath })}`;
+
+    apiFetch<FileManagerDirectoryResponse>(pickerUrl)
+      .then(value => {
+        if (active) setPickerDirectory(value);
+      })
+      .catch(value => {
+        if (active) setError(errorMessage(value));
+      })
+      .finally(() => {
+        if (active) setLoadingPicker(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pickerOpen, roots, rootIndex, pickerPath, activeConnectionId]);
 
   const visibleEntries = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -386,12 +545,22 @@ export function DocumentViewer() {
       .filter(entry => !query || `${entry.name} ${entry.path}`.toLowerCase().includes(query))
       .sort(compareDocumentEntries);
   }, [directory, filter]);
+
   const pickerFolders = useMemo(() => pickerDirectory?.entries.filter(entry => entry.type === "directory") || [], [pickerDirectory]);
-  const folderLabel = `${resolvedRoots[rootIndex] || roots[rootIndex] || ""}${folder ? `/${folder}` : ""}`;
-  const currentFavorite = favorites.find(item => item.root_path === roots[rootIndex] && (item.path === folder || `${item.path ? `${item.path}/` : ""}${PROJECT_DOCUMENT_SUFFIX}` === folder));
-  const activeFavorite = favorites
-    .filter(item => item.root_path === roots[rootIndex] && (item.path === "" || folder === item.path || folder.startsWith(`${item.path}/`)))
-    .sort((left, right) => right.path.length - left.path.length)[0];
+
+  const folderLabel = isRemote
+    ? `${activeConnection?.name || "服务器"} ~${folder ? `/${folder}` : ""}`
+    : `${resolvedRoots[rootIndex] || roots[rootIndex] || ""}${folder ? `/${folder}` : ""}`;
+
+  function handleSwitchConnection(connId: string) {
+    if (connId === activeConnectionId) return;
+    setActiveConnectionId(connId);
+    setFolder("");
+    setPickerPath("");
+    setSelectedPath("");
+    setMarkdownDocument(null);
+    setFilter("");
+  }
 
   function chooseRoot(nextRoot: number) {
     setLoadingFiles(true);
@@ -451,149 +620,216 @@ export function DocumentViewer() {
     setPickerPath(path);
   }
 
-  async function updateFavorites(request: Promise<{ favorites: FileManagerFavorite[] }>) {
-    setFavoriteBusy(true);
-    setFavoriteError("");
-    try {
-      const value = await request;
-      setFavorites(value.favorites);
-    } catch (value) {
-      setFavoriteError(errorMessage(value));
-    } finally {
-      setFavoriteBusy(false);
-    }
-  }
+  return (
+    <section className="document-viewer">
+      {/* 顶部服务器连接与常用目录切换栏 */}
+      <FileConnectionBar
+        connections={connections}
+        activeConnectionId={activeConnectionId}
+        onSelectConnection={handleSwitchConnection}
+        commonDirectories={commonDirectories}
+        onSelectCommonDirectory={dir => openDirectory(dir)}
+        onRefreshConnections={loadConnections}
+        onSaveCommonDirectories={handleSaveCommonDirectories}
+      />
 
-  function addCurrentFavorite() {
-    // 在 LIHAN/DOC 内点击收藏时，收藏上级项目目录而不是文档目录本身。
-    const favoritePath = folder === PROJECT_DOCUMENT_SUFFIX
-      ? ""
-      : folder.endsWith(`/${PROJECT_DOCUMENT_SUFFIX}`)
-        ? folder.slice(0, -PROJECT_DOCUMENT_SUFFIX.length - 1)
-        : folder;
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites`, { method: "POST", body: jsonBody({ root: rootIndex, path: favoritePath }) }));
-  }
-
-  function removeFavorite(id: string) {
-    void updateFavorites(apiFetch(`${API_PATHS.fileManager}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" }));
-  }
-
-  function projectDocumentPath(favorite: FileManagerFavorite): string {
-    return favorite.path ? `${favorite.path}/${PROJECT_DOCUMENT_SUFFIX}` : PROJECT_DOCUMENT_SUFFIX;
-  }
-
-  const pullFavorite = useCallback(async (favorite: FileManagerFavorite): Promise<FileManagerGitPullResponse | null> => {
-    const nextRootIndex = roots.indexOf(favorite.root_path);
-    if (nextRootIndex < 0) return null;
-    setPullBusy(true);
-    setPullError("");
-    setPullMessage(`正在拉取 ${favorite.name} 的最新修改…`);
-    try {
-      const value = await apiFetch<FileManagerGitPullResponse>(`${API_PATHS.fileManager}/git-pull`, {
-        method: "POST",
-        body: jsonBody({ root: nextRootIndex, path: favorite.path }),
-      });
-      const documentState = value.document_exists ? "" : "；未找到 LIHAN/DOC";
-      setPullMessage(`${value.repository ? (value.updated ? "已拉取最新修改" : "项目已是最新") : "该收藏不是 Git 仓库，已跳过拉取"}${documentState}`);
-      return value;
-    } catch (value) {
-      const message = errorMessage(value);
-      setPullError(message);
-      setPullMessage("");
-      return null;
-    } finally {
-      setPullBusy(false);
-    }
-  }, [roots]);
-
-  async function pullActiveFavorite() {
-    if (!activeFavorite) return;
-    const result = await pullFavorite(activeFavorite);
-    if (result) setRefreshToken(value => value + 1);
-  }
-
-  async function openFavorite(favorite: FileManagerFavorite) {
-    const nextRootIndex = roots.indexOf(favorite.root_path);
-    if (nextRootIndex < 0) return;
-    setPickerOpen(false);
-    const result = await pullFavorite(favorite);
-    const nextFolder = result?.document_exists ? result.document_path : projectDocumentPath(favorite);
-    if (nextRootIndex !== rootIndex) setRootIndex(nextRootIndex);
-    if (nextRootIndex !== rootIndex || nextFolder !== folder) openDirectory(nextFolder);
-  }
-
-
-  useEffect(() => {
-    if (!roots.length || !activeFavorite) return;
-    if (pulledFavoriteIdsRef.current.has(activeFavorite.id)) return;
-    pulledFavoriteIdsRef.current.add(activeFavorite.id);
-    void pullFavorite(activeFavorite).then(result => {
-      if (result) setRefreshToken(value => value + 1);
-    });
-  }, [roots, activeFavorite, pullFavorite]);
-
-  return <section className="document-viewer">
-    <div className="document-folder-bar">
-      <div className="document-folder-control">
-        <span>文档文件夹</span>
-        <select value={rootIndex} onChange={event => chooseRoot(Number(event.target.value))} disabled={!roots.length} aria-label="选择开放目录">
-          {roots.map((root, index) => <option key={root} value={index}>{resolvedRoots[index] || root}</option>)}
-        </select>
-      </div>
-      <button className="document-folder-path" type="button" onClick={openPicker} disabled={!roots.length} title="选择文件夹">
-        <span>{folderLabel || "尚未配置开放目录"}</span><b>选择文件夹</b>
-      </button>
-      <Button variant="secondary" size="sm" type="button" onClick={openPicker} disabled={!roots.length}>浏览</Button>
-    </div>
-
-    <section className="document-favorites" aria-label="收藏文档路径">
-      <div className="document-favorites-head">
-        <div><strong>收藏路径</strong><span>{favorites.length ? "点击收藏项会先拉取项目，再打开 LIHAN/DOC" : "收藏常用项目路径后可快速切换"}</span></div>
-        <div className="document-favorites-actions">
-          <Button variant="secondary" size="sm" type="button" onClick={pullActiveFavorite} disabled={!activeFavorite || pullBusy || favoriteBusy}>{pullBusy ? "正在拉取…" : "拉取最新修改"}</Button>
-          <Button variant="secondary" size="sm" type="button" onClick={addCurrentFavorite} disabled={!roots.length || Boolean(currentFavorite) || favoriteBusy}>{currentFavorite ? "已收藏当前路径" : "收藏当前路径"}</Button>
+      <div className="document-folder-bar">
+        <div className="document-folder-control">
+          <span>{isRemote ? "远端目录" : "文档文件夹"}</span>
+          {isRemote ? (
+            <span style={{ fontSize: 13, color: "var(--color-brand)", fontWeight: 500 }}>
+              {activeConnection?.name || "远程服务器"} (用户根目录 ~)
+            </span>
+          ) : (
+            <select value={rootIndex} onChange={event => chooseRoot(Number(event.target.value))} disabled={!roots.length} aria-label="选择开放目录">
+              {roots.map((root, index) => (
+                <option key={root} value={index}>
+                  {resolvedRoots[index] || root}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
+        <button
+          className="document-folder-path"
+          type="button"
+          onClick={openPicker}
+          disabled={!isRemote && !roots.length}
+          title="选择文件夹"
+        >
+          <span>{folderLabel || (isRemote ? "用户根目录 (~)" : "尚未配置开放目录")}</span>
+          <b>选择文件夹</b>
+        </button>
+        <Button variant="secondary" size="sm" type="button" onClick={openPicker} disabled={!isRemote && !roots.length}>
+          浏览
+        </Button>
       </div>
-      {pullBusy || pullMessage ? <p className="document-sync-status" aria-live="polite">{pullBusy ? pullMessage || "正在拉取最新修改…" : pullMessage}</p> : null}
-      {pullError ? <ErrorState message={pullError} /> : null}
-      {favoriteError ? <ErrorState message={favoriteError} /> : null}
-      {favorites.length ? <div className="document-favorite-list">
-        {favorites.map(favorite => {
-          const favoriteRootIndex = roots.indexOf(favorite.root_path);
-          return <div className={`document-favorite${favorite.id === activeFavorite?.id ? " is-selected" : ""}`} key={favorite.id}>
-            <button className="document-favorite-main" type="button" onClick={() => openFavorite(favorite)} disabled={favoriteRootIndex < 0 || pullBusy} title={`${favorite.root_path}/${favorite.path}/${PROJECT_DOCUMENT_SUFFIX}`}>
-              <strong>{favorite.name}</strong>
-              <small>{favorite.root_path}/{favorite.path}/{PROJECT_DOCUMENT_SUFFIX}</small>
+
+      {pickerOpen ? (
+        <section className="document-folder-picker" aria-label="选择文档文件夹">
+          <div className="document-picker-head">
+            <div>
+              <strong>选择文档文件夹</strong>
+              <span>左侧会以文件夹层级展示当前目录中的 Markdown 文档。</span>
+            </div>
+            <Button variant="quiet" size="sm" type="button" onClick={() => setPickerOpen(false)}>
+              关闭
+            </Button>
+          </div>
+          <div className="document-picker-breadcrumb">
+            <button type="button" onClick={() => changePickerPath("")}>
+              {isRemote ? activeConnection?.name || "用户目录 (~)" : resolvedRoots[rootIndex] || roots[rootIndex]}
             </button>
-            <Button variant="quiet" size="sm" type="button" onClick={() => removeFavorite(favorite.id)} disabled={favoriteBusy}>移除</Button>
-          </div>;
-        })}
-      </div> : <p className="document-favorites-empty">还没有收藏路径。浏览到常用项目目录后，点击右上角“收藏当前路径”。</p>}
-    </section>
+            {pickerPath
+              .split("/")
+              .filter(Boolean)
+              .map((segment, index, segments) => (
+                <span key={`${index}-${segment}`}>
+                  <b>/</b>
+                  <button type="button" onClick={() => changePickerPath(segments.slice(0, index + 1).join("/"))}>
+                    {segment}
+                  </button>
+                </span>
+              ))}
+          </div>
+          <div className="document-picker-list">
+            {pickerPath ? (
+              <button
+                type="button"
+                className="document-picker-row"
+                onClick={() => changePickerPath(pickerPath.split("/").slice(0, -1).join("/"))}
+              >
+                <span>↑</span>上一级
+              </button>
+            ) : null}
+            {loadingPicker ? (
+              <LoadingState label="正在读取文件夹…" />
+            ) : pickerFolders.length ? (
+              pickerFolders.map(item => (
+                <button type="button" className="document-picker-row" key={item.path} onClick={() => changePickerPath(item.path)}>
+                  <span>□</span>
+                  {item.name}
+                </button>
+              ))
+            ) : (
+              <EmptyState title="没有下级文件夹" detail="可以直接使用当前文件夹。" />
+            )}
+          </div>
+          <div className="document-picker-actions">
+            <span>
+              {isRemote
+                ? `${activeConnection?.name || "服务器"} ~${pickerPath ? `/${pickerPath}` : ""}`
+                : `${resolvedRoots[rootIndex] || roots[rootIndex]}${pickerPath ? `/${pickerPath}` : ""}`}
+            </span>
+            <Button size="sm" type="button" onClick={applyFolder}>
+              使用此文件夹
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
-    {pickerOpen ? <section className="document-folder-picker" aria-label="选择文档文件夹">
-      <div className="document-picker-head"><div><strong>选择文档文件夹</strong><span>左侧会以文件夹层级展示当前目录中的 Markdown 文档。</span></div><Button variant="quiet" size="sm" type="button" onClick={() => setPickerOpen(false)}>关闭</Button></div>
-      <div className="document-picker-breadcrumb"><button type="button" onClick={() => changePickerPath("")}>{resolvedRoots[rootIndex] || roots[rootIndex]}</button>{pickerPath.split("/").filter(Boolean).map((segment, index, segments) => <span key={`${index}-${segment}`}><b>/</b><button type="button" onClick={() => changePickerPath(segments.slice(0, index + 1).join("/"))}>{segment}</button></span>)}</div>
-      <div className="document-picker-list">
-        {pickerPath ? <button type="button" className="document-picker-row" onClick={() => changePickerPath(pickerPath.split("/").slice(0, -1).join("/"))}><span>↑</span>上一级</button> : null}
-        {loadingPicker ? <LoadingState label="正在读取文件夹…" /> : pickerFolders.length ? pickerFolders.map(item => <button type="button" className="document-picker-row" key={item.path} onClick={() => changePickerPath(item.path)}><span>□</span>{item.name}</button>) : <EmptyState title="没有下级文件夹" detail="可以直接使用当前文件夹。" />}
+      {error ? <ErrorState message={error} /> : null}
+      <div className="document-workspace">
+        <aside className="document-index">
+          <div className="document-index-head">
+            <div>
+              <strong>文档目录</strong>
+              <span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(isMarkdownFile).length} 篇`}</span>
+            </div>
+            <div className="document-index-breadcrumb">
+              <button type="button" onClick={() => openDirectory("")}>
+                {isRemote ? activeConnection?.name || "用户目录 (~)" : resolvedRoots[rootIndex] || roots[rootIndex]}
+              </button>
+              {folder
+                .split("/")
+                .filter(Boolean)
+                .map((segment, index, segments) => (
+                  <span key={`${index}-${segment}`}>
+                    <b>/</b>
+                    <button type="button" onClick={() => openDirectory(segments.slice(0, index + 1).join("/"))}>
+                      {segment}
+                    </button>
+                  </span>
+                ))}
+            </div>
+            <input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选当前目录" aria-label="筛选当前目录" />
+          </div>
+          <div className="document-file-list">
+            {loadingFiles ? (
+              <LoadingState label="正在读取当前文件夹…" />
+            ) : folder ? (
+              <button type="button" className="document-file document-folder-entry" onClick={() => openDirectory(folder.split("/").slice(0, -1).join("/"))}>
+                <strong>↑ 上一级</strong>
+                <span>返回父文件夹</span>
+              </button>
+            ) : null}
+            {!loadingFiles && visibleEntries.length
+              ? visibleEntries.map(entry =>
+                  entry.type === "directory" ? (
+                    <button className="document-file document-folder-entry" type="button" key={entry.path} onClick={() => openDirectory(entry.path)} title={entry.path}>
+                      <strong>□ {entry.name}</strong>
+                      <span>{entry.symlink ? "软链接文件夹" : "文件夹"}</span>
+                    </button>
+                  ) : (
+                    <button
+                      className={`document-file${entry.path === selectedPath ? " is-selected" : ""}`}
+                      type="button"
+                      key={entry.path}
+                      onClick={() => selectDocument(entry.path)}
+                      title={entry.path}
+                    >
+                      <strong>{entry.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</strong>
+                      <span>{formatDate(entry.modified)}</span>
+                    </button>
+                  )
+                )
+              : null}
+            {!loadingFiles && !visibleEntries.length ? (
+              <EmptyState
+                title={directory?.entries.length ? "没有匹配的文档" : "这个文件夹没有 Markdown 文档"}
+                detail={
+                  directory?.entries.length
+                    ? "可调整上方筛选条件。"
+                    : "点击顶部“选择文件夹”或常用目录切换到包含 .md 文件的位置。"
+                }
+              />
+            ) : null}
+          </div>
+        </aside>
+        <main className="document-reader">
+          {loadingDocument ? (
+            <LoadingState label="正在打开文档…" />
+          ) : markdownDocument ? (
+            <>
+              <header className="document-reader-head">
+                <div>
+                  <span>
+                    {isRemote
+                      ? `${activeConnection?.name || "远程服务器"} ~/${markdownDocument.path}`
+                      : markdownDocument.path}
+                  </span>
+                  <h1>{markdownDocument.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</h1>
+                </div>
+                <small>
+                  {formatBytes(markdownDocument.size)} · {formatDate(markdownDocument.modified)}
+                </small>
+              </header>
+              <MarkdownContent
+                content={markdownDocument.content}
+                rootIndex={rootIndex}
+                sourcePath={markdownDocument.path}
+                onOpenMarkdown={openMarkdown}
+                connectionId={isRemote ? activeConnectionId : "local"}
+              />
+            </>
+          ) : (
+            <EmptyState
+              title="选择一篇文档开始阅读"
+              detail="文档会在这里以阅读排版显示，代码块、列表、表格和相对图片均会保留。"
+            />
+          )}
+        </main>
       </div>
-      <div className="document-picker-actions"><span>{`${resolvedRoots[rootIndex] || roots[rootIndex]}${pickerPath ? `/${pickerPath}` : ""}`}</span><Button size="sm" type="button" onClick={applyFolder}>使用此文件夹</Button></div>
-    </section> : null}
-
-    {error ? <ErrorState message={error} /> : null}
-    <div className="document-workspace">
-      <aside className="document-index">
-        <div className="document-index-head"><div><strong>文档目录</strong><span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(isMarkdownFile).length} 篇`}</span></div><div className="document-index-breadcrumb"><button type="button" onClick={() => openDirectory("")}>{resolvedRoots[rootIndex] || roots[rootIndex]}</button>{folder.split("/").filter(Boolean).map((segment, index, segments) => <span key={`${index}-${segment}`}><b>/</b><button type="button" onClick={() => openDirectory(segments.slice(0, index + 1).join("/"))}>{segment}</button></span>)}</div><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选当前目录" aria-label="筛选当前目录" /></div>
-        <div className="document-file-list">
-          {loadingFiles ? <LoadingState label="正在读取当前文件夹…" /> : folder ? <button type="button" className="document-file document-folder-entry" onClick={() => openDirectory(folder.split("/").slice(0, -1).join("/"))}><strong>↑ 上一级</strong><span>返回父文件夹</span></button> : null}
-          {!loadingFiles && visibleEntries.length ? visibleEntries.map(entry => entry.type === "directory" ? <button className="document-file document-folder-entry" type="button" key={entry.path} onClick={() => openDirectory(entry.path)} title={entry.path}><strong>□ {entry.name}</strong><span>{entry.symlink ? "软链接文件夹" : "文件夹"}</span></button> : <button className={`document-file${entry.path === selectedPath ? " is-selected" : ""}`} type="button" key={entry.path} onClick={() => selectDocument(entry.path)} title={entry.path}><strong>{entry.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</strong><span>{formatDate(entry.modified)}</span></button>) : null}
-          {!loadingFiles && !visibleEntries.length ? <EmptyState title={directory?.entries.length ? "没有匹配的文档" : "这个文件夹没有 Markdown 文档"} detail={directory?.entries.length ? "可调整上方筛选条件。" : "点击顶部“选择文件夹”切换到包含 .md 文件的位置。"} /> : null}
-        </div>
-      </aside>
-      <main className="document-reader">
-        {loadingDocument ? <LoadingState label="正在打开文档…" /> : markdownDocument ? <><header className="document-reader-head"><div><span>{markdownDocument.path}</span><h1>{markdownDocument.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</h1></div><small>{formatBytes(markdownDocument.size)} · {formatDate(markdownDocument.modified)}</small></header><MarkdownContent content={markdownDocument.content} rootIndex={rootIndex} sourcePath={markdownDocument.path} onOpenMarkdown={openMarkdown} /></> : <EmptyState title="选择一篇文档开始阅读" detail="文档会在这里以阅读排版显示，代码块、列表、表格和相对图片均会保留。" />}
-      </main>
-    </div>
-  </section>;
+    </section>
+  );
 }
