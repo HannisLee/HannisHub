@@ -2,9 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
-import { TerminalInputRecorder } from "../../lib/terminal-recorder";
 import type { TerminalCommandGroup, TerminalCommandGroupList, TerminalSession, TerminalSessionList } from "../../lib/types";
 
 /** 本地会话：expiresAt 为按服务端剩余秒数换算的本地释放时刻（毫秒） */
@@ -57,6 +56,8 @@ function commandsFromText(value: string): string[] {
   return value.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
 }
 
+interface FloatingPoint { x: number; y: number }
+
 export function TerminalWorkspace() {
   const [sessions, setSessions] = useState<LocalSession[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -77,20 +78,14 @@ export function TerminalWorkspace() {
   const [commandText, setCommandText] = useState("");
   const [commandSaving, setCommandSaving] = useState(false);
   const [commandFormError, setCommandFormError] = useState("");
-  const [recording, setRecording] = useState(false);
-  const [recordedCommands, setRecordedCommands] = useState<string[]>([]);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [runningCommandId, setRunningCommandId] = useState<string | null>(null);
+  const [floatPosition, setFloatPosition] = useState<FloatingPoint | null>(null);
   const sessionsRef = useRef<LocalSession[]>([]);
-  const recorderRef = useRef<TerminalInputRecorder | null>(null);
-  const recordingRef = useRef(false);
+  const floatDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
-
-  const getRecorder = useCallback(() => {
-    recorderRef.current ??= new TerminalInputRecorder();
-    return recorderRef.current;
-  }, []);
 
   const setActiveId = useCallback((id: string | null) => {
     setActiveIdState(id);
@@ -150,13 +145,6 @@ export function TerminalWorkspace() {
     };
   }, [refreshCommands]);
 
-  const onTerminalInput = useCallback((_id: string, data: string) => {
-    if (!recordingRef.current) return;
-    const completed = getRecorder().consume(data);
-    if (!completed.length) return;
-    setRecordedCommands(current => [...current, ...completed].slice(0, 20));
-  }, [getRecorder]);
-
   async function createSession() {
     setCreating(true);
     setNotice("");
@@ -175,54 +163,56 @@ export function TerminalWorkspace() {
   }
 
   function openCommandDialog(group?: TerminalCommandGroup) {
-    const keepRecordingDraft = !group && recordingRef.current;
-    recordingRef.current = false;
-    setRecording(false);
+    ensureFloatPosition();
+    setManagerOpen(false);
     setCommandDialogOpen(true);
     setCommandEditingId(group?.id ?? null);
-    setCommandName(group?.name ?? commandName);
-    setCommandText(group?.commands.join("\n") ?? (keepRecordingDraft ? recordedCommands.join("\n") : commandText));
-    setRecordedCommands(group?.commands ?? recordedCommands);
+    setCommandName(group?.name ?? "");
+    setCommandText(group?.commands.join("\n") ?? "");
     setCommandFormError("");
   }
 
   function closeCommandDialog() {
     setCommandDialogOpen(false);
-    recordingRef.current = false;
-    setRecording(false);
   }
 
-  function startRecording() {
-    const initial = commandsFromText(commandText);
-    if (!sessionsRef.current.length) {
-      setCommandFormError("请先新建一个终端，再开始录制。");
-      return;
-    }
-    getRecorder().reset();
-    setRecordedCommands(initial);
-    recordingRef.current = true;
-    setRecording(true);
-    setCommandDialogOpen(false);
-    setCommandFormError("");
-    setNotice("正在录制终端输入：请完整输入命令并回车，历史补全和 Tab 补全不会进入录制内容。");
+  function ensureFloatPosition() {
+    setFloatPosition(current => current ?? {
+      x: Math.max(8, window.innerWidth - Math.min(560, window.innerWidth - 16) - 32),
+      y: 84,
+    });
   }
 
-  function finishRecording() {
-    recordingRef.current = false;
-    setRecording(false);
-    setCommandText(recordedCommands.join("\n"));
-    setCommandDialogOpen(true);
+  function onFloatPointerDown(event: ReactPointerEvent<HTMLElement>) {
+    if (!floatPosition || event.button !== 0 || event.target instanceof Element && event.target.closest("button")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floatDragRef.current = { startX: event.clientX, startY: event.clientY, originX: floatPosition.x, originY: floatPosition.y };
+  }
+
+  function onFloatPointerMove(event: ReactPointerEvent<HTMLElement>) {
+    const drag = floatDragRef.current;
+    if (!drag) return;
+    const width = Math.min(560, window.innerWidth - 16);
+    setFloatPosition({
+      x: Math.min(Math.max(drag.originX + event.clientX - drag.startX, 8), Math.max(8, window.innerWidth - width - 8)),
+      y: Math.min(Math.max(drag.originY + event.clientY - drag.startY, 8), Math.max(8, window.innerHeight - 96)),
+    });
+  }
+
+  function onFloatPointerUp(event: ReactPointerEvent<HTMLElement>) {
+    if (floatDragRef.current) event.currentTarget.releasePointerCapture(event.pointerId);
+    floatDragRef.current = null;
   }
 
   async function saveCommandGroup() {
     const name = commandName.trim();
-    const commands = (recording ? recordedCommands : commandsFromText(commandText));
+    const commands = commandsFromText(commandText);
     if (!name) {
       setCommandFormError("请填写命令组名称");
       return;
     }
     if (!commands.length) {
-      setCommandFormError("至少填写或录制一条命令");
+      setCommandFormError("至少填写一条命令");
       return;
     }
     setCommandSaving(true);
@@ -240,8 +230,6 @@ export function TerminalWorkspace() {
         return current.map(item => (item.id === commandEditingId ? data.command : item));
       });
       setCommandDialogOpen(false);
-      recordingRef.current = false;
-      setRecording(false);
       setNotice(`已保存命令组「${data.command.name}」`);
     } catch (reason) {
       setCommandFormError(reason instanceof Error ? reason.message : "保存命令组失败");
@@ -344,13 +332,12 @@ export function TerminalWorkspace() {
   const remainingOf = (session: LocalSession) => Math.max(0, (session.expiresAt - now) / 1000);
   const active = sessions.find(item => item.id === activeId) ?? null;
   const remaining = active ? remainingOf(active) : 0;
-  const savedCommandCount = commandGroups.reduce((total, group) => total + group.commands.length, 0);
   const storageStatus = commandError
     ? "存储读取失败"
     : !commandsLoaded
       ? "存储读取中…"
       : commandGroups.length
-        ? `已存 ${commandGroups.length} 组 / ${savedCommandCount} 条`
+        ? `已存 ${commandGroups.length} 组`
         : "尚未存储";
 
   useEffect(() => {
@@ -367,38 +354,26 @@ export function TerminalWorkspace() {
       <div className="terminal-commandbar">
         <div className="terminal-command-list" aria-label="已保存的终端命令组">
           {commandGroups.map(group => (
-            <div className="terminal-command-item" key={group.id}>
-              <button
-                type="button"
-                className="terminal-command-chip"
-                onClick={() => void runCommandGroup(group)}
-                disabled={runningCommandId === group.id}
-                title={`新建终端并执行：\n${group.commands.join("\n")}`}
-              >
-                <span className="terminal-command-name">{group.name}</span>
-                <span className="terminal-command-count">{group.commands.length} 条</span>
-              </button>
-              <button type="button" className="terminal-command-edit" onClick={() => openCommandDialog(group)} title={`编辑 ${group.name}`} aria-label={`编辑 ${group.name}`}>
-                <Icon name="edit" />
-              </button>
-              <button type="button" className="terminal-command-delete" onClick={() => void deleteCommandGroup(group)} title={`删除 ${group.name}`} aria-label={`删除 ${group.name}`}>
-                <Icon name="close" />
-              </button>
-            </div>
+            <button
+              type="button"
+              className="terminal-command-chip"
+              key={group.id}
+              onClick={() => void runCommandGroup(group)}
+              disabled={runningCommandId === group.id}
+              title={`新建终端并执行：\n${group.commands.join("\n")}`}
+            >
+              <span className="terminal-command-name">{group.name}</span>
+            </button>
           ))}
           {commandsLoaded && !commandGroups.length ? <span className="terminal-command-empty">尚无命令组</span> : null}
         </div>
         <span className={`terminal-storage-status${commandError ? " is-error" : ""}`}>{storageStatus}</span>
-        {recording ? (
-          <span className="terminal-recording-status">
-            <span className="terminal-recording-dot" aria-hidden="true" />
-            正在录制 {recordedCommands.length} 条
-            <button type="button" className="terminal-recording-finish" onClick={finishRecording}>完成</button>
-          </span>
-        ) : null}
         <button type="button" className="terminal-command-new" onClick={() => openCommandDialog()} title="新建命令组">
           <Icon name="plus" />
           新建
+        </button>
+        <button type="button" className="terminal-command-manage" onClick={() => { ensureFloatPosition(); setManagerOpen(true); setCommandDialogOpen(false); }} title="管理命令组">
+          管理
         </button>
       </div>
       <div className="terminal-tabbar" role="tablist" aria-label="终端列表">
@@ -457,7 +432,7 @@ export function TerminalWorkspace() {
 
       <div className="terminal-stage">
         {sessions.map(session => (
-          <TerminalView key={session.id} sessionId={session.id} active={session.id === activeId} onEnded={onEnded} onActivity={onActivity} onStatus={onStatus} onInput={onTerminalInput} />
+          <TerminalView key={session.id} sessionId={session.id} active={session.id === activeId} onEnded={onEnded} onActivity={onActivity} onStatus={onStatus} />
         ))}
         {loaded && sessions.length === 0 ? (
           <div className="terminal-empty">
@@ -476,39 +451,88 @@ export function TerminalWorkspace() {
       ) : null}
 
       {commandDialogOpen ? createPortal(
-        <div
-          className="terminal-command-backdrop"
-          onMouseDown={event => { if (event.target === event.currentTarget) closeCommandDialog(); }}
+        <section
+          className="terminal-command-dialog"
+          style={floatPosition ? { left: floatPosition.x, top: floatPosition.y } : undefined}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="terminal-command-dialog-title"
         >
-          <section className="terminal-command-dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-command-dialog-title">
-            <header className="terminal-command-dialog-header">
-              <div>
-                <p className="terminal-command-dialog-kicker">Terminal Quick Commands</p>
-                <h2 id="terminal-command-dialog-title">{commandEditingId ? "编辑命令组" : "新建命令组"}</h2>
-              </div>
-              <button type="button" className="terminal-command-dialog-close" onClick={closeCommandDialog} aria-label="关闭">
-                <Icon name="close" />
-              </button>
-            </header>
-            <label className="field">
-              <span className="field-label">名称</span>
-              <input value={commandName} maxLength={40} autoFocus onChange={event => setCommandName(event.target.value)} placeholder="例如：构建前端" />
-            </label>
-            <label className="field">
-              <span className="field-label">命令（每行一条）</span>
-              <textarea value={commandText} rows={8} onChange={event => setCommandText(event.target.value)} placeholder={"npm run typecheck\nnpm run build"} />
-            </label>
-            <div className="terminal-command-recording-hint">
-              录制会捕获当前终端中按回车提交的输入；方向键 / 快捷键不会记录。开始后配置框自动收起，可在顶部横条点「完成」回填并核对。
+          <header
+            className="terminal-command-dialog-header"
+            onPointerDown={onFloatPointerDown}
+            onPointerMove={onFloatPointerMove}
+            onPointerUp={onFloatPointerUp}
+            onPointerCancel={onFloatPointerUp}
+          >
+            <div>
+              <p className="terminal-command-dialog-kicker">Terminal Quick Commands</p>
+              <h2 id="terminal-command-dialog-title">{commandEditingId ? "编辑命令组" : "新建命令组"}</h2>
             </div>
-            {commandFormError ? <p className="terminal-command-dialog-error" role="alert">{commandFormError}</p> : null}
-            <footer className="terminal-command-dialog-actions">
-              <Button variant="secondary" onClick={startRecording}>开始录制</Button>
-              <Button variant="quiet" onClick={closeCommandDialog}>取消</Button>
-              <Button onClick={() => void saveCommandGroup()} disabled={commandSaving}>{commandSaving ? "保存中…" : "保存"}</Button>
-            </footer>
-          </section>
-        </div>,
+            <button type="button" className="terminal-command-dialog-close" onClick={closeCommandDialog} aria-label="关闭">
+              <Icon name="close" />
+            </button>
+          </header>
+          <label className="field">
+            <span className="field-label">名称</span>
+            <input value={commandName} maxLength={40} autoFocus onChange={event => setCommandName(event.target.value)} placeholder="例如：构建前端" />
+          </label>
+          <label className="field">
+            <span className="field-label">命令（每行一条）</span>
+            <textarea value={commandText} rows={8} onChange={event => setCommandText(event.target.value)} placeholder={"npm run typecheck\nnpm run build"} />
+          </label>
+          <div className="terminal-command-dialog-hint">可以先在终端实际执行并确认结果，再把命令复制到这里逐行保存。</div>
+          {commandFormError ? <p className="terminal-command-dialog-error" role="alert">{commandFormError}</p> : null}
+          <footer className="terminal-command-dialog-actions">
+            <Button variant="quiet" onClick={closeCommandDialog}>取消</Button>
+            <Button onClick={() => void saveCommandGroup()} disabled={commandSaving}>{commandSaving ? "保存中…" : "保存"}</Button>
+          </footer>
+        </section>,
+        document.body,
+      ) : null}
+
+      {managerOpen ? createPortal(
+        <section
+          className="terminal-command-manager"
+          style={floatPosition ? { left: floatPosition.x, top: floatPosition.y } : undefined}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="terminal-command-manager-title"
+        >
+          <header
+            className="terminal-command-dialog-header"
+            onPointerDown={onFloatPointerDown}
+            onPointerMove={onFloatPointerMove}
+            onPointerUp={onFloatPointerUp}
+            onPointerCancel={onFloatPointerUp}
+          >
+            <div>
+              <p className="terminal-command-dialog-kicker">Terminal Quick Commands</p>
+              <h2 id="terminal-command-manager-title">管理命令组</h2>
+            </div>
+            <button type="button" className="terminal-command-dialog-close" onClick={() => setManagerOpen(false)} aria-label="关闭">
+              <Icon name="close" />
+            </button>
+          </header>
+          {commandGroups.length ? (
+            <ul className="terminal-command-manager-list">
+              {commandGroups.map(group => (
+                <li key={group.id}>
+                  <div>
+                    <strong>{group.name}</strong>
+                    <pre>{group.commands.join("\n")}</pre>
+                  </div>
+                  <div>
+                    <Button variant="secondary" size="sm" onClick={() => openCommandDialog(group)}>修改</Button>
+                    <Button variant="danger" size="sm" onClick={() => void deleteCommandGroup(group)}>删除</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="terminal-command-manager-empty">还没有可管理的命令组。</p>
+          )}
+        </section>,
         document.body,
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "lobby" | "users" | "smile" | "attach" | "download" | "file" | "terminal" | "plus" | "close" | "edit" | "chevronDown" | "grip";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "lobby" | "users" | "smile" | "attach" | "download" | "file" | "terminal" | "plus" | "close" | "chevronDown" | "grip";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -29,7 +29,6 @@ const paths: Record<IconName, ReactNode> = {
   chevronDown: <><path d="m6 9 6 6 6-6" /></>,
   grip: <><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></>,
   close: <><path d="m6.5 6.5 11 11M17.5 6.5l-11 11" /></>,
-  edit: <><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z" /><path d="m14 7 3 3" /></>,
   panelExpand: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M9.5 4.5v15" /><path d="m14 9.5 2.75 2.5L14 14.5" /></>,
 };
 
