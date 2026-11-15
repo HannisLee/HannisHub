@@ -207,7 +207,10 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
     return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
   }, [menu]);
 
-  return <div className="terminal-view" ref={hostRef} hidden={!active} onMouseDownCapture={event => {
+  return <div className="terminal-view" ref={hostRef} hidden={!active} onMouseMoveCapture={event => {
+    // 程序开启全鼠标跟踪时，无按键的移动也会被当作输入并清除选区。
+    if (selectionMode && event.buttons === 0 && termRef.current?.modes.mouseTrackingMode !== "none") event.stopPropagation();
+  }} onMouseDownCapture={event => {
     if (forwardingSelectionMouse.current) return;
     if (selectionMode && event.button === 0 && termRef.current?.modes.mouseTrackingMode !== "none" && event.target instanceof Element && event.target.closest(".xterm-screen")) {
       // 利用 xterm 的强制选择机制，不更改终端程序的鼠标协议状态。

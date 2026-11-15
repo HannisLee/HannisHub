@@ -261,7 +261,7 @@ async function check(name, fn) {
   await check("鼠标接管时开启文字选择模式可直接拖选和复制", async () => {
     await page.bringToFront();
     await page.click(".terminal-view:not([hidden]) .xterm-screen");
-    await typeLine(page, "printf 'MODE_TEST_COPY\\n\\033[?1000h\\033[?1006h'");
+    await typeLine(page, "printf 'MODE_TEST_COPY\\n\\033[?1003h\\033[?1006h'");
     await page.locator(".terminal-view:not([hidden]) .xterm.enable-mouse-events").waitFor();
     await page.getByRole("button", { name: "文字选择 关" }).click();
     const box = await page.evaluate(() => {
@@ -273,6 +273,17 @@ async function check(name, fn) {
     await page.mouse.down();
     await page.mouse.move(box.x + 120, box.y, { steps: 10 });
     await page.mouse.up();
+    await page.mouse.move(box.x + 150, box.y + 5, { steps: 5 });
+    await page.waitForTimeout(300);
+    await page.mouse.click(box.x + 150, box.y + 5, { button: "right" });
+    assert.equal(await page.getByRole("menuitem", { name: /复制/ }).isEnabled(), true, "松开鼠标并移动后选区仍应保留");
+    await page.getByRole("menuitem", { name: /复制/ }).click();
+    await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())).includes("MODE_TEST_COPY"), 3000, "右键复制");
+    await page.mouse.move(box.x + 2, box.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 120, box.y, { steps: 10 });
+    await page.mouse.up();
+    await page.mouse.move(box.x + 150, box.y + 5, { steps: 5 });
     await page.keyboard.press("Control+Shift+C");
     await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())).includes("MODE_TEST_COPY"), 3000, "选择模式复制");
     await page.evaluate(() => {
