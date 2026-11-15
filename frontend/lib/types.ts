@@ -528,6 +528,18 @@ export interface TerminalSessionList {
   idle_timeout_seconds: number;
 }
 
+export interface TerminalCommandGroup {
+  id: string;
+  name: string;
+  commands: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface TerminalCommandGroupList {
+  commands: TerminalCommandGroup[];
+}
+
 export interface HubUser {
   username: string;
   created_at: number;

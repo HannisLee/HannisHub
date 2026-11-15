@@ -1280,6 +1280,28 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 /* 网页终端：顶部横向标签栏 + 填满剩余高度的终端区 */
 .content-container.terminal-page { width: min(100% - 64px, 1700px); padding: var(--space-5) 0 var(--space-6); }
 .terminal-workspace { display: flex; height: calc(100vh - 120px); min-height: 420px; flex-direction: column; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.terminal-commandbar { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); min-height: 34px; padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--color-divider); background: var(--color-surface-soft); }
+.terminal-command-list { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-2); overflow-x: auto; scrollbar-width: none; }
+.terminal-command-list::-webkit-scrollbar { display: none; }
+.terminal-command-item { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; }
+.terminal-command-chip { display: inline-flex; height: 24px; max-width: 210px; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: 1px solid var(--color-control-border); border-radius: var(--radius-pill); background: var(--color-surface); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease; }
+.terminal-command-chip:hover:not(:disabled), .terminal-command-chip:focus-visible { border-color: var(--color-text-muted); background: var(--color-surface-hover); color: var(--color-text-primary); }
+.terminal-command-chip:disabled { opacity: 0.55; cursor: wait; }
+.terminal-command-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-command-count { flex: 0 0 auto; color: var(--color-text-muted); font: 400 11px/1 var(--font-mono); }
+.terminal-command-edit, .terminal-command-delete { display: inline-grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); }
+.terminal-command-edit:hover, .terminal-command-delete:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.terminal-command-edit svg, .terminal-command-delete svg { width: 11px; height: 11px; }
+.terminal-command-empty, .terminal-storage-status { flex: 0 0 auto; color: var(--color-text-muted); font-size: 12px; white-space: nowrap; }
+.terminal-storage-status.is-error { color: var(--color-error); }
+.terminal-recording-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); color: var(--color-error); font-size: 12px; white-space: nowrap; }
+.terminal-recording-dot { width: 6px; height: 6px; border-radius: var(--radius-pill); background: var(--color-error); animation: terminal-recording-blink 1.2s ease-in-out infinite; }
+.terminal-recording-finish { height: 20px; padding: 0 var(--space-2); border: 1px solid var(--color-error); border-radius: var(--radius-sm); background: transparent; color: var(--color-error); font-size: 11px; }
+.terminal-recording-finish:hover { background: var(--color-surface-hover); }
+.terminal-command-new { display: inline-flex; height: 22px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 var(--space-2); border: 1px solid var(--color-white); border-radius: var(--radius-pill); background: var(--color-white); color: var(--color-on-light); font-size: 12px; font-weight: 600; }
+.terminal-command-new:hover { border-color: var(--color-white); background: var(--color-white); }
+.terminal-command-new svg { width: 11px; height: 11px; }
+@keyframes terminal-recording-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .terminal-tabbar { display: flex; flex: 0 0 auto; align-items: stretch; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
 .terminal-tabs { display: flex; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
 .terminal-tabs::-webkit-scrollbar { display: none; }
@@ -1311,6 +1333,19 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .terminal-empty { display: grid; height: 100%; place-content: center; justify-items: center; gap: var(--space-4); padding: var(--space-6); color: var(--color-text-secondary); font-size: 14px; text-align: center; }
 .terminal-empty p { max-width: 420px; margin: 0; }
 .terminal-statusbar { display: flex; flex: 0 0 auto; gap: var(--space-5); padding: var(--space-1) var(--space-4); border-top: 1px solid var(--color-divider); color: var(--color-text-muted); font: 400 12px/1.8 var(--font-mono); }
+.terminal-command-backdrop { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: var(--space-6); background: color-mix(in srgb, var(--color-bg) 78%, transparent); }
+.terminal-command-dialog { display: grid; width: min(520px, 100%); gap: var(--space-4); padding: var(--space-5); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.terminal-command-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.terminal-command-dialog-kicker { margin: 0 0 var(--space-1); color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.terminal-command-dialog-header h2 { margin: 0; color: var(--color-text-primary); font: 400 26px/1.2 var(--font-display); }
+.terminal-command-dialog-close { display: inline-grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); }
+.terminal-command-dialog-close:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.terminal-command-dialog-close svg { width: 14px; height: 14px; }
+.terminal-command-dialog textarea { min-height: 180px; font-family: var(--font-mono); font-size: 13px; }
+.terminal-command-recording-hint { margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.7; }
+.terminal-command-dialog-error { margin: 0; color: var(--color-error); font-size: 13px; }
+.terminal-command-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.terminal-command-dialog-actions .button { min-height: 34px; padding: 0 var(--space-3); font-size: 13px; }
 
 /* 终端页浮动提示词：可拖动圆形按钮 + 输入面板（仅输入、复制、归档） */
 .prompt-float-bubble { position: fixed; z-index: 40; display: inline-grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--color-control-border); border-radius: var(--radius-pill); background: var(--color-surface); color: var(--color-text-secondary); cursor: grab; touch-action: none; user-select: none; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
@@ -1341,6 +1376,8 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
   .content-container.terminal-page { width: calc(100% - 24px); padding-top: var(--space-3); }
   .terminal-workspace { height: calc(100vh - 100px); }
   .terminal-statusbar span:first-child { display: none; }
+  .terminal-storage-status { display: none; }
+  .terminal-command-backdrop { padding: var(--space-3); }
   .lobby-title { font-size: 24px; }
   .lobby-hint-text { display: none; }
   .lobby-hint { gap: var(--space-3); }

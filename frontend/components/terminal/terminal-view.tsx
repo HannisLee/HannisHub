@@ -16,6 +16,7 @@ interface TerminalViewProps {
   onEnded: (id: string, reason: TerminalEndReason) => void;
   onActivity: (id: string) => void;
   onStatus: (id: string, connected: boolean) => void;
+  onInput?: (id: string, data: string) => void;
 }
 
 const CLOSE_RELEASED = 4000;
@@ -58,16 +59,16 @@ function readTheme(): ITheme {
   };
 }
 
-export default function TerminalView({ sessionId, active, onEnded, onActivity, onStatus }: TerminalViewProps) {
+export default function TerminalView({ sessionId, active, onEnded, onActivity, onStatus, onInput }: TerminalViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   // 回调放进 ref，避免父组件重渲染导致终端重建
-  const callbacks = useRef({ onEnded, onActivity, onStatus });
+  const callbacks = useRef({ onEnded, onActivity, onStatus, onInput });
   useEffect(() => {
-    callbacks.current = { onEnded, onActivity, onStatus };
-  }, [onEnded, onActivity, onStatus]);
+    callbacks.current = { onEnded, onActivity, onStatus, onInput };
+  }, [onEnded, onActivity, onStatus, onInput]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -156,6 +157,7 @@ export default function TerminalView({ sessionId, active, onEnded, onActivity, o
     const dataListener = term.onData(data => {
       send({ type: "input", data });
       callbacks.current.onActivity(sessionId);
+      callbacks.current.onInput?.(sessionId, data);
     });
     const resizeListener = term.onResize(() => {
       window.clearTimeout(resizeTimer);

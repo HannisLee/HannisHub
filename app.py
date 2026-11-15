@@ -38,7 +38,7 @@ from core.auth import (
 from model_manager import ai_settings
 from chatworld import chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
-from server import terminal_manager
+from server import terminal_commands, terminal_manager
 from core.compression import SelectiveGZipMiddleware
 import model_manager.app as model_manager_app
 from server.file_manager import (
@@ -838,6 +838,43 @@ async def terminal_create(request: Request, payload: dict[str, Any] = Body(defau
     return JSONResponse({"session": terminal_manager.manager.create(username, payload.get("title"))})
 
 
+@app.get("/api/terminal/commands")
+async def terminal_command_list(request: Request):
+    """列出当前账号保存的终端命令组。"""
+    username = _require_terminal_admin(request.session)
+    return JSONResponse({"commands": await run_in_threadpool(terminal_commands.list_groups, username)})
+
+
+@app.post("/api/terminal/commands")
+async def terminal_command_create(request: Request, payload: dict[str, Any] = Body(...)):
+    """保存一组可一键执行的终端命令。"""
+    username = _require_terminal_admin(request.session)
+    return JSONResponse({"command": await run_in_threadpool(terminal_commands.create_group, username, payload)})
+
+
+@app.patch("/api/terminal/commands/{command_id}")
+async def terminal_command_update(command_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """修改自己的终端命令组。"""
+    username = _require_terminal_admin(request.session)
+    return JSONResponse({"command": await run_in_threadpool(terminal_commands.update_group, username, command_id, payload)})
+
+
+@app.delete("/api/terminal/commands/{command_id}")
+async def terminal_command_delete(command_id: str, request: Request):
+    """删除自己的终端命令组。"""
+    username = _require_terminal_admin(request.session)
+    await run_in_threadpool(terminal_commands.delete_group, username, command_id)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/terminal/commands/{command_id}/run")
+async def terminal_command_run(command_id: str, request: Request):
+    """一键新建终端并按顺序执行已保存命令。"""
+    username = _require_terminal_admin(request.session)
+    group = await run_in_threadpool(terminal_commands.get_group, username, command_id)
+    return JSONResponse({"session": terminal_manager.manager.run(username, group["name"], group["commands"])})
+
+
 @app.patch("/api/terminal/sessions/{session_id}")
 async def terminal_rename(session_id: str, request: Request, payload: dict[str, Any] = Body(...)):
     _require_terminal_admin(request.session)
@@ -969,6 +1006,7 @@ async def users_delete(username: str, request: Request):
     await run_in_threadpool(model_manager_app.purge_asr_user, username)
     await run_in_threadpool(ocr_records.purge_user, username)
     await run_in_threadpool(todos.purge_user, username)
+    await run_in_threadpool(terminal_commands.purge_user, username)
     await run_in_threadpool(lobby_desks.purge_user, username)
     await run_in_threadpool(lobby_notes.purge_user, username)
     lobby_presence.presence.notify_desks()

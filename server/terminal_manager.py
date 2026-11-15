@@ -293,6 +293,14 @@ class TerminalManager:
         self.sessions[session.id] = session
         return session.info()
 
+    def run(self, owner: str, title: str, commands: list[str]) -> dict[str, Any]:
+        """新建一个终端并立即把命令序列排入 PTY 输入。"""
+        info = self.create(owner, title)
+        session = self.get(info["id"])
+        # shell 尚未完成登录初始化时，内核 PTY 输入缓冲会保留这些字节；使用统一的非阻塞写入路径
+        session.write("".join(f"{command}\n" for command in commands))
+        return info
+
     def rename(self, session_id: str, title: Any) -> dict[str, Any]:
         session = self.get(session_id)
         name = _clean_title(title)

@@ -54,7 +54,8 @@ HannisHub/
 ├── server/                   # Server 子服务与服务器侧组件
 │   ├── app.py                # SSH 与定时任务后端
 │   ├── file_manager.py       # 文件管理组件：受限目录、缓存、浏览与下载
-│   ├── terminal_manager.py   # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像与空闲回收（仅内存，读取根目录 settings.json）
+│   ├── terminal_manager.py   # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像、命令组一键执行与空闲回收（读取根目录 settings.json）
+│   ├── terminal_commands.py  # 终端命令组：名称与命令序列按账号存 SQLite terminal_command_groups 表
 │   ├── point_cloud.py        # 旧版点云文件读取接口兼容层
 │   ├── index.html            # Server 旧版 WebUI，迁移验证期保留
 │   ├── settings.json         # Server 子服务配置
@@ -125,7 +126,7 @@ HannisHub/
   - 世界排布：自上而下依次为我的房间、入口厅、大厅（水平居中对齐，与楼上/楼下的进出方向一致），各房间间隔 256px，保证小房间在大屏居中显示时相机视野内看不到相邻房间。玻璃门的开门/关门帧序列由 `layout.json` 中动画的 `door` 字段给出；玻璃门贴图裁掉关门上沿（y=19）以上的像素，开门时门扇不再冒出墙顶；大厅上墙玻璃门背后烘焙幽暗门洞（`Room.door_recess`：门框之间深色填充、门楣投影、底部渐亮暗示门外地面），门打开后看到的是通道而不是墙面与墙顶白边；电梯同样是自动门（帧 0–7 开门、8–13 + 0 关门），门框之间烘焙亮着顶灯的不锈钢轿厢（`Room.elevator_recess`：拉丝后壁、扶手、深色地板），开门后看到的是轿厢而不是墙纸，深度固定为 20，角色走进时画在门上；出生点可设置 `cycleDoor: true`，到达时房间内的自动门立即打开并保持约 1.1 秒，随后按距离判定自然关上（入口厅开场与从我的房间下楼时使用）；只播放一次的帧条（`frames: "once"`）不循环。家具单件自带的不透明灰色默认阴影（RGB 167,151,150）在构建时统一替换为半透明暗色，家具放在地毯上时不再盖出一块灰底。交互键 E / 空格在 keydown 事件中置位，避免按下与抬起落在同一帧时被漏掉。相机边距：房间本身放得下、只是加上 12px 边距才超出时，边距收窄到剩余空间，整个房间静止完整显示（避免为几像素边距滚动而裁掉顶部铭牌）。
   - **素材版本**：构建脚本在 `layout.json` 与 `avatar/parts.json` 中写入 `build`（输出内容的短哈希，内容不变则不变）。前端每次加载都绕过缓存重新获取这两个清单（`layout.json?t=时间戳`、`parts.json` 使用 `cache: "no-cache"`），其余素材地址统一带 `?v=<build>`（`assetUrl()`）。静态文件没有缓存头，浏览器可能复用旧文件；版本号保证图集图片与坐标表总是来自同一次构建，否则家具会显示成错误的贴图（位置错乱）。
   - 「形象与名字」保存遇到 404 / 405（后台进程尚未加载资料接口，请求落到根路径静态文件托管上）时提示「后台服务尚未更新，请重启后台服务后再保存」。
-- `/terminal`：网页终端（仅管理员）。顶部横向标签栏列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」。页面右下角另有可拖动的浮动提示词按钮（位置记忆在 `hannishub_prompt_float_position`），点击展开仅含输入框、复制、归档的面板，不提供润色；草稿暂存在 `hannishub_prompt_float_draft`（与提示词页草稿互不覆盖），归档调用提示词模块既有的 `POST /prompt/api/prompts`，写入 `prompt_service/settings.json`，与提示词页归档列表共用同一份数据
+- `/terminal`：网页终端（仅管理员）。终端卡最上方是 34px 小高度命令条：左侧列出已保存命令组（名称与命令数，可编辑 / 删除），右侧显示 SQLite 存储状态与白色「新建」按钮；点击命令组立即新建终端并按顺序提交命令。浮动配置框填写名称与逐行命令，也可进入录制模式——收起配置框后在当前终端实际执行，回车提交的输入被记录，完成后回填供核对。命令条下方是横向标签栏，列出全部终端，`+` 新建、双击标签重命名、× 关闭（确认后结束其中的程序）；每个终端一个 xterm.js 实例，切换标签不丢状态，尺寸随容器自适应。关闭网页不结束 shell，再次打开自动接回并回放最近输出；多个标签页/设备可同时连接同一终端，输出同步、都能输入；断线指数退避自动重连（最长 10 秒）。标签圆点表示连接状态，底部状态栏显示 PID 与预计释放时间；当前活动标签保存在 `localStorage` 键 `hannishub_terminal_active`。详见下文「网页终端」。页面右下角另有可拖动的浮动提示词按钮（位置记忆在 `hannishub_prompt_float_position`），点击展开仅含输入框、复制、归档的面板，不提供润色；草稿暂存在 `hannishub_prompt_float_draft`（与提示词页草稿互不覆盖），归档调用提示词模块既有的 `POST /prompt/api/prompts`，写入 `prompt_service/settings.json`，与提示词页归档列表共用同一份数据
 - `/llama/ocr`：OCR 识别页面，自研工作台（文档解析 / 字段提取 / 图像问答），调用受管小米 OCR 服务，识别记录按账号独立保存。原始文档区支持拖入、点击选择，以及在页面任意位置 Ctrl+V 粘贴剪贴板中的图片（截图、复制的图片）或文件；截图类无名图片自动命名为「粘贴图片-YYYYMMDD-HHMMSS.扩展名」，纯文字粘贴不拦截，字段 / 问题输入框照常可用。
 - `/llama/models`：推理服务页面，合并 GPU 状态、服务注册、启动与受管进程日志；`/llama/processes` 作为旧链接兼容入口
 - `/llama/gpu`、`/llama/downloads`、`/llama/asr`、`/llama/settings`：GPU 监控、模型下载、ASR 转写与模型设置页面
@@ -159,7 +160,7 @@ HannisHub/
 | `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
 | `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR / 聊天室面板，整页模式下隐藏独立页面链接）；`avatar-dialog.tsx` 为我的房间「形象与名字」面板；页面加载时读取 `/api/chat-lobby/profile` 并合成形象；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏；普通账号整页显示（`AppShell` 的 `immersiveForRegular`，通过 `components/layout/shell-context.tsx` 获取登录信息与退出方法），出生点改为我的房间；`desk-claim-dialog.tsx` 为空闲工位的认领确认框；`notes-board.tsx` 为留言板对话框内容；舞台底部的回车说话输入框；页面加载时读取工位归属（`/api/chat-lobby/desks`）写入桥接对象，按交互类型显示提示条，提供快捷表情按钮与短提示，工位待办对话框标题栏提供「退还工位」 |
 | `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色（可切换皮肤贴图）、`presence-client.ts` 多人同步连接（节流上报、退避重连）、`remote-player.ts` 其他人的角色（插值显示、名字标签、自动行走）、`pathfinding.ts` 房间寻路网格（A* + 视线拉直）、`avatar.ts` 角色生成器部件加载与叠层合成（React 与 Phaser 共用）、`create-game.ts` 游戏工厂，与普通 UI 组件解耦；`tunes.ts` 钢琴 / 吉他短旋律（Web Audio 合成）；场景统一处理机器、工位、座位与小互动四类交互对象（重叠时取面积最小者），绘制工位名牌与头顶表情气泡 |
-| `frontend/components/terminal/` | 网页终端：横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
+| `frontend/components/terminal/` | 网页终端：顶部小高度命令条（已存状态、一键执行、编辑删除、白色新建按钮与浮动配置框）、横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步、录制输入回调） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
 | `frontend/components/overview/` | 跨服务总览组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件 |
@@ -187,6 +188,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 权限：仅管理员可用——固定用户名 `lihan`。`/api/auth/status` 返回 `terminal` 布尔值，侧栏「设置」分组据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
 - `AuthMiddleware` 对 WebSocket 握手同样校验会话，未登录直接拒绝（此前 WebSocket 请求不经过登录校验）。
 - 输入写入：`input` 先追加到会话的待写缓冲，以 4 KB 为块非阻塞写入 PTY；PTY 输入缓冲写满时注册 `loop.add_writer`，等可写时继续，绝不在事件循环里等待。大段粘贴期间 Hub 其他请求与终端输出照常处理；待写积压超过 16 MB（shell 长时间不读输入）时丢弃新输入。
+- 顶部命令条：命令组保存名称（最多 40 字）与 1–20 条命令（单条最多 2,000 字，按账号隔离存 SQLite `terminal_command_groups`，每账号最多 50 组）。点击后后端创建以命令组名命名的 PTY 会话，并通过同一非阻塞输入路径按原顺序写入命令；前端可编辑、删除，右上白色「新建」按钮打开浮动配置框。录制模式基于 xterm `onData`：只记录回车提交的可打印输入与退格编辑，忽略方向键、Tab 补全、控制字符与 bracketed paste 标记；录制时配置框收起，顶部显示红色闪烁状态与「完成」，完成后命令回填文本框供人工核对，不经过 shell 输出反推，因此 Tab 补全结果不会被误当作原始输入。
 - 剪贴板（`frontend/lib/terminal-clipboard.ts` + xterm `attachCustomKeyEventHandler`）：xterm.js 在非 macOS 平台会把 Ctrl+V 当作控制字符 `^V` 并阻止浏览器默认行为，导致 Windows 浏览器无法粘贴。前端把以下快捷键让回浏览器，由原生 `paste` / `copy` 事件完成，不依赖 `navigator.clipboard`，HTTP 局域网地址（非安全上下文）同样可用：Ctrl+V、Ctrl+Shift+V、Shift+Insert 粘贴；有选中文字时 Ctrl+C、Ctrl+Insert 复制，没有选中时 Ctrl+C 仍发送中断信号；Ctrl+Shift+C 始终阻止浏览器打开开发者工具，有选中时复制。粘贴遵循 bracketed paste，bash 提示符下多行粘贴需按回车才执行；Windows 剪贴板的 CRLF 换行由 xterm 统一转为回车。macOS 的 Cmd+V / Cmd+C 行为不变；输入法组字与 AltGr 组合不拦截。
 - 端到端测试：`scripts/e2e/launch_test_hub.py` 以临时 settings、临时数据库、关闭 lifespan 启动测试 Hub，`scripts/e2e/terminal_paste.test.cjs` 用 Playwright 模拟 Windows 浏览器（`navigator.platform = Win32`）验证上述快捷键、多行 CRLF / 中文 / emoji 粘贴逐字一致、bracketed paste、2 MB 大段粘贴完整且 Hub 保持响应，以及非安全上下文下的粘贴
 - 配置（根 `settings.json`，均可省略）：`"terminal": {"idle_timeout_hours": 6, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
@@ -207,6 +209,11 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | PATCH | `/api/terminal/sessions/{id}` | 重命名终端（最多 40 字），仅管理员 |
 | DELETE | `/api/terminal/sessions/{id}` | 关闭终端并结束其进程组，仅管理员 |
 | WS | `/api/terminal/sessions/{id}/ws` | 终端交互通道，详见「网页终端」，仅管理员 |
+| GET | `/api/terminal/commands` | 列出当前账号保存的终端命令组（id、名称、命令数组、创建与修改时间），仅管理员 |
+| POST | `/api/terminal/commands` | 新建命令组：`name` 最多 40 字，`commands` 为 1–20 条非空字符串（单条最多 2,000 字），每账号最多 50 组 |
+| PATCH | `/api/terminal/commands/{id}` | 修改自己的命令组名称或命令；不存在或不属于当前账号返回 404 |
+| DELETE | `/api/terminal/commands/{id}` | 删除自己的命令组 |
+| POST | `/api/terminal/commands/{id}/run` | 新建以命令组名命名的终端，并把全部命令按顺序写入 PTY 输入，返回新会话 |
 | GET | `/api/users` | 列出全部用户（用户名、创建时间、是否为当前账号），不返回密码哈希 |
 | POST | `/api/users` | 新增用户：`username` 3-64 位且不含空白，`password` 至少 8 位；最多 100 个用户 |
 | POST | `/api/users/{username}/password` | 重置指定用户密码，该用户已有会话全部失效 |
@@ -292,7 +299,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 旧版单管理员字段 `auth.username` / `auth.password_hash` 在启动时自动迁移为第一个用户
 - 登录失败按 IP 和账号分别限速：5 分钟内失败 5 次后暂时拒绝，计数保存在进程内，重启后清空。反向代理须正确配置可信代理地址，避免全部请求共用代理 IP；不应信任客户端自行提供的转发头。
 - 写请求必须提供与请求地址同源的 `Origin` 或 `Referer`；开发环境跨源访问可通过 `HANNISHUB_DEV_ORIGINS` 显式配置。HTTPS 部署可设置 `HANNISHUB_HTTPS_ONLY=1` 为会话 Cookie 启用 Secure；代理须保留 Host 并正确传递 HTTPS 协议。
-- ASR 转写历史、ASR 提炼提示词与 OCR 识别记录均按登录账号隔离：记录保存在 SQLite `data/hannishub.db`，每行带 `owner`（用户名），所有读取、改名、删除与提取都按当前会话账号过滤，访问其他账号的记录与不存在一样返回 404。管理员 `lihan` 的提炼提示词仍保存在 `ai_settings.json`，同时作为其他账号未自定义时的默认值；其他账号修改后保存在数据库 `user_settings` 表，互不影响。工位待办同样按账号隔离（`todos` 表）。删除账号时同步清理该账号的 ASR / OCR 记录、上传文件、个人偏好与工位待办，并退还其工位，避免同名新账号继承。
+- ASR 转写历史、ASR 提炼提示词与 OCR 识别记录均按登录账号隔离：记录保存在 SQLite `data/hannishub.db`，每行带 `owner`（用户名），所有读取、改名、删除与提取都按当前会话账号过滤，访问其他账号的记录与不存在一样返回 404。管理员 `lihan` 的提炼提示词仍保存在 `ai_settings.json`，同时作为其他账号未自定义时的默认值；其他账号修改后保存在数据库 `user_settings` 表，互不影响。工位待办与终端命令组同样按账号隔离（`todos`、`terminal_command_groups` 表）。删除账号时同步清理该账号的 ASR / OCR 记录、上传文件、个人偏好、工位待办与终端命令组，并退还其工位，避免同名新账号继承。
 - 旧版数据迁移：Hub 启动时把旧版全员共享的 `model_manager/data/asr_history/`（records.json + 全文 txt）与 `data/ocr_records/<用户哈希>/` 一次性导入数据库，全部归属管理员 `lihan`，其他账号从空记录开始；旧目录改名为 `asr_history.migrated` / `ocr_records.migrated` 留作备份，旧任务目录 `model_manager/data/asr_jobs/` 移到 `data/asr_jobs/`。迁移可重复执行，已导入的记录 ID 会跳过。
 - 每个用户有 `session_version`，会话中同时记录用户名与版本；重置密码时版本递增，删除用户或版本不一致时会话立即失效。中间件按 `settings.json` 修改时间缓存用户表，避免每个请求重复解析
 - 密码使用 `pwdlib[argon2]` 的 Argon2id 哈希
@@ -697,6 +704,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `todos` | `id`（16 位十六进制） | 工位待办（v2）：`owner`、`title`、`note`、`list` 清单、`priority`（0 无 / 1 低 / 2 中 / 3 高）、`due_date` 截止日期、`my_day` 加入「今天」的日期、`done` / `done_at`、`subtasks`（JSON 数组）、`sort` 手动排序、创建与修改时间；索引 (`owner`, `done`, `sort`) |
 | `lobby_desks` | `desk`（`desk-1`…`desk-6`） | 聊天大厅工位认领（v2）：`owner` 唯一（每人最多一个工位）、`claimed_at`；工位数量与 `scripts/build_chat_lobby_assets.py` 的 `DESK_COUNT`、`chatworld/lobby_desks.py` 的 `DESK_COUNT` 保持一致 |
 | `lobby_notes` | `id`（随机 16 位十六进制） | 聊天大厅留言板（v3）：`owner`（作者账号，用于撕自己的便签与删除账号时清理）、`name`（贴出时的大厅名字）、`text`、`color`、`created_at`；按 `created_at`、`(owner, created_at)` 建索引 |
+| `terminal_command_groups` | `id`（`tc_` + 16 位十六进制） | 终端顶部命令组（v4）：`owner`、名称 `name`、`commands` JSON 字符串（最多 20 条）、创建与修改时间；索引 `(owner, created_at)`，点击命令条时按顺序写入新 PTY |
 
 ### 根目录 ai_settings.json（不入 Git）
 
