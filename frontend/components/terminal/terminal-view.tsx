@@ -244,10 +244,6 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
           else setMenu(current => current && { ...current, message: "复制失败，请使用 Ctrl+Shift+C" });
         });
       }}>复制 <span>Ctrl+Shift+C</span></button>
-      <button type="button" role="menuitem" onClick={() => {
-        if (!navigator.clipboard?.readText) { setMenu(current => current && { ...current, message: "请使用 Ctrl+V 粘贴" }); return; }
-        void navigator.clipboard.readText().then(value => { termRef.current?.paste(value); setMenu(null); termRef.current?.focus(); }).catch(() => setMenu(current => current && { ...current, message: "请使用 Ctrl+V 粘贴" }));
-      }}>粘贴 <span>Ctrl+V</span></button>
       {menu.message ? <p role="status">{menu.message}</p> : null}
     </div> : null}
   </div>;
