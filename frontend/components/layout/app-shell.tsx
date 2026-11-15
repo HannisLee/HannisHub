@@ -13,7 +13,7 @@ import { DocumentTitle } from "./document-title";
 import { ShellContext, type ShellInfo } from "./shell-context";
 import { SidebarNav } from "./sidebar-nav";
 
-/** 侧栏收起状态保存在浏览器，刷新与跨页面跳转后保持同一形态 */
+/** 侧栏收起状态按浏览器标签页保存，刷新与跨页面跳转后保持同一形态 */
 const COLLAPSE_STORAGE_KEY = "hannishub_sidebar_collapsed";
 const COLLAPSE_CHANGE_EVENT = "hannishub:sidebar-collapse-change";
 const MOBILE_QUERY = "(max-width: 767px)";
@@ -24,7 +24,7 @@ function isMobileViewport(): boolean {
 
 function readSidebarCollapsed(): boolean {
   try {
-    return window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
+    return window.sessionStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
@@ -32,7 +32,7 @@ function readSidebarCollapsed(): boolean {
 
 function writeSidebarCollapsed(collapsed: boolean): void {
   try {
-    window.localStorage.setItem(COLLAPSE_STORAGE_KEY, collapsed ? "1" : "0");
+    window.sessionStorage.setItem(COLLAPSE_STORAGE_KEY, collapsed ? "1" : "0");
   } catch {
     return;
   }
@@ -40,10 +40,8 @@ function writeSidebarCollapsed(collapsed: boolean): void {
 }
 
 function subscribeSidebarCollapsed(onChange: () => void): () => void {
-  window.addEventListener("storage", onChange);
   window.addEventListener(COLLAPSE_CHANGE_EVENT, onChange);
   return () => {
-    window.removeEventListener("storage", onChange);
     window.removeEventListener(COLLAPSE_CHANGE_EVENT, onChange);
   };
 }
