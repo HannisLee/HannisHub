@@ -9,14 +9,18 @@ import re
 import subprocess
 import threading
 import time
+import tempfile
+import zipfile
 from datetime import date, datetime
 from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 from fastapi import HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
 from core.auth import get_settings_section, update_settings_section
@@ -672,6 +676,57 @@ def search_ply_by_range(start_date: object, end_date: object, iteration_mode: ob
     entries.sort(key=lambda entry: (entry["experiment_date"], entry["source_path"].lower(), entry["path"].lower()), reverse=True)
     return {"entries": entries, "start_date": start.isoformat(), "end_date": end.isoformat(),
             "iteration_mode": iteration_mode, "iteration": iteration if iteration_mode == "exact" else None, "cached": cached}
+
+
+def archive_response(name: str, populate):
+    """在临时磁盘打包，响应结束关闭并删除临时文件。"""
+    archive = tempfile.TemporaryFile()
+    try:
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as bundle:
+            populate(bundle)
+        size = archive.tell()
+        archive.seek(0)
+    except BaseException:
+        archive.close()
+        raise
+
+    def chunks():
+        try:
+            while chunk := archive.read(1024 * 1024):
+                yield chunk
+        finally:
+            archive.close()
+
+    return StreamingResponse(chunks(), media_type="application/zip", headers={
+        "Content-Length": str(size), "Cache-Control": "no-store",
+        "Content-Disposition": f"attachment; filename*=utf-8''{quote(name + '.zip', safe='')}",
+    }, background=BackgroundTask(archive.close))
+
+
+def download_response(root_index: int, relative_path: str):
+    """普通文件直接下载，文件夹递归打包；内部软链接跳过以防循环。"""
+    roots = configured_roots()
+    if root_index < 0 or root_index >= len(roots):
+        raise HTTPException(status_code=404, detail="文件管理顶层目录不存在")
+    target = _resolve_relative(_resolve_root(roots[root_index]), _normalize_relative_path(relative_path))
+    if target.is_file():
+        return FileResponse(target, filename=target.name, headers={"Cache-Control": "no-store"})
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="文件或文件夹不存在")
+
+    name = relative_path.rsplit("/", 1)[-1]
+
+    def populate(bundle):
+        for directory, folders, files in os.walk(target, followlinks=False):
+            folders[:] = [name for name in folders if not (Path(directory) / name).is_symlink()]
+            base = Path(directory)
+            bundle.write(base, str(Path(name) / base.relative_to(target)) + "/")
+            for filename in files:
+                source = base / filename
+                if not source.is_symlink() and source.is_file():
+                    bundle.write(source, str(Path(name) / source.relative_to(target)))
+
+    return archive_response(name, populate)
 
 
 def resolve_file(root_index: int, relative_path: str) -> Path:

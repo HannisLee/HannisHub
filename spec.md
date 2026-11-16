@@ -272,14 +272,14 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | GET | `/api/ocr/records/{record_id}/source` | 内联返回当前用户记录的原始文件，供页面预览 |
 | PATCH | `/api/ocr/records/{record_id}` | 重命名记录，提交 `name`（1–160 个字符） |
 | DELETE | `/api/ocr/records/{record_id}` | 删除已结束的记录及其原始文件与结果；进行中返回 409 |
-| GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 流式下载受限目录内的普通文件；拒绝越界路径 |
+| GET | `/api/file-manager/download?root=<index>&path=<relative_path>` | 下载受限目录内的普通文件或文件夹（以文件夹名.zip 打包，保留空目录，跳过内部软链接）；拒绝越界路径 |
 | GET | `/api/file-manager/resource?root=<index>&path=<relative_path>` | 内联返回受限目录内的原始资源及文件名，供文档、图片和附件预览 |
 | GET | `/api/file-manager/connections` | 读取文件管理可用的连接列表，包含本机与已保存的 SSH 集群服务器连接 |
 | GET | `/api/file-manager/common-directories` | 读取已保存的常用目录列表（统一相对用户目录 `~`） |
 | PUT | `/api/file-manager/common-directories` | 保存常用目录列表，仅允许相对用户目录路径，拒绝 `..` 越界与敏感绝对路径 |
 | GET | `/api/file-manager/remote/{connection_id}/directory?path=<path>` | 通过常驻 SFTP 通道浏览内网集群服务器用户目录 `~` 内的文件与子项 |
 | GET | `/api/file-manager/remote/{connection_id}/markdown?path=<path>` | 读取远程集群服务器上的单个 Markdown 文档（限制 3 MB 内） |
-| GET | `/api/file-manager/remote/{connection_id}/download?path=<path>` | 经本机跳板流式下载远程服务器用户目录内的普通文件（支持 HTTP Range 断点续传） |
+| GET | `/api/file-manager/remote/{connection_id}/download?path=<path>` | 经本机跳板下载远程普通文件（支持 HTTP Range 断点续传）或文件夹（以文件夹名.zip 打包，保留空目录，跳过内部软链接） |
 | GET | `/api/file-manager/remote/{connection_id}/resource?path=<path>` | 内联返回远程服务器上的原始静态资源（沙箱 CSP），供 Markdown 相对图片与附件加载 |
 | POST | `/api/file-manager/remote/{connection_id}/upload?path=<path>&overwrite=<bool>` | 以原始请求体上传小文件到远程服务器用户目录，文件相对路径放在 `x-file-path` 头 |
 | POST | `/api/file-manager/remote/{connection_id}/uploads?path=<path>` | 创建远程分片上传会话，在远端预分配临时文件，支持多片并发并发写入 |
@@ -940,3 +940,5 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - PDF 选择字段提取或图像问答时走两段链路：先按 PDF 文档解析链路得到整份 Markdown（进度占 0–90%，中间结果保存为记录目录下 `parsed.md`），再把 Markdown 交给「设置 · AI 能力」当前启用的 OpenAI 兼容模型（`ai_settings.chat_completion`，temperature 0.1）完成字段提取（只输出 JSON，未找到的字段为 null，自动去掉代码块标记）或问答（只依据文档回答，未提及时明确说明）；解析结果超过 20 万字符或文本模型调用失败时记录标记失败并给出原因。图片的三种任务与 PDF 文档解析仍直接调用小米 OCR。页面不再禁用 PDF 的字段提取 / 图像问答，选中时在任务切换旁说明该链路，记录列表标注「先解析后文本处理」。
 - 识别由 Hub 后端 `model_manager/ocr_records.py` 在后台调用受管 OCR 实例（`model_manager.app.get_running_ocr_service()` 查找运行中的 `xiaomi_ocr_0`）：图片调用官方 `/api/ocr`，PDF 调用 `/api/book` 并每 2 秒轮询页进度，完成后读取合并 Markdown；部分页失败时保留结果并在记录上标注失败页码；全部页面失败时记录标记为失败并显示首个原因。全局最多 2 个任务并发，关闭页面不影响识别。
 - 识别记录按登录用户隔离，保存在 `data/ocr_records/<用户名 SHA-256 前 32 位>/`：`records.json` 为索引，`<记录 ID>/source.<扩展名>` 为原始文件、`result.md` 为结果；每个账号最多 500 条。Hub 重启时把未完成的记录标记为「服务重启导致任务中断」。页面在有进行中的记录时每 2 秒刷新列表，可查看、打开原文件、重命名与删除（进行中的记录不可删除）。上传、完成与失败写入 `uvicorn.error` 日志。
+
+文档查看的文件列表每行右侧提供下载按钮；复制路径后显示“已复制”，3 秒后恢复“复制路径”，期间仍可再次复制。终端执行已保存命令组时不显示“已新建”成功提示。

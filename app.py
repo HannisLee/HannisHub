@@ -52,6 +52,7 @@ from server.file_manager import (
     list_ply_files,
     rename_favorite,
     resolve_file,
+    download_response,
     read_markdown_file,
     save_roots,
     save_date_search_folders,
@@ -634,9 +635,8 @@ async def file_manager_download(
     root: int = Query(..., ge=0),
     path: str = Query(..., min_length=1, max_length=4_096),
 ):
-    """流式下载受限目录内的普通文件。"""
-    file_path = resolve_file(root, path)
-    return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
+    """下载普通文件，或将文件夹打包为 ZIP 下载。"""
+    return await run_in_threadpool(download_response, root, path)
 
 
 @app.get("/api/file-manager/resource")

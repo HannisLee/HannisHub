@@ -1618,3 +1618,9 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .file-conn-manage-info code { color: var(--color-text-muted); font-size: 12px; }
 .file-conn-manage-actions { display: flex; align-items: center; gap: var(--space-2); }
 
+
+.document-file-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--color-divider); }
+.document-file-row .document-file { min-width: 0; flex: 1; border-bottom: 0; }
+.document-file-download { display: flex; align-items: center; justify-content: center; flex: 0 0 40px; color: var(--color-text-secondary); }
+.document-file-download:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.document-file-download:focus-visible { outline: 1px solid var(--color-brand); outline-offset: -2px; }

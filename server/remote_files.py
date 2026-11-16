@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import mimetypes
 import socket
+import shutil
 import stat as stat_module
 import threading
 import time
@@ -27,6 +28,7 @@ from starlette.requests import ClientDisconnect
 
 import server.app as server_app
 from server.file_manager import (
+    archive_response,
     IGNORED_DIRECTORY_NAMES,
     MAX_DIRECTORY_ENTRIES,
     MAX_MARKDOWN_FILE_BYTES,
@@ -488,6 +490,26 @@ def file_response(connection_id: str, relative_path: str, range_header: str | No
     with remote_sftp(connection_id) as (sftp, home):
         target = _join(home, safe_path)
         attr = _stat_or_none(sftp, target)
+        if attr is not None and stat_module.S_ISDIR(attr.st_mode or 0) and not inline:
+            name = safe_path.rsplit("/", 1)[-1]
+
+            def populate(bundle):
+                def visit(directory, archive_path):
+                    bundle.mkdir(archive_path + "/")
+                    for child in sftp.listdir_attr(directory):
+                        if child.filename in (".", "..") or "/" in child.filename or "\\" in child.filename:
+                            continue
+                        source = directory.rstrip("/") + "/" + child.filename
+                        destination = archive_path + "/" + child.filename
+                        mode = child.st_mode or 0
+                        if stat_module.S_ISDIR(mode):
+                            visit(source, destination)
+                        elif stat_module.S_ISREG(mode):
+                            with sftp.open(source, "rb") as handle, bundle.open(destination, "w", force_zip64=True) as output:
+                                shutil.copyfileobj(handle, output, 1024 * 1024)
+                visit(target, name)
+
+            return archive_response(name, populate)
         if attr is None or not stat_module.S_ISREG(attr.st_mode or 0):
             raise HTTPException(status_code=404, detail="文件不存在或不是普通文件")
     size = int(attr.st_size or 0)

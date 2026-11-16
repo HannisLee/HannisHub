@@ -263,7 +263,7 @@ export function TerminalWorkspace() {
       setNow(session.expiresAt - data.session.expires_in * 1000);
       setActiveId(data.session.id);
       setError("");
-      setNotice(`已新建「${group.name}」终端，${group.commands.length} 条命令已提交执行。`);
+      setNotice("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "执行命令组失败");
     } finally {

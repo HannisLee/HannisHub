@@ -53,6 +53,9 @@ function makeTestPdf() {
  assert.equal(await page.getByLabel('筛选当前目录').count(), 0);
  await page.getByRole('button',{name:'复制路径'}).click();
  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~/project');
+ await page.getByRole('button',{name:'已复制',exact:true}).click();
+ await page.getByRole('button',{name:'复制路径',exact:true}).waitFor();
+ assert.equal(await page.getByRole('link',{name:'下载 notes.md',exact:true}).getAttribute('href'), '/api/file-manager/download?root=0&path=notes.md');
  await page.getByRole('button',{name:'photo.png'}).click();
  await page.locator('img.document-image-preview').waitFor();
  await page.getByRole('button',{name:'vector.svg'}).click();

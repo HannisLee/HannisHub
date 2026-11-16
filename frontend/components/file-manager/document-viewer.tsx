@@ -435,6 +435,8 @@ export function DocumentViewer() {
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
@@ -829,6 +831,8 @@ export function DocumentViewer() {
             ? directory?.path.startsWith("/") ? displayHomePath(directory.path, directory.root_path) : `~${directory?.path ? `/${directory.path}` : ""}`
             : displayHomePath(`${(resolvedRoots[rootIndex] || "").replace(/\/$/, "")}${folder ? `/${folder}` : ""}` || "/", homeDir);
           setCopyStatus(path && await copyToClipboard(path) ? "已复制" : "复制失败");
+          if (copyTimer.current) clearTimeout(copyTimer.current);
+          copyTimer.current = setTimeout(() => setCopyStatus(""), 3000);
         }}>{copyStatus || "复制路径"}</Button>
       </div>
 
@@ -845,25 +849,22 @@ export function DocumentViewer() {
               </button>
             ) : null}
             {!loadingFiles && visibleEntries.length
-              ? visibleEntries.map(entry =>
-                  entry.type === "directory" ? (
-                    <button className="document-file document-folder-entry" type="button" key={entry.path} onClick={() => openDirectory(entry.path)} title={entry.path}>
-                      <strong>□ {entry.name}</strong>
-                      <span>{entry.symlink ? "软链接文件夹" : "文件夹"}</span>
-                    </button>
-                  ) : (
+              ? visibleEntries.map(entry => (
+                  <div className="document-file-row" key={entry.path}>
                     <button
-                      className={`document-file${entry.path === selectedPath ? " is-selected" : ""}`}
+                      className={`document-file${entry.type === "directory" ? " document-folder-entry" : ""}${entry.path === selectedPath ? " is-selected" : ""}`}
                       type="button"
-                      key={entry.path}
-                      onClick={() => selectDocument(entry.path)}
+                      onClick={() => entry.type === "directory" ? openDirectory(entry.path) : selectDocument(entry.path)}
                       title={entry.path}
                     >
-                      <strong>{entry.name}</strong>
-                      <span>{formatDate(entry.modified)}</span>
+                      <strong>{entry.type === "directory" ? "□ " : ""}{entry.name}</strong>
+                      <span>{entry.type === "directory" ? (entry.symlink ? "软链接文件夹" : "文件夹") : formatDate(entry.modified)}</span>
                     </button>
-                  )
-                )
+                    <a className="document-file-download" href={resourceUrl(rootIndex, entry.path, activeConnectionId).replace("/resource?", "/download?")} download aria-label={`下载 ${entry.name}`} title={`下载 ${entry.name}`}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg>
+                    </a>
+                  </div>
+                ))
               : null}
             {!loadingFiles && !visibleEntries.length ? (
               <EmptyState
