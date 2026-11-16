@@ -846,14 +846,12 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .document-file strong { display: -webkit-box; overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .document-file span { overflow: hidden; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .document-folder-entry strong { color: var(--color-text-secondary); }
-/* 文档目录与阅读区左右排列，目录条目支持横向滚动。 */
+/* 文档目录与阅读区左右排列，文件名称横向显示。 */
 .document-index-head > div:first-child { justify-content: flex-start; flex-wrap: wrap; }
 .document-index-head select { max-width: min(100%, 360px); min-height: 34px; font-size: 13px; }
 .document-index-head input { width: min(100%, 400px); }
 .document-index-breadcrumb { justify-content: flex-start !important; }
-.document-file-list { display: flex; max-height: 180px; overflow: auto; }
-.document-file { flex: 0 0 200px; width: 200px; border-right: 1px solid var(--color-divider); }
-.document-file.is-selected { box-shadow: inset 0 -2px var(--color-brand); }
+.document-file strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-reader { min-width: 0; max-height: calc(100vh - 190px); overflow: auto; padding: var(--space-10) clamp(var(--space-6), 5vw, var(--space-16)); scroll-behavior: smooth; }
 .document-reader > .empty-state, .document-reader > .loading-state { min-height: 420px; }
 .document-reader-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); margin: 0 auto var(--space-10); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-divider); }
