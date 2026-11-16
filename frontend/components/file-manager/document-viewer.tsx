@@ -313,6 +313,47 @@ function MarkdownContent({
   return <article className="markdown-content">{blocks}</article>;
 }
 
+function ImageLightbox({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [fitWidth, setFitWidth] = useState(0);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => { dialog?.close(); };
+  }, []);
+
+  function changeZoom(delta: number) {
+    setZoom(value => Math.min(8, Math.max(0.25, Math.round((value + delta) * 100) / 100)));
+  }
+
+  return (
+    <dialog ref={dialogRef} className="document-image-lightbox" aria-label={`${name} 图片查看`} onClose={onClose}>
+      <div className="document-image-lightbox-bar">
+        <strong title={name}>{name}</strong>
+        <div className="document-image-lightbox-actions">
+          <Button variant="secondary" size="sm" type="button" onClick={() => changeZoom(-0.25)} aria-label="缩小图片">−</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => setZoom(1)} aria-label="重置图片缩放">{Math.round(zoom * 100)}%</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => changeZoom(0.25)} aria-label="放大图片">＋</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={onClose}>关闭</Button>
+        </div>
+      </div>
+      <div className="document-image-lightbox-viewport">
+        {/* 使用图片元素隔离 SVG，缩放后允许滚动查看细节。 */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={name} style={fitWidth ? { width: `${fitWidth * zoom}px` } : undefined} onLoad={event => {
+          const image = event.currentTarget;
+          const viewport = image.parentElement;
+          if (!viewport || !image.naturalWidth || !image.naturalHeight) return;
+          const scale = Math.min(1, (viewport.clientWidth - 32) / image.naturalWidth, (viewport.clientHeight - 32) / image.naturalHeight);
+          setFitWidth(Math.max(1, image.naturalWidth * scale));
+        }} />
+      </div>
+    </dialog>
+  );
+}
+
 export function DocumentViewer() {
   // 连接与常用目录
   const [connections, setConnections] = useState<FileConnection[]>([
@@ -335,6 +376,7 @@ export function DocumentViewer() {
   const [copyStatus, setCopyStatus] = useState("");
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState(false);
+  const [imageExpanded, setImageExpanded] = useState(false);
   const [indexWidth, setIndexWidth] = useState(300);
   const [indexCollapsed, setIndexCollapsed] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -689,44 +731,35 @@ export function DocumentViewer() {
 
       {error ? <ErrorState message={error} /> : null}
       <div className="document-index-head">
-            <div>
-              <strong>文档目录</strong>
-              <span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(entry => entry.type !== "directory").length} 个文件`}</span>
-              {!isRemote && roots.length > 0 ? (
-                <select value={rootIndex} onChange={event => chooseRoot(Number(event.target.value))} aria-label="选择开放目录">
-                  {roots.map((root, index) => <option key={root} value={index}>{resolvedRoots[index] || root}</option>)}
-                </select>
-              ) : null}
-              <Button variant="secondary" size="sm" type="button" disabled={!directory} onClick={async () => {
-                const path = isRemote
-                  ? directory?.path.startsWith("/") ? displayHomePath(directory.path, directory.root_path) : `~${directory?.path ? `/${directory.path}` : ""}`
-                  : displayHomePath(`${(resolvedRoots[rootIndex] || "").replace(/\/$/, "")}${folder ? `/${folder}` : ""}` || "/", homeDir);
-                setCopyStatus(path && await copyToClipboard(path) ? "已复制" : "复制失败");
-              }}>{copyStatus || "复制路径"}</Button>
-            </div>
-            <div className="document-index-breadcrumb">
-              <button type="button" onClick={() => openDirectory("")}>
-                {isRemote ? "~" : displayHomePath(resolvedRoots[rootIndex] || roots[rootIndex] || "", homeDir)}
-              </button>
-              {folder
-                .split("/")
-                .filter(Boolean)
-                .map((segment, index, segments) => (
-                  <span key={`${index}-${segment}`}>
-                    <b>/</b>
-                    <button type="button" onClick={() => openDirectory(`${folder.startsWith("/") ? "/" : ""}${segments.slice(0, index + 1).join("/")}`)}>
-                      {segment}
-                    </button>
-                  </span>
-                ))}
-            </div>
-          </div>
+        <button type="button" className="document-index-toggle" onClick={toggleIndex} aria-label={indexCollapsed ? "展开文件列表" : "折叠文件列表"} title={indexCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!indexCollapsed}>
+          {indexCollapsed ? "›" : "‹"}
+        </button>
+        <nav className="document-index-breadcrumb" aria-label="当前目录路径">
+          <button type="button" onClick={() => openDirectory("")}>
+            {isRemote ? "~" : displayHomePath(resolvedRoots[rootIndex] || roots[rootIndex] || "", homeDir)}
+          </button>
+          {folder.split("/").filter(Boolean).map((segment, index, segments) => (
+            <span key={`${index}-${segment}`}>
+              <b>/</b>
+              <button type="button" onClick={() => openDirectory(`${folder.startsWith("/") ? "/" : ""}${segments.slice(0, index + 1).join("/")}`)}>{segment}</button>
+            </span>
+          ))}
+        </nav>
+        {!isRemote && roots.length > 1 ? (
+          <select value={rootIndex} onChange={event => chooseRoot(Number(event.target.value))} aria-label="选择开放目录">
+            {roots.map((root, index) => <option key={root} value={index}>{resolvedRoots[index] || root}</option>)}
+          </select>
+        ) : null}
+        <Button variant="secondary" size="sm" type="button" disabled={!directory} onClick={async () => {
+          const path = isRemote
+            ? directory?.path.startsWith("/") ? displayHomePath(directory.path, directory.root_path) : `~${directory?.path ? `/${directory.path}` : ""}`
+            : displayHomePath(`${(resolvedRoots[rootIndex] || "").replace(/\/$/, "")}${folder ? `/${folder}` : ""}` || "/", homeDir);
+          setCopyStatus(path && await copyToClipboard(path) ? "已复制" : "复制失败");
+        }}>{copyStatus || "复制路径"}</Button>
+      </div>
 
       <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
         <aside className="document-index">
-          <button type="button" className="document-index-toggle" onClick={toggleIndex} aria-label={indexCollapsed ? "展开文件列表" : "折叠文件列表"} title={indexCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!indexCollapsed}>
-            {indexCollapsed ? "›" : "‹"}
-          </button>
           {!indexCollapsed ? <>
           <div className="document-file-list">
             {loadingFiles ? (
@@ -777,14 +810,17 @@ export function DocumentViewer() {
           ) : selectedEntry && selectedKind !== "markdown" ? (
             <>
               <header className="document-reader-head">
-                <div><span>{selectedEntry.path}</span><h1>{selectedEntry.name}</h1></div>
+                <h1 title={selectedEntry.name}>{selectedEntry.name}</h1>
                 <small>{formatBytes(selectedEntry.size)} · {formatDate(selectedEntry.modified)}</small>
               </header>
               {selectedKind === "image" ? (
                 previewError ? <EmptyState title="无法显示图片" detail="文件可能已损坏，或浏览器不支持此图片格式。" /> :
                 // 图片地址来自受限资源接口，SVG 作为图片加载。
-                // eslint-disable-next-line @next/next/no-img-element
-                <img className="document-image-preview" src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} alt={selectedEntry.name} onError={() => setPreviewError(true)} />
+                <div className="document-image-preview-wrap">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="document-image-preview" src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} alt={selectedEntry.name} onError={() => setPreviewError(true)} />
+                  <Button variant="secondary" size="sm" type="button" onClick={() => setImageExpanded(true)}>全屏查看</Button>
+                </div>
               ) : selectedKind === "pdf" ? (
                 <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} />
               ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、图片、SVG 和 PDF。" />}
@@ -792,14 +828,7 @@ export function DocumentViewer() {
           ) : markdownDocument && markdownDocument.path === selectedPath ? (
             <>
               <header className="document-reader-head">
-                <div>
-                  <span>
-                    {isRemote
-                      ? `${activeConnection?.name || "远程服务器"} ${markdownDocument.path}`
-                      : markdownDocument.path}
-                  </span>
-                  <h1>{markdownDocument.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</h1>
-                </div>
+                <h1 title={markdownDocument.name}>{markdownDocument.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</h1>
                 <small>
                   {formatBytes(markdownDocument.size)} · {formatDate(markdownDocument.modified)}
                 </small>
@@ -820,6 +849,9 @@ export function DocumentViewer() {
           )}
         </main>
       </div>
+      {imageExpanded && selectedEntry && selectedKind === "image" ? (
+        <ImageLightbox src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} name={selectedEntry.name} onClose={() => setImageExpanded(false)} />
+      ) : null}
     </section>
   );
 }
