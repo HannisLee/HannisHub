@@ -59,6 +59,28 @@ const assert=require('node:assert/strict');
    await input.fill('WASD E 空格正常输入');
    assert.equal(await input.inputValue(),'WASD E 空格正常输入');
    await ui.getByText('离线留言',{exact:true}).waitFor();
+   const composer=ui.locator('.private-panel .chat-composer');
+   const inputBox=await input.boundingBox();
+   const sendBox=await composer.getByRole('button',{name:'发送',exact:true}).boundingBox();
+   assert.ok(inputBox.width>80 && sendBox.x>=inputBox.x+inputBox.width);
+   assert.ok(Math.abs(inputBox.y+inputBox.height-sendBox.y-sendBox.height)<4);
+   await input.press('Shift+Enter');
+   await input.press('a');
+   assert.ok((await input.inputValue()).includes('\n'));
+   assert.ok((await input.boundingBox()).height>inputBox.height);
+   await composer.getByRole('button',{name:'表情',exact:true}).click();
+   await ui.locator('.chat-emoji-button:visible').first().waitFor();
+   const before=await input.inputValue();
+   await ui.locator('.chat-emoji-button:visible').first().click();
+   assert.ok((await input.inputValue()).length>before.length);
+   await ui.keyboard.press('Escape');
+   assert.equal(await ui.getByRole('dialog').count(),1);
+   assert.equal(await ui.locator('.chat-emoji-popover').count(),0);
+   const bubble=ui.locator('.chat-row-mine .chat-bubble').last();
+   const bubbleBox=await bubble.boundingBox();
+   const rowBox=await ui.locator('.chat-row-mine').last().boundingBox();
+   assert.ok(Math.abs(bubbleBox.x+bubbleBox.width-rowBox.x-rowBox.width)<2);
+
    await ui.keyboard.press('Escape');
    await ui.getByRole('dialog').waitFor({state:'hidden'});
  }
