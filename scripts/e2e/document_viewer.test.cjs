@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
  const origin = `http://127.0.0.1:${process.env.HUB_PORT || '18094'}`;
  await page.goto(`${origin}/login`);
  assert.equal(await page.evaluate(async () => (await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:'lihan',password:'e2e-test-pass-123'})})).status), 200);
- const entries = ['notes.md','photo.png','vector.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
+ const entries = ['notes.md','photo.png','vector.svg','big.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
  await page.route('**/api/file-manager/**', async route => {
    const u = new URL(route.request().url());
    const p = u.pathname;
@@ -20,7 +20,7 @@ const assert = require('node:assert/strict');
    if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
    if (p.endsWith('/directory')) { const folder = u.searchParams.get('path') || ''; const files = entries.map(e => ({...e,path:folder ? `${folder}/${e.name}` : e.path})); if (!folder) files.push({name:'sub',path:'sub',type:'directory',size:0,modified:0,extension:''}); return route.fulfill({json:{root_index:0,root_path:remote?'/home/test':'/home/test/project',path:folder,entries:files,cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
    if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:'# 测试文档'}}); }
-   if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',body:'%PDF-1.4\n%%EOF'}); }
+   if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('big.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1600"><rect width="2000" height="1600"/></svg>'}); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',body:'%PDF-1.4\n%%EOF'}); }
    return route.continue();
  });
  await page.goto(`${origin}/files/documents`);
@@ -51,6 +51,36 @@ const assert = require('node:assert/strict');
  assert.equal(await lightbox.getByRole('button',{name:'重置图片缩放'}).innerText(), '100%');
  await page.keyboard.press('Escape');
  await lightbox.waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'big.svg'}).click();
+ await page.getByRole('button',{name:'全屏查看'}).click();
+ const bigLightbox = page.getByRole('dialog',{name:'big.svg 图片查看'});
+ const viewport = bigLightbox.locator('.document-image-lightbox-viewport');
+ await page.waitForFunction(() => document.querySelector('.document-image-lightbox img')?.naturalWidth === 2000);
+ const bounds = await viewport.boundingBox();
+ await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+ await page.mouse.wheel(0, -300);
+ await page.waitForFunction(() => document.querySelector('[aria-label="重置图片缩放"]')?.textContent === '110%');
+ await page.mouse.wheel(0, 300);
+ await page.waitForFunction(() => document.querySelector('[aria-label="重置图片缩放"]')?.textContent === '100%');
+ for (let i = 0; i < 5; i++) await bigLightbox.getByRole('button',{name:'放大图片'}).click();
+ await viewport.evaluate(el => { el.scrollLeft = 150; el.scrollTop = 150; });
+ const beforeDrag = await viewport.evaluate(el => ({ x: el.scrollLeft, y: el.scrollTop }));
+ await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+ await page.mouse.down();
+ await page.mouse.move(bounds.x + bounds.width / 2 - 80, bounds.y + bounds.height / 2 - 70);
+ await page.mouse.up();
+ const afterDrag = await viewport.evaluate(el => ({ x: el.scrollLeft, y: el.scrollTop }));
+ assert.ok(afterDrag.x > beforeDrag.x && afterDrag.y > beforeDrag.y);
+ const cursor = {x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2};
+ await page.mouse.move(cursor.x, cursor.y);
+ const pointBefore = await bigLightbox.locator('img').evaluate((el, point) => { const rect = el.getBoundingClientRect(); return {x:(point.x-rect.left)/rect.width, y:(point.y-rect.top)/rect.height}; }, cursor);
+ await page.mouse.wheel(0, -100);
+ await page.waitForFunction(() => document.querySelector('[aria-label="重置图片缩放"]')?.textContent === '248%');
+ await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+ const pointAfter = await bigLightbox.locator('img').evaluate((el, point) => { const rect = el.getBoundingClientRect(); return {x:(point.x-rect.left)/rect.width, y:(point.y-rect.top)/rect.height}; }, cursor);
+ assert.ok(Math.abs(pointBefore.x - pointAfter.x) < 0.02 && Math.abs(pointBefore.y - pointAfter.y) < 0.02);
+ await page.keyboard.press('Escape');
+ await bigLightbox.waitFor({state:'hidden'});
  await page.getByRole('button',{name:'sample.pdf'}).click();
  await page.locator('iframe.document-pdf-preview').waitFor();
  await page.reload();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -315,6 +315,11 @@ function MarkdownContent({
 
 function ImageLightbox({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(1);
+  const zoomAnchorRef = useRef<{ x: number; y: number; relativeX: number; relativeY: number } | null>(null);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [fitWidth, setFitWidth] = useState(0);
 
@@ -324,8 +329,46 @@ function ImageLightbox({ src, name, onClose }: { src: string; name: string; onCl
     return () => { dialog?.close(); };
   }, []);
 
+  const applyZoom = useCallback((value: number, anchor?: { x: number; y: number }) => {
+    const viewport = viewportRef.current;
+    const image = viewport?.querySelector("img");
+    const rect = image?.getBoundingClientRect();
+    const point = anchor && rect && rect.width && rect.height
+      ? { x: (anchor.x - rect.left) / rect.width, y: (anchor.y - rect.top) / rect.height }
+      : null;
+    const next = Math.min(8, Math.max(0.25, Math.round(value * 100) / 100));
+    if (next === zoomRef.current) return;
+    zoomAnchorRef.current = point && anchor ? { x: anchor.x, y: anchor.y, relativeX: point.x, relativeY: point.y } : null;
+    zoomRef.current = next;
+    setZoom(next);
+  }, []);
+
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    const viewport = viewportRef.current;
+    const image = viewport?.querySelector("img");
+    if (anchor && viewport && image) {
+      const resized = image.getBoundingClientRect();
+      viewport.scrollLeft += resized.left + anchor.relativeX * resized.width - anchor.x;
+      viewport.scrollTop += resized.top + anchor.relativeY * resized.height - anchor.y;
+    }
+    zoomAnchorRef.current = null;
+  }, [zoom]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    function handleWheel(event: WheelEvent) {
+      if (!event.deltaY) return;
+      event.preventDefault();
+      applyZoom(zoomRef.current * (event.deltaY < 0 ? 1.1 : 1 / 1.1), { x: event.clientX, y: event.clientY });
+    }
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, [applyZoom]);
+
   function changeZoom(delta: number) {
-    setZoom(value => Math.min(8, Math.max(0.25, Math.round((value + delta) * 100) / 100)));
+    applyZoom(zoomRef.current + delta);
   }
 
   return (
@@ -334,15 +377,33 @@ function ImageLightbox({ src, name, onClose }: { src: string; name: string; onCl
         <strong title={name}>{name}</strong>
         <div className="document-image-lightbox-actions">
           <Button variant="secondary" size="sm" type="button" onClick={() => changeZoom(-0.25)} aria-label="缩小图片">−</Button>
-          <Button variant="secondary" size="sm" type="button" onClick={() => setZoom(1)} aria-label="重置图片缩放">{Math.round(zoom * 100)}%</Button>
+          <Button variant="secondary" size="sm" type="button" onClick={() => applyZoom(1)} aria-label="重置图片缩放">{Math.round(zoom * 100)}%</Button>
           <Button variant="secondary" size="sm" type="button" onClick={() => changeZoom(0.25)} aria-label="放大图片">＋</Button>
           <Button variant="secondary" size="sm" type="button" onClick={onClose}>关闭</Button>
         </div>
       </div>
-      <div className="document-image-lightbox-viewport">
+      <div ref={viewportRef} className={`document-image-lightbox-viewport${dragging ? " is-dragging" : ""}`}
+        onPointerDown={event => {
+          if (event.pointerType !== "mouse" || event.button !== 0) return;
+          const viewport = event.currentTarget;
+          dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop };
+          viewport.setPointerCapture(event.pointerId);
+          setDragging(true);
+          event.preventDefault();
+        }}
+        onPointerMove={event => {
+          const drag = dragRef.current;
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          event.currentTarget.scrollLeft = drag.scrollLeft - (event.clientX - drag.x);
+          event.currentTarget.scrollTop = drag.scrollTop - (event.clientY - drag.y);
+        }}
+        onPointerUp={event => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; setDragging(false); } }}
+        onPointerCancel={() => { dragRef.current = null; setDragging(false); }}
+        onLostPointerCapture={() => { dragRef.current = null; setDragging(false); }}>
+
         {/* 使用图片元素隔离 SVG，缩放后允许滚动查看细节。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={name} style={fitWidth ? { width: `${fitWidth * zoom}px` } : undefined} onLoad={event => {
+        <img src={src} alt={name} draggable={false} style={fitWidth ? { width: `${fitWidth * zoom}px` } : undefined} onLoad={event => {
           const image = event.currentTarget;
           const viewport = image.parentElement;
           if (!viewport || !image.naturalWidth || !image.naturalHeight) return;
