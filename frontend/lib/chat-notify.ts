@@ -28,15 +28,44 @@ interface NotifyState {
 let state: NotifyState = { unread: 0, toast: null, soundEnabled: true, embedded: false };
 let soundLoaded = false;
 const listeners = new Set<() => void>();
+const unreadIds = new Set<number>();
+let lastRead = 0;
 
 function emit(next: Partial<NotifyState>) {
   state = { ...state, ...next };
   listeners.forEach(listener => listener());
 }
 
+/** 监听其他窗口的已读进度；窗口恢复时补同步后台期间可能延迟的事件。 */
+function syncChatRead() {
+  const read = getLastRead();
+  for (const id of unreadIds) if (id <= read) unreadIds.delete(id);
+  const toast = state.toast && state.toast.id > read ? state.toast : null;
+  if (toast !== state.toast) window.clearTimeout(toastTimer);
+  if (state.unread !== unreadIds.size || toast !== state.toast) emit({ unread: unreadIds.size, toast });
+}
+
+function onReadStorage(event: StorageEvent) {
+  if (event.key === LAST_READ_KEY || event.key === null) syncChatRead();
+}
+
 export function subscribeChatNotify(listener: () => void) {
+  const first = listeners.size === 0;
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  if (first && typeof window !== "undefined") {
+    window.addEventListener("storage", onReadStorage);
+    window.addEventListener("focus", syncChatRead);
+    document.addEventListener("visibilitychange", syncChatRead);
+    syncChatRead();
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onReadStorage);
+      window.removeEventListener("focus", syncChatRead);
+      document.removeEventListener("visibilitychange", syncChatRead);
+    }
+  };
 }
 
 export function getChatNotifySnapshot(): NotifyState {
@@ -74,13 +103,17 @@ export function readChatClientId(): string {
 
 /** 最后已读消息 id；0 表示本浏览器从未打开过聊天室 */
 export function getLastRead(): number {
-  return Number(storageGet(LAST_READ_KEY)) || 0;
+  lastRead = Math.max(lastRead, Number(storageGet(LAST_READ_KEY)) || 0);
+  return lastRead;
 }
 
-/** 标记读到某条消息为止，并清空未读数 */
+/** 标记读到某条消息为止，保留比该位置更新的未读消息。 */
 export function markChatRead(messageId: number) {
-  if (messageId > getLastRead()) storageSet(LAST_READ_KEY, String(messageId));
-  if (state.unread !== 0) emit({ unread: 0 });
+  if (messageId > getLastRead()) {
+    lastRead = messageId;
+    storageSet(LAST_READ_KEY, String(messageId));
+  }
+  syncChatRead();
 }
 
 /** 内嵌聊天室打开 / 关闭；打开时收起已有提示条 */
@@ -90,12 +123,15 @@ export function setChatEmbedded(open: boolean) {
   emit(open ? { embedded: true, toast: null } : { embedded: false });
 }
 
-export function setChatUnread(count: number) {
-  if (state.unread !== count) emit({ unread: count });
+export function setChatUnread(messages: readonly ChatRoomMessage[]) {
+  unreadIds.clear();
+  addChatUnread(messages);
 }
 
-export function addChatUnread(count: number) {
-  if (count > 0) emit({ unread: state.unread + count });
+export function addChatUnread(messages: readonly ChatRoomMessage[]) {
+  const read = getLastRead();
+  for (const message of messages) if (message.id > read) unreadIds.add(message.id);
+  syncChatRead();
 }
 
 /** 是否为别人发送的消息（自己的消息不触发提醒） */
@@ -115,6 +151,7 @@ export function messagePreview(message: ChatRoomMessage): string {
 }
 
 export function showChatToast(message: ChatRoomMessage) {
+  if (message.id <= getLastRead()) return;
   emit({ toast: { id: message.id, nickname: message.nickname, content: messagePreview(message) } });
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => emit({ toast: null }), 6000);

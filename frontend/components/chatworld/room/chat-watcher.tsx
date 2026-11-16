@@ -43,14 +43,16 @@ export function useChatWatcher(enabled: boolean) {
       if (lastRead === 0) {
         // 从未打开过聊天室：以当前最新消息为起点，不把历史记录算作未读
         const latest = await apiFetch<ChatRoomMessages>(`${MESSAGES}?limit=1`);
+        if (cancelled) return;
         const latestId = latest.messages.at(-1)?.id ?? 0;
         markChatRead(latestId);
         lastSeen = latestId;
         return;
       }
       const data = await apiFetch<ChatRoomMessages>(`${MESSAGES}?after=${lastRead}&limit=500`);
+      if (cancelled) return;
       const clientId = readChatClientId();
-      setChatUnread(data.messages.filter(message => isFromOthers(message, clientId)).length);
+      setChatUnread(data.messages.filter(message => isFromOthers(message, clientId)));
       lastSeen = data.messages.at(-1)?.id ?? lastRead;
     }
 
@@ -59,9 +61,10 @@ export function useChatWatcher(enabled: boolean) {
       if (cancelled || data.messages.length === 0) return;
       lastSeen = data.messages.at(-1)?.id ?? lastSeen;
       const clientId = readChatClientId();
-      const fresh = data.messages.filter(message => isFromOthers(message, clientId));
+      const read = getLastRead();
+      const fresh = data.messages.filter(message => message.id > read && isFromOthers(message, clientId));
       if (fresh.length === 0) return;
-      addChatUnread(fresh.length);
+      addChatUnread(fresh);
       showChatToast(fresh[fresh.length - 1]);
       playChatDing();
     }

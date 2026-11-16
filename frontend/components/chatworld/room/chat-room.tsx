@@ -5,6 +5,7 @@ import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../../lib/api";
 import {
   CHAT_CLIENT_ID_KEY,
   addChatUnread,
+  getLastRead,
   isFromOthers,
   markChatRead,
   playChatDing,
@@ -250,13 +251,13 @@ export function ChatRoom() {
     });
     lastIdRef.current = Math.max(known, ...incoming.map(item => item.id));
 
-    const fromOthers = fresh.filter(item => isFromOthers(item, clientIdRef.current));
+    const fromOthers = fresh.filter(item => item.id > getLastRead() && isFromOthers(item, clientIdRef.current));
     if (!notify || fromOthers.length === 0 || isWatching()) {
       if (isWatching()) markChatRead(lastIdRef.current);
       return;
     }
     // 不在看最新消息：计入未读、提示音，滚动在上方时显示「新消息」按钮
-    addChatUnread(fromOthers.length);
+    addChatUnread(fromOthers);
     playChatDing();
     if (!stickToBottomRef.current) setNewBelow(count => count + fromOthers.length);
   }, [isWatching, updatePending]);
