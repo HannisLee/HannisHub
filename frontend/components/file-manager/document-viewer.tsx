@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
 import { errorMessage, formatBytes, formatDate } from "../../lib/format";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -19,6 +19,9 @@ const DEFAULT_DOCUMENT_FOLDER = "/home/lihan/reproduce/RadioGS-stage1";
 const DOCUMENT_LOCATION_KEY = "hannishub_document_viewer_location";
 const REMOTE_LOCATION_KEY = "hannishub_document_viewer_remote_locations";
 const ACTIVE_CONN_KEY = "hannishub_doc_active_connection";
+const INDEX_WIDTH_KEY = "hannishub_document_index_width";
+const INDEX_COLLAPSED_KEY = "hannishub_document_index_collapsed";
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "jfif", "gif", "webp", "avif", "apng", "bmp", "ico", "svg", "tif", "tiff", "heic", "heif", "jxl"]);
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkdn"]);
 
 interface SavedDocumentLocation {
@@ -62,6 +65,15 @@ function readRemoteLocation(connectionId: string): RemoteDocumentLocation {
     return { folder: "", document: "" };
   }
   return value;
+}
+
+function fileKind(path: string): "markdown" | "image" | "pdf" | "other" {
+  const name = path.split("/").pop() || "";
+  const extension = name.includes(".") ? name.split(".").pop()?.toLowerCase() || "" : "";
+  if (MARKDOWN_EXTENSIONS.has(extension)) return "markdown";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (extension === "pdf") return "pdf";
+  return "other";
 }
 
 function isMarkdownFile(entry: FileManagerEntry): boolean {
@@ -312,11 +324,44 @@ export function DocumentViewer() {
   const [initialized, setInitialized] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [error, setError] = useState("");
+  const [previewError, setPreviewError] = useState(false);
+  const [indexWidth, setIndexWidth] = useState(300);
+  const [indexCollapsed, setIndexCollapsed] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
 
   const restoredDirectoryRef = useRef<FileManagerDirectoryResponse | null>(null);
 
   const isRemote = activeConnectionId !== "local";
   const activeConnection = connections.find(c => c.id === activeConnectionId);
+  const selectedEntry = directory?.entries.find(entry => entry.type !== "directory" && entry.path === selectedPath);
+  const selectedKind = fileKind(selectedPath);
+
+  useEffect(() => {
+    try {
+      const width = Number(window.localStorage.getItem(INDEX_WIDTH_KEY));
+      // 从浏览器存储恢复布局，服务端渲染时使用默认值。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (width >= 220 && width <= 700) setIndexWidth(width);
+      setIndexCollapsed(window.localStorage.getItem(INDEX_COLLAPSED_KEY) === "true");
+    } catch {
+      // 浏览器禁用存储时使用默认布局。
+    }
+  }, []);
+
+  function updateIndexWidth(width: number) {
+    const available = workspaceRef.current?.clientWidth || 960;
+    const next = Math.round(Math.max(220, Math.min(700, Math.max(220, available - 260), width)));
+    setIndexWidth(next);
+    try { window.localStorage.setItem(INDEX_WIDTH_KEY, String(next)); } catch { /* 忽略 */ }
+  }
+
+  function toggleIndex() {
+    const next = !indexCollapsed;
+    setIndexCollapsed(next);
+    try { window.localStorage.setItem(INDEX_COLLAPSED_KEY, String(next)); } catch { /* 忽略 */ }
+  }
+
 
   // 载入可用连接
   const loadConnections = useCallback(async () => {
@@ -376,7 +421,7 @@ export function DocumentViewer() {
             const saved = readRemoteLocation(savedConn);
             setFolder(saved.folder);
             setSelectedPath(saved.document);
-            setLoadingDocument(Boolean(saved.document));
+            setLoadingDocument(Boolean(saved.document) && fileKind(saved.document) === "markdown");
             setRoots(nextRoots);
             setResolvedRoots(nextResolvedRoots);
             setInitialized(true);
@@ -424,7 +469,7 @@ export function DocumentViewer() {
         setRootIndex(nextRootIndex);
         setFolder(nextFolder);
         setSelectedPath(nextDocumentPath);
-        setLoadingDocument(Boolean(nextDocumentPath));
+        setLoadingDocument(Boolean(nextDocumentPath) && fileKind(nextDocumentPath) === "markdown");
         if (nextDirectory) {
           restoredDirectoryRef.current = nextDirectory;
           setDirectory(nextDirectory);
@@ -453,10 +498,10 @@ export function DocumentViewer() {
       setDirectory(value);
       setSelectedPath(current => {
         const markdownFiles = value.entries.filter(isMarkdownFile);
-        const nextPath = markdownFiles.some(entry => entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
+        const nextPath = value.entries.some(entry => entry.type !== "directory" && entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
         if (nextPath !== current) {
           setMarkdownDocument(null);
-          setLoadingDocument(Boolean(nextPath));
+          setLoadingDocument(Boolean(nextPath) && fileKind(nextPath) === "markdown");
         }
         return nextPath;
       });
@@ -478,10 +523,10 @@ export function DocumentViewer() {
         setDirectory(value);
         setSelectedPath(current => {
           const markdownFiles = value.entries.filter(isMarkdownFile);
-          const nextPath = markdownFiles.some(entry => entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
+          const nextPath = value.entries.some(entry => entry.type !== "directory" && entry.path === current) ? current : markdownFiles.sort(compareDocumentEntries)[0]?.path || "";
           if (nextPath !== current) {
             setMarkdownDocument(null);
-            setLoadingDocument(Boolean(nextPath));
+            setLoadingDocument(Boolean(nextPath) && fileKind(nextPath) === "markdown");
           }
           return nextPath;
         });
@@ -501,8 +546,8 @@ export function DocumentViewer() {
   // 读取 Markdown 内容（区分本机与远程 SSH）
   useEffect(() => {
     if (!initialized || !selectedPath) return;
+    if (fileKind(selectedPath) !== "markdown") return;
     let active = true;
-    setLoadingDocument(true);
     const markdownUrl =
       activeConnectionId !== "local"
         ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(activeConnectionId)}/markdown?path=${encodeURIComponent(selectedPath)}`
@@ -529,7 +574,7 @@ export function DocumentViewer() {
     try {
       window.localStorage.setItem(ACTIVE_CONN_KEY, activeConnectionId);
       if (!directory || loadingFiles || loadingDocument) return;
-      const openedDocument = markdownDocument?.path === selectedPath ? selectedPath : "";
+      const openedDocument = selectedEntry && (selectedKind !== "markdown" || markdownDocument?.path === selectedPath) ? selectedPath : "";
       if (activeConnectionId === "local") {
         if (directory.root_index !== rootIndex || directory.path !== folder) return;
         window.localStorage.setItem(DOCUMENT_LOCATION_KEY, JSON.stringify({ root: resolvedRoots[rootIndex], folder, document: openedDocument }));
@@ -541,12 +586,11 @@ export function DocumentViewer() {
     } catch {
       // 浏览器禁用存储时仍可正常浏览。
     }
-  }, [initialized, resolvedRoots, rootIndex, folder, directory, markdownDocument, selectedPath, loadingFiles, loadingDocument, activeConnectionId]);
+  }, [initialized, resolvedRoots, rootIndex, folder, directory, markdownDocument, selectedPath, loadingFiles, loadingDocument, activeConnectionId, selectedEntry, selectedKind]);
 
   const visibleEntries = useMemo(() => {
     const query = filter.trim().toLowerCase();
     return (directory?.entries || [])
-      .filter(entry => entry.type === "directory" || isMarkdownFile(entry))
       .filter(entry => !query || `${entry.name} ${entry.path}`.toLowerCase().includes(query))
       .sort(compareDocumentEntries);
   }, [directory, filter]);
@@ -573,15 +617,17 @@ export function DocumentViewer() {
     setActiveConnectionId(connId);
     setFolder(nextFolder);
     setSelectedPath(nextDocument);
-    setLoadingDocument(Boolean(nextDocument));
+    setLoadingDocument(Boolean(nextDocument) && fileKind(nextDocument) === "markdown");
     setMarkdownDocument(null);
     setFilter("");
     setCopyStatus("");
+    setPreviewError(false);
   }
 
   function chooseRoot(nextRoot: number) {
     if (nextRoot === rootIndex) return;
     setCopyStatus("");
+    setPreviewError(false);
     setLoadingFiles(true);
     setDirectory(null);
     setRootIndex(nextRoot);
@@ -608,15 +654,18 @@ export function DocumentViewer() {
     setFolder(path);
     setFilter("");
     setCopyStatus("");
+    setPreviewError(false);
     setMarkdownDocument(null);
     setSelectedPath(documentPath);
-    setLoadingDocument(Boolean(documentPath));
+    setLoadingDocument(Boolean(documentPath) && fileKind(documentPath) === "markdown");
   }
 
   function selectDocument(path: string) {
     if (path === selectedPath) return;
-    setLoadingDocument(true);
+    setLoadingDocument(fileKind(path) === "markdown");
     setMarkdownDocument(null);
+    setPreviewError(false);
+    setError("");
     setSelectedPath(path);
   }
 
@@ -634,12 +683,16 @@ export function DocumentViewer() {
       />
 
       {error ? <ErrorState message={error} /> : null}
-      <div className="document-workspace">
+      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
         <aside className="document-index">
+          <button type="button" className="document-index-toggle" onClick={toggleIndex} aria-label={indexCollapsed ? "展开文件列表" : "折叠文件列表"} title={indexCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!indexCollapsed}>
+            {indexCollapsed ? "›" : "‹"}
+          </button>
+          {!indexCollapsed ? <>
           <div className="document-index-head">
             <div>
               <strong>文档目录</strong>
-              <span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(isMarkdownFile).length} 篇`}</span>
+              <span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(entry => entry.type !== "directory").length} 个文件`}</span>
               {!isRemote && roots.length > 0 ? (
                 <select value={rootIndex} onChange={event => chooseRoot(Number(event.target.value))} aria-label="选择开放目录">
                   {roots.map((root, index) => <option key={root} value={index}>{resolvedRoots[index] || root}</option>)}
@@ -692,7 +745,7 @@ export function DocumentViewer() {
                       onClick={() => selectDocument(entry.path)}
                       title={entry.path}
                     >
-                      <strong>{entry.name.replace(/\.(md|markdown|mdown|mkdn)$/i, "")}</strong>
+                      <strong>{entry.name}</strong>
                       <span>{formatDate(entry.modified)}</span>
                     </button>
                   )
@@ -700,20 +753,40 @@ export function DocumentViewer() {
               : null}
             {!loadingFiles && !visibleEntries.length ? (
               <EmptyState
-                title={directory?.entries.length ? "没有匹配的文档" : "这个文件夹没有 Markdown 文档"}
+                title={directory?.entries.length ? "没有匹配的文件" : "这个文件夹为空"}
                 detail={
                   directory?.entries.length
                     ? "可调整上方筛选条件。"
-                    : "可通过上级目录或常用目录切换到包含 .md 文件的位置。"
+                    : "可通过上级目录或常用目录切换位置。"
                 }
               />
             ) : null}
           </div>
+          <div className="document-index-resizer" role="separator" aria-label="调整文件列表宽度" aria-orientation="vertical" aria-valuemin={220} aria-valuemax={700} aria-valuenow={indexWidth} tabIndex={0}
+            onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); }}
+            onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId) && workspaceRef.current) updateIndexWidth(event.clientX - workspaceRef.current.getBoundingClientRect().left); }}
+            onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); updateIndexWidth(indexWidth + (event.key === "ArrowRight" ? 16 : -16)); } }} />
+          </> : null}
         </aside>
         <main className="document-reader">
           {loadingDocument ? (
             <LoadingState label="正在打开文档…" />
-          ) : markdownDocument ? (
+          ) : selectedEntry && selectedKind !== "markdown" ? (
+            <>
+              <header className="document-reader-head">
+                <div><span>{selectedEntry.path}</span><h1>{selectedEntry.name}</h1></div>
+                <small>{formatBytes(selectedEntry.size)} · {formatDate(selectedEntry.modified)}</small>
+              </header>
+              {selectedKind === "image" ? (
+                previewError ? <EmptyState title="无法显示图片" detail="文件可能已损坏，或浏览器不支持此图片格式。" /> :
+                // 图片地址来自受限资源接口，SVG 作为图片加载。
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="document-image-preview" src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} alt={selectedEntry.name} onError={() => setPreviewError(true)} />
+              ) : selectedKind === "pdf" ? (
+                <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} />
+              ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、图片、SVG 和 PDF。" />}
+            </>
+          ) : markdownDocument && markdownDocument.path === selectedPath ? (
             <>
               <header className="document-reader-head">
                 <div>
@@ -738,8 +811,8 @@ export function DocumentViewer() {
             </>
           ) : (
             <EmptyState
-              title="选择一篇文档开始阅读"
-              detail="文档会在这里以阅读排版显示，代码块、列表、表格和相对图片均会保留。"
+              title="选择文件开始查看"
+              detail="支持查看 Markdown、图片、SVG 和 PDF。"
             />
           )}
         </main>
