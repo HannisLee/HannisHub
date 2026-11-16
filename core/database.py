@@ -153,6 +153,22 @@ _MIGRATIONS: list[str] = [
     CREATE INDEX feature_requests_created ON feature_requests(created_at DESC);
     CREATE INDEX feature_requests_owner ON feature_requests(owner, created_at DESC);
     """,
+    # v7：大厅街机连连看排行榜（每个账号每个模式 / 每天只保留最高分；闯关的 day 为空字符串）
+    """
+    CREATE TABLE linkup_scores (
+        owner      TEXT NOT NULL,
+        mode       TEXT NOT NULL,
+        day        TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        score      INTEGER NOT NULL,
+        level      INTEGER NOT NULL,
+        cleared    INTEGER NOT NULL DEFAULT 0,
+        plays      INTEGER NOT NULL DEFAULT 1,
+        updated_at REAL NOT NULL,
+        PRIMARY KEY (owner, mode, day)
+    );
+    CREATE INDEX linkup_scores_rank ON linkup_scores(mode, day, score DESC);
+    """,
 
 ]
 

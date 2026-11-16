@@ -6,6 +6,7 @@ import { DeskComputer, PrivatePanel } from "./private-panel";
 import { useCallback, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setChatEmbedded } from "../../../lib/chat-notify";
+import { linkupCloseWarning } from "../../../lib/lobby-linkup";
 import { poolCloseWarning } from "../../../lib/lobby-pool";
 import { useShell } from "../../layout/shell-context";
 import type { MachineInfo } from "./game/layout";
@@ -19,6 +20,7 @@ const OcrPanel = dynamic(() => import("../../llama/ocr-panel").then(m => m.OcrPa
 const ChatRoom = dynamic(() => import("../room/chat-room").then(m => m.ChatRoom), { ssr: false, loading: PanelLoading });
 const NotesBoard = dynamic(() => import("./notes-board").then(m => m.NotesBoard), { ssr: false, loading: PanelLoading });
 const PoolPanel = dynamic(() => import("../pool/pool-panel").then(m => m.PoolPanel), { ssr: false, loading: PanelLoading });
+const LinkupPanel = dynamic(() => import("../linkup/linkup-panel").then(m => m.LinkupPanel), { ssr: false, loading: PanelLoading });
 
 /** 内嵌聊天室：打开期间暂停页面级的后台新消息检查，避免对正在看的消息弹提示、响提示音 */
 function ChatPanel() {
@@ -68,6 +70,7 @@ const MACHINES: Record<string, {
   pool: POOL_ENTRY,
   "pool-left": POOL_ENTRY,
   "pool-right": POOL_ENTRY,
+  linkup: { Panel: LinkupPanel, fill: true, hint: "连连看 · 闯关 / 每日挑战 / 休闲", confirmClose: linkupCloseWarning },
 };
 
 interface MachineDialogProps {

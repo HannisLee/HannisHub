@@ -1073,12 +1073,16 @@ def build_hall() -> Room:
         room.put("chair_side_l", tx + 14, tbm, solid=[tx + 15, tbm - 5, OBJECTS["chair_side_l"].width - 2, 5])
         room.seat(tx + 14 + OBJECTS["chair_side_l"].width - 8, tbm + 1, "left", [tx + 22, tbm - 14, 14, 16], title="坐下")
 
-    # ---- 右下：游戏角（街机、弹珠机、完整台球桌与球杆架、蛋椅）
+    # ---- 右下：游戏角（街机连连看、弹珠机、完整台球桌与球杆架、蛋椅）
     gx0, gx1 = 400, w - 22
     room.rug((gx0, 250, gx1, floor_bottom - 6), floor_tex(4, 20), edge=(60, 40, 40), inner=(170, 120, 100))
     room.put("arcade_a", gx0 + 10, 286, foot=10)
     room.put("arcade_b", gx0 + 28, 286, foot=10)
-    room.action("arcade", "街机", "来一局", [gx0 + 8, 286, 38, 14])
+    # 街机：按 E 打开连连看（两台街机共用一个交互区与铭牌）
+    room.machines.append({
+        "id": "linkup", "title": "街机 · 连连看", "hint": "闯关 / 每日挑战 / 休闲",
+        "zone": [gx0 + 8, 286, 38, 14], "signX": gx0 + 27, "signY": 236,
+    })
     room.put("pinball", gx0 + 50, 286, foot=10)
     room.action("pinball", "弹珠机", "弹一把", [gx0 + 48, 286, 22, 14])
     pool_x = gx0 + 92
