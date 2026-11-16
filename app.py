@@ -38,7 +38,7 @@ from core.auth import (
 from model_manager import ai_settings
 from chatworld import private_chat, chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
-from server import terminal_commands, terminal_manager
+from server import terminal_commands, terminal_client
 from core.compression import SelectiveGZipMiddleware
 import model_manager.app as model_manager_app
 from server.file_manager import (
@@ -131,14 +131,11 @@ async def lifespan(_: FastAPI):
     await model_manager_app.recover_interrupted_asr_tasks()
     ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(model_manager_app.auto_start_watchdog())
-    terminal_reaper = asyncio.create_task(terminal_manager.manager.reaper_loop())
     try:
         yield
     finally:
         remote_files.close_all()
         auto_start_task.cancel()
-        terminal_reaper.cancel()
-        await terminal_manager.manager.shutdown_all()
         await prompt_service_app.audio_service.stop()
         await server_manager_app.stop_scheduler()
 
@@ -994,16 +991,13 @@ def _websocket_origin_allowed(websocket: WebSocket) -> bool:
 @app.get("/api/terminal/sessions")
 async def terminal_list(request: Request):
     _require_terminal_admin(request.session)
-    return JSONResponse({
-        "sessions": terminal_manager.manager.list(),
-        "idle_timeout_seconds": int(terminal_manager.idle_timeout_seconds()),
-    })
+    return JSONResponse(await terminal_client.request("GET", "/sessions"))
 
 
 @app.post("/api/terminal/sessions")
 async def terminal_create(request: Request, payload: dict[str, Any] = Body(default_factory=dict)):
     username = _require_terminal_admin(request.session)
-    return JSONResponse({"session": terminal_manager.manager.create(username, payload.get("title"))})
+    return JSONResponse(await terminal_client.request("POST", "/sessions", {"owner": username, "title": payload.get("title")}))
 
 
 @app.get("/api/terminal/commands")
@@ -1040,21 +1034,19 @@ async def terminal_command_run(command_id: str, request: Request):
     """一键新建终端并按顺序执行已保存命令。"""
     username = _require_terminal_admin(request.session)
     group = await run_in_threadpool(terminal_commands.get_group, username, command_id)
-    return JSONResponse({"session": terminal_manager.manager.run(username, group["name"], group["commands"])})
+    return JSONResponse(await terminal_client.request("POST", "/run", {"owner": username, "title": group["name"], "commands": group["commands"]}))
 
 
 @app.patch("/api/terminal/sessions/{session_id}")
 async def terminal_rename(session_id: str, request: Request, payload: dict[str, Any] = Body(...)):
     _require_terminal_admin(request.session)
-    return JSONResponse({"session": terminal_manager.manager.rename(session_id, payload.get("title"))})
+    return JSONResponse(await terminal_client.request("PATCH", f"/sessions/{session_id}", {"title": payload.get("title")}))
 
 
 @app.delete("/api/terminal/sessions/{session_id}")
 async def terminal_delete(session_id: str, request: Request):
     _require_terminal_admin(request.session)
-    if not await terminal_manager.manager.close(session_id, reason="closed"):
-        raise HTTPException(status_code=404, detail="终端不存在或已释放")
-    return JSONResponse({"ok": True})
+    return JSONResponse(await terminal_client.request("DELETE", f"/sessions/{session_id}"))
 
 
 @app.websocket("/api/terminal/sessions/{session_id}/ws")
@@ -1062,7 +1054,7 @@ async def terminal_socket(websocket: WebSocket, session_id: str):
     if not is_terminal_admin(current_username(websocket.session)) or not _websocket_origin_allowed(websocket):
         await websocket.close(code=4403)
         return
-    await terminal_manager.manager.attach(session_id, websocket)
+    await terminal_client.attach(websocket, session_id)
 
 
 @app.post("/api/auth/login")

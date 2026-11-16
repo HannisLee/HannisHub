@@ -54,7 +54,7 @@ HannisHub/
 ├── server/                   # Server 子服务与服务器侧组件
 │   ├── app.py                # SSH 与定时任务后端
 │   ├── file_manager.py       # 文件管理组件：受限目录、缓存、浏览与下载
-│   ├── terminal_manager.py   # 网页终端组件：常驻 PTY shell 会话、输出回放、多端镜像、命令组一键执行与空闲回收（读取根目录 settings.json）
+│   ├── terminal_manager.py   # 网页终端组件：独立后台的常驻 PTY shell 会话、输出回放、多端镜像、命令组一键执行与空闲回收（读取根目录 settings.json）
 │   ├── terminal_commands.py  # 终端命令组：名称与命令序列按账号存 SQLite terminal_command_groups 表
 │   ├── point_cloud.py        # 旧版点云文件读取接口兼容层
 │   ├── index.html            # Server 旧版 WebUI，迁移验证期保留
@@ -182,9 +182,9 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 
 ### 网页终端
 
-- 后端 `server/terminal_manager.py` 在 Hub 进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
+- 后端 `server/terminal_manager.py` 在独立终端后台进程内维护会话表：每个终端为 `os.openpty()` + 登录 shell（`$SHELL -l`，工作目录为家目录，`TERM=xterm-256color`，独立进程组），以 Hub 运行用户身份执行。PTY 输出通过 `loop.add_reader` 读取，追加到每会话的环形回滚缓冲（默认 512 KB），并经每个连接独立的有序队列广播；连接积压超过 4096 块时断开该连接，由浏览器重连回放。
 - WebSocket 协议：服务端→客户端二进制帧为终端原始输出（连接后先发送回滚缓冲），文本帧为 JSON 控制消息 `{"type":"exit"|"released"|"closed"}`；客户端→服务端为 JSON `{"type":"input","data"}` 与 `{"type":"resize","cols","rows"}`。多端连接时 PTY 尺寸取最近一次调整的客户端。关闭码：4000 已释放、4401 未登录、4403 无权限或 Origin 不符、4404 终端不存在。
-- 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 15 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在内存，Hub 停止时全部结束；同时最多 10 个。
+- 生命周期：键盘输入、调整尺寸、新连接接入视为“操作”；纯输出不算操作。后台每 60 秒检查，超过空闲时限（默认 15 小时）无操作即发送 SIGHUP、3 秒后仍存活则 SIGKILL 结束整个进程组，并通知已连接的页面。shell 自行退出时会话自动删除。会话只存在独立后台内存，Hub 停止时保留；终端后台停止时全部结束；同时最多 10 个。
 - 权限：仅管理员可用——固定用户名 `lihan`。`/api/auth/status` 返回 `terminal` 布尔值，侧栏「设置」分组据此显示「终端」入口。WebSocket 额外校验 `Origin` 与 `Host` 一致，开发模式可用环境变量 `HANNISHUB_DEV_ORIGINS`（逗号分隔）放行来源，前端用 `NEXT_PUBLIC_HANNISHUB_WS_ORIGIN` 直连后端。
 - `AuthMiddleware` 对 WebSocket 握手同样校验会话，未登录直接拒绝（此前 WebSocket 请求不经过登录校验）。
 - 输入写入：`input` 先追加到会话的待写缓冲，以 4 KB 为块非阻塞写入 PTY；PTY 输入缓冲写满时注册 `loop.add_writer`，等可写时继续，绝不在事件循环里等待。大段粘贴期间 Hub 其他请求与终端输出照常处理；待写积压超过 16 MB（shell 长时间不读输入）时丢弃新输入。
@@ -964,3 +964,24 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 #### 私聊发送区
 
 私聊复用聊天室的 `chat-row` / `chat-bubble` 消息样式及 `chat-composer` 发送区样式，自己消息靠右、对方消息靠左，展示名字与时间。输入框从单行自动增高，最多 200px；Enter 发送、Shift+Enter 换行，中文输入法确认不触发发送。复用聊天室表情选择器，按光标位置插入并遵守 1000 字限制；Esc 优先关闭表情面板，继续按 Esc 关闭私聊。发送确认后清空草稿并恢复输入焦点，发送失败保留内容；在消息底部阅读时新消息自动滚动，向上查看历史时保留当前位置。发送区提供纯文字及表情输入。
+
+
+## 独立终端后台（v0.3.1）
+
+网页终端的 PTY、输出缓冲和空闲回收由 `server.terminal_service` 独立进程管理；Hub 仅负责现有登录、管理员权限、来源校验以及 HTTP/WebSocket 转发。Hub 重启不结束 shell，前端保留原标签并自动重连、回放输出。15 小时无操作回收规则不变；终端后台自身或服务器重启仍结束会话。后台不可用返回 503，不在 Hub 内创建替代会话。提示词浮窗仍使用 Hub 的归档接口，重启期间归档可暂时失败，草稿与复制不受影响。
+
+配置仍在根 `settings.json`：`terminal.backend_port` 默认 `18082`，后台固定绑定 `127.0.0.1`。内部 Bearer 服务密钥通过现有 `auth.session_secret` 按专用用途 HMAC 派生，不写入浏览器、URL 或日志；密钥变化需重启 Hub 使登录配置一致。内部接口全部校验服务密钥，不对浏览器开放，不接受浏览器提交的内部身份头。现有 `/api/terminal/*` 外部接口与协议不变。
+
+| 方法 | 内部路径 | 用途 |
+| --- | --- | --- |
+| GET | `/internal/health` | 服务健康检查（同样要求认证） |
+| GET / POST | `/internal/sessions` | 列表（含空闲回收时限）/ 创建（`owner`、可选 `title`） |
+| PATCH / DELETE | `/internal/sessions/{id}` | 重命名（`title`）/ 关闭 |
+| POST | `/internal/run` | Hub 读取账号命令组后传入 `owner`、`title`、`commands` 创建并执行 |
+| WS | `/internal/sessions/{id}/ws` | 复用现有终端消息协议；断连不释放 PTY，缺失会话关闭码 4404 |
+
+部署：先初始化现有 Hub 登录配置，再用 `conda activate llama-manager && bash scripts/run_terminal.sh` 启动后台；Hub 继续用原有 `bash run.sh`。常驻部署将 `scripts/systemd/hannishub-terminal.service` 复制到 `~/.config/systemd/user/`，按实际安装目录调整模板，执行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now hannishub-terminal.service`。后台和 `llamamanager.service` 无停止/重启绑定；可分别维护，不能用同一个自动重载进程运行。可在 Hub 的 systemd 单元中添加 `Wants=hannishub-terminal.service` 与 `After=hannishub-terminal.service`，这两个依赖不会传递停止操作。`run.sh` 的绑定地址和 8081 端口保持不变。
+
+首次迁移前需结束或妥善保存旧 Hub 中的终端任务，旧内存会话不能直接迁移；启动独立后台后再安排一次 Hub 重启完成切换。之后普通 Hub 重启无需重启后台。
+
+测试：`scripts/e2e/launch_test_hub.py` 默认拉起使用临时配置、随机端口的测试后台并在退出时清理；`HANNISHUB_TEST_EXTERNAL_TERMINAL=1` 用于重启回归测试共享同一临时后台。`HANNISHUB_TERMINAL_SETTINGS_PATH` 仅用于隔离实例指定配置路径。所有业务数据库测试通过 `HANNISHUB_DB_PATH` 指向临时库，不连接线上 8081。

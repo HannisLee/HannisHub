@@ -1,0 +1,15 @@
+[Unit]
+Description=HannisHub 独立终端后台
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/run/HannisHub
+ExecStart=%h/miniconda3/envs/llama-manager/bin/python -m server.terminal_service
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

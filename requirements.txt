@@ -7,3 +7,4 @@ pwdlib[argon2]
 itsdangerous
 tqdm
 paramiko>=3.4
+websockets>=15
