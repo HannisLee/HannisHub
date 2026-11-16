@@ -61,7 +61,7 @@ function readRemoteLocations(): Record<string, RemoteDocumentLocation> {
 function readRemoteLocation(connectionId: string): RemoteDocumentLocation {
   const value = readRemoteLocations()[connectionId];
   if (!value || typeof value.folder !== "string" || typeof value.document !== "string" ||
-      (value.document && (value.document.split("/").slice(0, -1).join("/") || "/") !== value.folder)) {
+      (value.document && (value.document.split("/").slice(0, -1).join("/") || (value.document.startsWith("/") ? "/" : "")) !== value.folder)) {
     return { folder: "", document: "" };
   }
   return value;
@@ -74,6 +74,16 @@ function fileKind(path: string): "markdown" | "image" | "pdf" | "other" {
   if (IMAGE_EXTENSIONS.has(extension)) return "image";
   if (extension === "pdf") return "pdf";
   return "other";
+}
+
+/** 主目录内使用 ~，其他位置保留绝对路径。 */
+function displayHomePath(path: string, home: string): string {
+  if (!home) return path;
+  const normalizedHome = home.replace(/\/+$/, "") || "/";
+  if (path === normalizedHome) return "~";
+  if (normalizedHome !== "/" && path.startsWith(`${normalizedHome}/`)) return `~${path.slice(normalizedHome.length)}`;
+  if (normalizedHome === "/" && path.startsWith("/")) return `~${path}`;
+  return path;
 }
 
 function isMarkdownFile(entry: FileManagerEntry): boolean {
@@ -318,7 +328,7 @@ export function DocumentViewer() {
   const [directory, setDirectory] = useState<FileManagerDirectoryResponse | null>(null);
   const [selectedPath, setSelectedPath] = useState("");
   const [markdownDocument, setMarkdownDocument] = useState<MarkdownDocument | null>(null);
-  const [filter, setFilter] = useState("");
+  const [homeDir, setHomeDir] = useState("");
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingDocument, setLoadingDocument] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -404,9 +414,10 @@ export function DocumentViewer() {
   // 本机 settings 载入
   useEffect(() => {
     let active = true;
-    apiFetch<{ roots: string[]; resolved_roots: string[] }>(`${API_PATHS.fileManager}/settings`)
+    apiFetch<{ roots: string[]; resolved_roots: string[]; home_dir: string }>(`${API_PATHS.fileManager}/settings`)
       .then(async value => {
         if (!active) return;
+        setHomeDir(value.home_dir || "");
         const nextRoots = value.roots || [];
         const nextResolvedRoots = value.resolved_roots || nextRoots;
         let nextRootIndex = 0;
@@ -589,11 +600,8 @@ export function DocumentViewer() {
   }, [initialized, resolvedRoots, rootIndex, folder, directory, markdownDocument, selectedPath, loadingFiles, loadingDocument, activeConnectionId, selectedEntry, selectedKind]);
 
   const visibleEntries = useMemo(() => {
-    const query = filter.trim().toLowerCase();
-    return (directory?.entries || [])
-      .filter(entry => !query || `${entry.name} ${entry.path}`.toLowerCase().includes(query))
-      .sort(compareDocumentEntries);
-  }, [directory, filter]);
+    return [...(directory?.entries || [])].sort(compareDocumentEntries);
+  }, [directory]);
 
   function handleSwitchConnection(connId: string) {
     if (connId === activeConnectionId) return;
@@ -619,7 +627,6 @@ export function DocumentViewer() {
     setSelectedPath(nextDocument);
     setLoadingDocument(Boolean(nextDocument) && fileKind(nextDocument) === "markdown");
     setMarkdownDocument(null);
-    setFilter("");
     setCopyStatus("");
     setPreviewError(false);
   }
@@ -634,7 +641,6 @@ export function DocumentViewer() {
     setFolder("");
     setSelectedPath("");
     setMarkdownDocument(null);
-    setFilter("");
   }
 
   function openMarkdown(path: string) {
@@ -652,7 +658,6 @@ export function DocumentViewer() {
     setLoadingFiles(true);
     setDirectory(null);
     setFolder(path);
-    setFilter("");
     setCopyStatus("");
     setPreviewError(false);
     setMarkdownDocument(null);
@@ -683,13 +688,7 @@ export function DocumentViewer() {
       />
 
       {error ? <ErrorState message={error} /> : null}
-      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
-        <aside className="document-index">
-          <button type="button" className="document-index-toggle" onClick={toggleIndex} aria-label={indexCollapsed ? "展开文件列表" : "折叠文件列表"} title={indexCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!indexCollapsed}>
-            {indexCollapsed ? "›" : "‹"}
-          </button>
-          {!indexCollapsed ? <>
-          <div className="document-index-head">
+      <div className="document-index-head">
             <div>
               <strong>文档目录</strong>
               <span>{loadingFiles ? "正在读取…" : `${visibleEntries.filter(entry => entry.type !== "directory").length} 个文件`}</span>
@@ -699,13 +698,15 @@ export function DocumentViewer() {
                 </select>
               ) : null}
               <Button variant="secondary" size="sm" type="button" disabled={!directory} onClick={async () => {
-                const path = isRemote ? directory?.path : `${(resolvedRoots[rootIndex] || "").replace(/\/$/, "")}${folder ? `/${folder}` : ""}` || "/";
+                const path = isRemote
+                  ? directory?.path.startsWith("/") ? displayHomePath(directory.path, directory.root_path) : `~${directory?.path ? `/${directory.path}` : ""}`
+                  : displayHomePath(`${(resolvedRoots[rootIndex] || "").replace(/\/$/, "")}${folder ? `/${folder}` : ""}` || "/", homeDir);
                 setCopyStatus(path && await copyToClipboard(path) ? "已复制" : "复制失败");
               }}>{copyStatus || "复制路径"}</Button>
             </div>
             <div className="document-index-breadcrumb">
               <button type="button" onClick={() => openDirectory("")}>
-                {isRemote ? activeConnection?.name || "用户目录 (~)" : resolvedRoots[rootIndex] || roots[rootIndex]}
+                {isRemote ? "~" : displayHomePath(resolvedRoots[rootIndex] || roots[rootIndex] || "", homeDir)}
               </button>
               {folder
                 .split("/")
@@ -719,8 +720,14 @@ export function DocumentViewer() {
                   </span>
                 ))}
             </div>
-            <input value={filter} onChange={event => setFilter(event.target.value)} placeholder="筛选当前目录" aria-label="筛选当前目录" />
           </div>
+
+      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
+        <aside className="document-index">
+          <button type="button" className="document-index-toggle" onClick={toggleIndex} aria-label={indexCollapsed ? "展开文件列表" : "折叠文件列表"} title={indexCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!indexCollapsed}>
+            {indexCollapsed ? "›" : "‹"}
+          </button>
+          {!indexCollapsed ? <>
           <div className="document-file-list">
             {loadingFiles ? (
               <LoadingState label="正在读取当前文件夹…" />
@@ -753,12 +760,8 @@ export function DocumentViewer() {
               : null}
             {!loadingFiles && !visibleEntries.length ? (
               <EmptyState
-                title={directory?.entries.length ? "没有匹配的文件" : "这个文件夹为空"}
-                detail={
-                  directory?.entries.length
-                    ? "可调整上方筛选条件。"
-                    : "可通过上级目录或常用目录切换位置。"
-                }
+                title="这个文件夹为空"
+                detail="可通过上级目录或常用目录切换位置。"
               />
             ) : null}
           </div>

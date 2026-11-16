@@ -435,7 +435,7 @@ async def chat_room_clear():
 async def file_manager_settings():
     """返回文件管理组件已暴露的顶层目录。"""
     roots = configured_roots()
-    return JSONResponse({"roots": roots, "resolved_roots": [str(Path(root).expanduser().resolve()) for root in roots]})
+    return JSONResponse({"roots": roots, "resolved_roots": [str(Path(root).expanduser().resolve()) for root in roots], "home_dir": str(Path.home().resolve())})
 
 
 @app.put("/api/file-manager/settings")

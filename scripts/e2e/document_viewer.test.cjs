@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 (async () => {
  const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true });
  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+ await context.grantPermissions(['clipboard-read', 'clipboard-write']);
  const page = await context.newPage();
  const origin = `http://127.0.0.1:${process.env.HUB_PORT || '18094'}`;
  await page.goto(`${origin}/login`);
@@ -16,14 +17,17 @@ const assert = require('node:assert/strict');
    const remote = p.includes('/remote/');
    if (p.endsWith('/connections')) return route.fulfill({json:{connections:[{id:'local',name:'本机',type:'local'},{id:'remote38',name:'38服务器',type:'ssh'}]}});
    if (p.endsWith('/common-directories')) return route.fulfill({json:{directories:[]}});
-   if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/test'],resolved_roots:['/test']}});
-   if (p.endsWith('/directory')) { const folder = remote ? '/home/test' : ''; return route.fulfill({json:{root_index:0,root_path:'/test',path:folder,entries:entries.map(e => ({...e,path:remote?`${folder}/${e.name}`:e.path})),cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
+   if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
+   if (p.endsWith('/directory')) { const folder = u.searchParams.get('path') || ''; const files = entries.map(e => ({...e,path:folder ? `${folder}/${e.name}` : e.path})); if (!folder) files.push({name:'sub',path:'sub',type:'directory',size:0,modified:0,extension:''}); return route.fulfill({json:{root_index:0,root_path:remote?'/home/test':'/home/test/project',path:folder,entries:files,cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
    if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:'# 测试文档'}}); }
    if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',body:'%PDF-1.4\n%%EOF'}); }
    return route.continue();
  });
  await page.goto(`${origin}/files/documents`);
  await page.getByRole('button',{name:'photo.png'}).waitFor();
+ assert.equal(await page.getByLabel('筛选当前目录').count(), 0);
+ await page.getByRole('button',{name:'复制路径'}).click();
+ assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~/project');
  await page.getByRole('button',{name:'photo.png'}).click();
  await page.locator('img.document-image-preview').waitFor();
  await page.getByRole('button',{name:'vector.svg'}).click();
@@ -42,11 +46,27 @@ const assert = require('node:assert/strict');
  const resized = Number(await handle.getAttribute('aria-valuenow'));
  assert.ok(resized > 350);
  await page.getByRole('button',{name:'折叠文件列表'}).click();
+ await page.getByText('文档目录', {exact:true}).waitFor();
+ const headerWidth = await page.locator('.document-index-head').evaluate(el => el.getBoundingClientRect().width);
+ const workspaceWidth = await page.locator('.document-workspace').evaluate(el => el.getBoundingClientRect().width);
+ assert.ok(Math.abs(headerWidth - workspaceWidth) < 2);
+ await page.getByRole('button',{name:'复制路径'}).waitFor();
  await page.getByRole('button',{name:'展开文件列表'}).click();
  assert.equal(Number(await page.getByRole('separator',{name:'调整文件列表宽度'}).getAttribute('aria-valuenow')), resized);
  await page.reload();
  await page.waitForFunction(width => Number(document.querySelector('.document-index-resizer')?.getAttribute('aria-valuenow')) === width, resized);
  await page.getByRole('tab',{name:'38服务器'}).click();
+ await page.getByRole('button',{name:'sub'}).waitFor();
+ await page.getByRole('button',{name:'复制路径'}).click();
+ assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~');
+ await page.getByRole('button',{name:'vector.svg'}).click();
+ await page.waitForFunction(() => document.querySelector('.document-image-preview')?.naturalWidth === 10);
+ await page.reload();
+ await page.waitForFunction(() => document.querySelector('.document-image-preview')?.naturalWidth === 10);
+ await page.getByRole('button',{name:'sub'}).click();
+ await page.getByRole('button',{name:'vector.svg'}).waitFor();
+ await page.getByRole('button',{name:'复制路径'}).click();
+ assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~/sub');
  await page.getByRole('button',{name:'vector.svg'}).click();
  await page.waitForFunction(() => document.querySelector('.document-image-preview')?.naturalWidth === 10);
  await page.reload();
