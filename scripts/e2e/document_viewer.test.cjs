@@ -2,6 +2,24 @@
 // PW_CORE 指向 playwright-core，CHROME 可指定浏览器，HUB_PORT 默认 18094。
 const { chromium } = require(process.env.PW_CORE);
 const assert = require('node:assert/strict');
+// 构造有效的单页 PDF，避免用空文件误判浏览器预览成功。
+function makeTestPdf() {
+ const objects = [
+  '<< /Type /Catalog /Pages 2 0 R >>',
+  '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  '<< /Length 48 >>\nstream\nBT /F1 24 Tf 72 720 Td (PDF preview test) Tj ET\nendstream',
+ ];
+ let pdf = '%PDF-1.4\n';
+ const offsets = [0];
+ objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdf)); pdf += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+ const xref = Buffer.byteLength(pdf);
+ pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+ for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+ pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+ return Buffer.from(pdf);
+}
 (async () => {
  const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined, headless: true });
  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
@@ -20,7 +38,7 @@ const assert = require('node:assert/strict');
    if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
    if (p.endsWith('/directory')) { const folder = u.searchParams.get('path') || ''; const files = entries.map(e => ({...e,path:folder ? `${folder}/${e.name}` : e.path})); if (!folder) files.push({name:'sub',path:'sub',type:'directory',size:0,modified:0,extension:''}); return route.fulfill({json:{root_index:0,root_path:remote?'/home/test':'/home/test/project',path:folder,entries:files,cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
    if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:'# 测试文档'}}); }
-   if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('big.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1600"><rect width="2000" height="1600"/></svg>'}); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',body:'%PDF-1.4\n%%EOF'}); }
+   if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('big.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1600"><rect width="2000" height="1600"/></svg>'}); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',headers:remote?{'Content-Security-Policy':'sandbox','Content-Disposition':'inline; filename=sample.pdf'}:{'Content-Disposition':'inline; filename=sample.pdf'},body:makeTestPdf()}); }
    return route.continue();
  });
  await page.goto(`${origin}/files/documents`);
@@ -82,7 +100,21 @@ const assert = require('node:assert/strict');
  await page.keyboard.press('Escape');
  await bigLightbox.waitFor({state:'hidden'});
  await page.getByRole('button',{name:'sample.pdf'}).click();
- await page.locator('iframe.document-pdf-preview').waitFor();
+ const pdfFrame = page.locator('iframe.document-pdf-preview');
+ await pdfFrame.waitFor();
+ assert.ok((await pdfFrame.getAttribute('src')).includes('#view=FitH&navpanes=0'));
+ const pdfBox = await pdfFrame.boundingBox();
+ assert.ok(pdfBox.y + pdfBox.height <= 900 && pdfBox.width > 700);
+ await pdfFrame.evaluate(el => { el.dataset.testIdentity = 'same-frame'; });
+ await page.getByRole('button',{name:'全屏查看'}).click();
+ const pdfDialog = page.getByRole('dialog',{name:'sample.pdf 全屏查看'});
+ await pdfDialog.waitFor();
+ assert.equal(await pdfFrame.getAttribute('data-test-identity'), 'same-frame');
+ const expandedBox = await pdfFrame.boundingBox();
+ assert.ok(expandedBox.width > 1200 && expandedBox.height > 700);
+ await page.getByRole('button',{name:'退出全屏'}).click();
+ assert.equal(await pdfFrame.getAttribute('data-test-identity'), 'same-frame');
+ assert.ok((await page.getByRole('link',{name:'新标签页打开'}).getAttribute('href')).includes('/resource?'));
  await page.reload();
  await page.locator('iframe.document-pdf-preview').waitFor();
  await page.getByRole('button',{name:'data.xyz'}).click();
@@ -129,7 +161,9 @@ const assert = require('node:assert/strict');
  const mobileCopy = await page.getByRole('button',{name:'复制路径'}).boundingBox();
  assert.ok(Math.abs(mobileToggle.y - mobileCopy.y) < 8);
  assert.ok(mobileCopy.x + mobileCopy.width <= 390);
+ const mobilePdf = await page.locator('iframe.document-pdf-preview').boundingBox();
+ assert.ok(mobilePdf.width > 200 && mobilePdf.x + mobilePdf.width <= 390);
  assert.equal(await page.locator('.document-reader-head h1').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
- console.log('通过：路径栏、缩放、PNG/SVG/PDF 预览、恢复、列表宽度和折叠');
+ console.log('通过：PDF 布局与全屏、图片缩放、路径导航和列表折叠');
  await browser.close();
 })().catch(error => {console.error(error);process.exit(1)});

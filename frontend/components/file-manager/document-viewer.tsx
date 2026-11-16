@@ -438,6 +438,7 @@ export function DocumentViewer() {
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
+  const [pdfExpanded, setPdfExpanded] = useState(false);
   const [indexWidth, setIndexWidth] = useState(300);
   const [indexCollapsed, setIndexCollapsed] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -449,6 +450,15 @@ export function DocumentViewer() {
   const activeConnection = connections.find(c => c.id === activeConnectionId);
   const selectedEntry = directory?.entries.find(entry => entry.type !== "directory" && entry.path === selectedPath);
   const selectedKind = fileKind(selectedPath);
+
+  useEffect(() => {
+    if (!pdfExpanded) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setPdfExpanded(false);
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [pdfExpanded]);
 
   useEffect(() => {
     try {
@@ -725,6 +735,7 @@ export function DocumentViewer() {
     }
     setLoadingFiles(true);
     setDirectory(null);
+    setPdfExpanded(false);
     setActiveConnectionId(connId);
     setFolder(nextFolder);
     setSelectedPath(nextDocument);
@@ -761,6 +772,7 @@ export function DocumentViewer() {
     setLoadingFiles(true);
     setDirectory(null);
     setFolder(path);
+    setPdfExpanded(false);
     setCopyStatus("");
     setPreviewError(false);
     setMarkdownDocument(null);
@@ -770,6 +782,7 @@ export function DocumentViewer() {
 
   function selectDocument(path: string) {
     if (path === selectedPath) return;
+    setPdfExpanded(false);
     setLoadingDocument(fileKind(path) === "markdown");
     setMarkdownDocument(null);
     setPreviewError(false);
@@ -819,7 +832,7 @@ export function DocumentViewer() {
         }}>{copyStatus || "复制路径"}</Button>
       </div>
 
-      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
+      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}${selectedKind === "pdf" && selectedEntry ? " is-pdf" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
         <aside className="document-index">
           {!indexCollapsed ? <>
           <div className="document-file-list">
@@ -865,7 +878,7 @@ export function DocumentViewer() {
             onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); updateIndexWidth(indexWidth + (event.key === "ArrowRight" ? 16 : -16)); } }} />
           </> : null}
         </aside>
-        <main className="document-reader">
+        <main className={`document-reader${selectedKind === "pdf" && selectedEntry ? " is-pdf" : ""}`}>
           {loadingDocument ? (
             <LoadingState label="正在打开文档…" />
           ) : selectedEntry && selectedKind !== "markdown" ? (
@@ -883,7 +896,14 @@ export function DocumentViewer() {
                   <Button variant="secondary" size="sm" type="button" onClick={() => setImageExpanded(true)}>全屏查看</Button>
                 </div>
               ) : selectedKind === "pdf" ? (
-                <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} />
+                <div className={`document-pdf-container${pdfExpanded ? " is-expanded" : ""}`} role={pdfExpanded ? "dialog" : undefined} aria-modal={pdfExpanded ? true : undefined} aria-label={pdfExpanded ? `${selectedEntry.name} 全屏查看` : undefined}>
+                  <div className="document-pdf-actions">
+                    {pdfExpanded ? <strong title={selectedEntry.name}>{selectedEntry.name}</strong> : null}
+                    <a className="document-pdf-open" href={resourceUrl(rootIndex, selectedPath, activeConnectionId)} target="_blank" rel="noopener noreferrer">新标签页打开</a>
+                    <Button variant="secondary" size="sm" type="button" onClick={() => setPdfExpanded(value => !value)}>{pdfExpanded ? "退出全屏" : "全屏查看"}</Button>
+                  </div>
+                  <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={`${resourceUrl(rootIndex, selectedPath, activeConnectionId)}#view=FitH&navpanes=0`} />
+                </div>
               ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、图片、SVG 和 PDF。" />}
             </>
           ) : markdownDocument && markdownDocument.path === selectedPath ? (

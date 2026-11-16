@@ -646,7 +646,7 @@ async def file_manager_resource(
 ):
     """返回受限目录中的原始资源，供 Markdown 内的相对图片与链接引用。"""
     file_path = resolve_file(root, path)
-    return FileResponse(file_path, headers={"Cache-Control": "no-store"})
+    return FileResponse(file_path, filename=file_path.name, content_disposition_type="inline", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/file-manager/connections")
