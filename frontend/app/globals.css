@@ -846,9 +846,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .document-file strong { display: -webkit-box; overflow: hidden; color: var(--color-text-primary); font-size: 14px; font-weight: 500; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .document-file span { overflow: hidden; color: var(--color-text-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .document-folder-entry strong { color: var(--color-text-secondary); }
-/* 文档目录横向展开，阅读区位于目录下方。 */
-.document-workspace { display: flex; flex-direction: column; }
-.document-index { border-right: 0; border-bottom: 1px solid var(--color-divider); }
+/* 文档目录与阅读区左右排列，目录条目支持横向滚动。 */
 .document-index-head > div:first-child { justify-content: flex-start; flex-wrap: wrap; }
 .document-index-head select { max-width: min(100%, 360px); min-height: 34px; font-size: 13px; }
 .document-index-head input { width: min(100%, 400px); }
@@ -1471,7 +1469,7 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
   .file-manager-upload-actions { justify-content: flex-start; }
   .file-manager-upload .upload-row > div { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
   .file-manager-upload .upload-row span { text-align: left; }
-  .document-workspace { min-height: 0; overflow: visible; }.document-index { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--color-divider); }.document-reader { max-height: none; min-height: 520px; padding: var(--space-8) var(--space-5); }.document-reader-head { align-items: flex-start; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-8); }.document-reader-head small { white-space: normal; }.markdown-content { font-size: 15px; }
+  .document-workspace { min-height: 0; grid-template-columns: 1fr; overflow: visible; }.document-index { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--color-divider); }.document-reader { max-height: none; min-height: 520px; padding: var(--space-8) var(--space-5); }.document-reader-head { align-items: flex-start; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-8); }.document-reader-head small { white-space: normal; }.markdown-content { font-size: 15px; }
   .file-manager-date-controls .button { width: 100%; }
   .file-manager-date-result { align-items: flex-start; flex-direction: column; }
   .file-manager-compare-grid { grid-template-columns: 1fr; }
