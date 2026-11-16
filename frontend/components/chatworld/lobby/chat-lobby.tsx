@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { PrivateNotice } from "./private-panel";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   claimLobbyDesk, fetchLobbyDesks, fetchLobbyProfile, LOBBY_SAY_MAX, QUICK_EMOTES, releaseLobbyDesk, type LobbyDeskState, type LobbyProfile,
@@ -13,6 +12,7 @@ import { DeskClaimDialog } from "./desk-claim-dialog";
 import { composeAvatarSheet, loadAvatarParts, normalizeAvatar } from "./game/avatar";
 import type { LobbyBridge, LobbyEvents, MachineInfo, NearbyInfo, RoomInfo } from "./game/layout";
 import { MachineDialog } from "./machine-dialog";
+import { PrivateBadge } from "./private-panel";
 
 const LobbyCanvas = dynamic(() => import("./lobby-canvas"), {
   ssr: false,
@@ -24,7 +24,7 @@ type Phase = "loading" | "ready" | "error";
 /** 每个房间的一句话引导 */
 const ROOM_GUIDES: Record<string, string> = {
   foyer: "入口厅 · 下方出口通往大厅，HannisHub 标牌下的电梯通往我的房间",
-  room: "我的房间 · 站到衣柜前的地台上按 E 换形象、改名字，下方出口回入口厅",
+  room: "我的房间 · 站到衣柜前的地台上按 E 换形象、改名字和聊天头像，下方出口回入口厅",
   hall: "大厅 · 机器前、工位椅后、沙发、留言板与各处小物件旁按 E 互动；回车说话，数字键 1–4 发表情",
 };
 
@@ -200,6 +200,13 @@ export function ChatLobby() {
     return () => window.removeEventListener("lobby-private-open", open);
   }, [active, claiming, saying, openMachine]);
 
+  /** 点击私聊提醒：任意位置直接打开该联系人的会话 */
+  const openInbox = useCallback((contactId: string) => {
+    if (claiming) return;
+    setSaying(false);
+    openMachine({ id: "inbox", title: "私聊", hint: contactId });
+  }, [claiming, openMachine]);
+
   const closeMachine = useCallback(() => {
     bridge.paused = false;
     setActive(null);
@@ -347,7 +354,6 @@ export function ChatLobby() {
         </div>
       </header>}
 
-      <PrivateNotice />
       <div className="lobby-stage">
         {profileReady ? <LobbyCanvas key={gameKey} bridge={bridge} events={events} /> : <div className="lobby-canvas-host" />}
 
@@ -358,12 +364,15 @@ export function ChatLobby() {
           </div>
         ) : null}
 
-        {immersive && shell ? (
-          <div className="lobby-account">
-            <span className="lobby-account-name">{profile?.name || shell.username}</span>
-            <button type="button" className="lobby-account-logout" onClick={() => void shell.logout()}>退出</button>
-          </div>
-        ) : null}
+        <div className="lobby-corner">
+          {immersive && shell ? (
+            <div className="lobby-account">
+              <span className="lobby-account-name">{profile?.name || shell.username}</span>
+              <button type="button" className="lobby-account-logout" onClick={() => void shell.logout()}>退出</button>
+            </div>
+          ) : null}
+          {ready && !active && !claiming ? <PrivateBadge onOpen={openInbox} /> : null}
+        </div>
 
         {saying && sayAllowed ? (
           <form className="lobby-say" onSubmit={submitSay}>
@@ -447,7 +456,7 @@ export function ChatLobby() {
 
       {active && active.id === AVATAR_MACHINE ? (
         <AvatarDialog
-          profile={profile ?? { username: "", name: "", avatar: null, updated_at: null }}
+          profile={profile ?? { username: "", name: "", avatar: null, photo: "", updated_at: null }}
           onClose={closeMachine}
           onSaved={saveProfile}
         />

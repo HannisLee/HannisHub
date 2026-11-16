@@ -1086,7 +1086,7 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .lobby-retry:hover { background: var(--color-brand); color: var(--color-on-light); }
 /* 机器面板：遮罩 + 大尺寸对话框，内嵌 ASR / OCR 页面组件 */
 .lobby-machine-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--space-6); background: color-mix(in srgb, var(--color-bg) 78%, transparent); animation: lobby-fade-in 160ms ease-out; }
-.lobby-machine { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(92vh, 1000px); overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-bg); animation: lobby-rise-in 200ms ease-out; }
+.lobby-machine { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(92dvh, 1000px); overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-bg); animation: lobby-rise-in 200ms ease-out; }
 .lobby-machine-bar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-6); border-bottom: 1px solid var(--color-divider); background: var(--color-surface-soft); }
 .lobby-machine-name { display: flex; min-width: 0; align-items: center; gap: var(--space-2); color: var(--color-text-primary); font-size: 15px; font-weight: 500; }
 .lobby-machine-hint { overflow: hidden; margin-left: var(--space-2); color: var(--color-text-muted); font-size: 13px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
@@ -1625,24 +1625,87 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .document-file-download:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .document-file-download:focus-visible { outline: 1px solid var(--color-brand); outline-offset: -2px; }
 
-/* 私聊与工位电脑沿用暖黑界面变量。 */
-.private-panel { display:flex; gap:var(--space-4); min-height:400px; height:65vh; }
-.private-panel aside { width:240px; overflow:auto; border-right:1px solid var(--color-border); padding-right:var(--space-4); }
-.private-panel section { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
-.private-panel h2 { font-family:var(--font-display); font-size:24px; }
-.private-panel aside button,.private-panel .private-messages > button,.private-tabs button { min-height:40px; padding:8px 16px; border:1px solid var(--color-border); border-radius:var(--radius-md); background:var(--color-surface); color:var(--color-text-primary); cursor:pointer; }
-.private-panel aside button { display:block; width:100%; text-align:left; margin-top:8px; }
-.private-panel small { display:block; color:var(--color-text-secondary); }
-.private-panel aside small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.private-panel [aria-pressed=true],.private-tabs [aria-pressed=true] { border-color:var(--color-brand); }
-.private-messages { flex:1; min-height:0; padding:var(--space-4) var(--space-2) var(--space-4) 0; }
-.private-panel .chat-composer { flex:0 0 auto; }
-.private-panel .chat-composer textarea { min-width:0; width:0; }
-.private-panel aside input { width:100%; background:var(--color-bg); color:var(--color-text-primary); border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:var(--space-2); }
-.private-tabs { display:flex; gap:8px; margin-bottom:16px; }
-.private-notice { color:var(--color-brand); font-size:12px; }
-@media(max-width:767px) { .private-panel { flex-direction:column; } .private-panel aside { width:100%; max-height:160px; border-right:0; } .private-panel section { min-height:240px; } }
+/* 私聊与工位电脑沿用暖黑界面变量：面板铺满对话框，只有联系人列表和消息区内部滚动，整体不出现页面级滚动条。 */
+.lobby-machine.is-compact { width: min(960px, 100%); height: min(88dvh, 760px); }
+.private-desk { display: flex; flex-direction: column; min-height: 0; }
+.private-tabs { display: flex; flex: 0 0 auto; gap: var(--space-1); padding: var(--space-3) var(--space-6); border-bottom: 1px solid var(--color-divider); }
+.private-tabs .lobby-avatar-tab { display: inline-flex; align-items: center; gap: var(--space-2); }
+.private-desk-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-10) var(--space-10); overscroll-behavior: contain; }
+.private-desk > .private-panel { flex: 1 1 auto; }
+.private-panel { display: flex; min-width: 0; min-height: 0; }
+.private-contacts { display: flex; flex: 0 0 280px; flex-direction: column; gap: var(--space-3); min-height: 0; padding: var(--space-4); border-right: 1px solid var(--color-divider); background: var(--color-surface-soft); }
+.private-search { width: 100%; min-height: 36px; font-size: 13px; }
+.private-contact-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: var(--space-1); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.private-contact { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2); border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease; }
+.private-contact:hover { background: var(--color-surface-hover); }
+.private-contact[aria-pressed=true] { border-color: var(--color-border); background: var(--color-surface); }
+.private-contact-text { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
+.private-contact-name { overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.private-contact small { overflow: hidden; color: var(--color-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.private-unread { display: inline-grid; min-width: 18px; height: 18px; flex: 0 0 auto; place-items: center; padding: 0 5px; border-radius: var(--radius-pill); background: var(--color-brand); color: var(--color-white); font-size: 11px; font-weight: 600; line-height: 1; }
+.private-thread { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; padding: 0 var(--space-6) var(--space-4); }
+.private-head { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
+.private-peer { overflow: hidden; margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.private-status { flex: 0 0 auto; margin-left: auto; padding: 2px var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; }
+.private-back { display: none; width: 32px; height: 32px; flex: 0 0 auto; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: transparent; color: var(--color-text-secondary); font-size: 20px; line-height: 1; cursor: pointer; }
+.private-back:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.private-messages { flex: 1 1 auto; min-height: 0; padding: var(--space-4) var(--space-2) var(--space-4) 0; overscroll-behavior: contain; }
+.private-more { align-self: center; min-height: 30px; padding: 0 var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: transparent; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; }
+.private-more:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.private-empty { display: grid; flex: 1 1 auto; place-items: center; color: var(--color-text-muted); font-size: 14px; }
+.private-muted { margin: 0; padding: var(--space-2); color: var(--color-text-muted); font-size: 13px; }
+.private-hello { align-self: center; margin-top: auto; }
+.private-error { margin: var(--space-2) 0 0; color: var(--color-error); font-size: 13px; }
+.private-locked { flex: 0 0 auto; margin: 0; padding: var(--space-4) 0 0; border-top: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 13px; line-height: 1.6; }
+.private-panel .chat-composer { flex: 0 0 auto; }
+.private-panel .chat-composer textarea { min-width: 0; width: 0; max-height: min(200px, 24dvh); }
 /* 私聊弹窗中表情面板对齐发送区右边缘，窄屏保持在窗口内。 */
-.private-panel .chat-emoji-anchor { position:static; }
-.private-panel .chat-emoji-picker { width:min(352px, calc(100vw - 80px)); }
-.private-panel .chat-emoji-button { width:clamp(24px, calc((100vw - 112px) / 8), 36px); }
+.private-panel .chat-emoji-anchor { position: static; }
+.private-panel .chat-emoji-picker { width: min(352px, calc(100vw - 80px)); }
+.private-panel .chat-emoji-button { width: clamp(24px, calc((100vw - 112px) / 8), 36px); }
+
+/* 游戏画面右上角：沉浸模式的账号胶囊与私聊提醒 */
+.lobby-corner { position: absolute; top: var(--space-4); right: var(--space-4); z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); max-width: calc(100% - 160px); pointer-events: none; }
+.lobby-corner > * { pointer-events: auto; }
+.lobby-corner .lobby-account { position: static; max-width: 100%; }
+.lobby-private-badge { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; min-height: 36px; padding: 4px var(--space-3) 4px 4px; border: 1px solid var(--color-brand); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--color-surface) 92%, transparent); color: var(--color-text-primary); font-size: 13px; line-height: 1.2; cursor: pointer; animation: lobby-rise-in 200ms ease-out; transition: background-color 160ms ease; }
+.lobby-private-badge:hover { background: var(--color-surface-hover); }
+.lobby-private-badge:focus-visible { outline: 1px solid var(--color-brand); outline-offset: 2px; }
+.lobby-private-mark { position: relative; display: inline-grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--color-brand); color: var(--color-white); font: 700 15px/1 var(--font-ui); }
+.lobby-private-mark::after { position: absolute; inset: -3px; border: 1px solid var(--color-brand); border-radius: 50%; content: ""; animation: lobby-private-ping 1.8s ease-out infinite; }
+.lobby-private-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes lobby-private-ping { from { opacity: 0.8; transform: scale(1); } to { opacity: 0; transform: scale(1.6); } }
+@media (prefers-reduced-motion: reduce) { .lobby-private-mark::after { animation: none; opacity: 0; } }
+
+/* 「我的房间」聊天头像 */
+/* 「我的房间」侧栏放下形象预览、名字与聊天头像：收紧间距，常见屏幕高度下无需滚动 */
+.lobby-avatar-side { gap: var(--space-5); }
+.lobby-avatar-side .lobby-avatar-stage { padding-top: var(--space-4); }
+.lobby-avatar-side .chat-avatar-options { gap: var(--space-1); }
+.chat-settings-name { color: var(--color-text-primary); font-size: 16px; font-weight: 500; }
+
+/* 矮屏（如 13 寸笔记本、浏览器非全屏）：对话框贴近视口，压缩留白 */
+@media (min-width: 768px) and (max-height: 760px) {
+  .lobby-machine-backdrop { padding: var(--space-3); }
+  .lobby-machine, .lobby-machine.is-compact { height: calc(100dvh - var(--space-6)); }
+  .lobby-machine-bar { padding-block: var(--space-2); }
+  .private-tabs { padding-block: var(--space-2); }
+  .private-head { padding-block: var(--space-2); }
+  .private-messages { padding-block: var(--space-3); }
+  .private-panel .chat-composer { padding-top: var(--space-3); }
+}
+
+/* 窄屏：联系人与会话分两屏，选中联系人后显示会话，左上角返回 */
+@media (max-width: 767px) {
+  .private-contacts { flex: 1 1 auto; border-right: 0; }
+  .private-panel.has-selection .private-contacts { display: none; }
+  .private-panel:not(.has-selection):not(.is-single) .private-thread { display: none; }
+  .private-back { display: inline-grid; place-items: center; }
+  .private-thread { padding: 0 var(--space-4) var(--space-3); }
+  .private-tabs { padding-inline: var(--space-4); }
+  .private-desk-scroll { padding: var(--space-4) var(--space-4) var(--space-8); }
+  .lobby-machine.is-compact { width: 100%; height: 100%; }
+  .lobby-private-text { display: none; }
+  .lobby-private-badge { padding-right: 4px; }
+  .lobby-corner { max-width: calc(100% - 120px); }
+}

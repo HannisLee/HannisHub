@@ -15,6 +15,8 @@ export interface LobbyProfile {
   /** 多人同场时显示在其他人看到的角色头顶 */
   name: string;
   avatar: LobbyAvatar | null;
+  /** 聊天窗口（聊天室、私聊）通用头像：空字符串为默认（名字首字），emoji 或 data URL 图片 */
+  photo: string;
   updated_at: number | null;
 }
 
@@ -24,10 +26,10 @@ export function fetchLobbyProfile(): Promise<LobbyProfile> {
   return apiFetch<LobbyProfile>(`${API_PATHS.chatLobby}/profile`);
 }
 
-export function saveLobbyProfile(name: string, avatar: LobbyAvatar | null): Promise<LobbyProfile> {
+export function saveLobbyProfile(name: string, avatar: LobbyAvatar | null, photo: string): Promise<LobbyProfile> {
   return apiFetch<LobbyProfile>(`${API_PATHS.chatLobby}/profile`, {
     method: "PUT",
-    body: jsonBody({ name, avatar }),
+    body: jsonBody({ name, avatar, photo }),
   });
 }
 

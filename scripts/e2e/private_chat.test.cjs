@@ -76,14 +76,72 @@ const assert=require('node:assert/strict');
    await ui.keyboard.press('Escape');
    assert.equal(await ui.getByRole('dialog').count(),1);
    assert.equal(await ui.locator('.chat-emoji-popover').count(),0);
-   const bubble=ui.locator('.chat-row-mine .chat-bubble').last();
-   const bubbleBox=await bubble.boundingBox();
-   const rowBox=await ui.locator('.chat-row-mine').last().boundingBox();
-   assert.ok(Math.abs(bubbleBox.x+bubbleBox.width-rowBox.x-rowBox.width)<2);
+   // 自己的消息靠右：头像贴右边缘，气泡紧挨在头像左侧
+   const mine=ui.locator('.chat-row-mine:not(.chat-row-grouped)').last();
+   const rowBox=await mine.boundingBox();
+   const avatarBox=await mine.locator('.chat-avatar').boundingBox();
+   const bubbleBox=await mine.locator('.chat-bubble').boundingBox();
+   assert.ok(Math.abs(avatarBox.x+avatarBox.width-rowBox.x-rowBox.width)<2);
+   assert.ok(bubbleBox.x+bubbleBox.width<=avatarBox.x);
 
    await ui.keyboard.press('Escape');
    await ui.getByRole('dialog').waitFor({state:'hidden'});
  }
- console.log('私聊浏览器检查通过：三账号隔离、定向通知、幂等发送、已读与距离失效');
+ await ui.unroute('**/private-chat/*/open');
+
+ // 接收不限位置：guest 收到来信后可在任意位置（inbox）回复；lihan 收到回信前不能在任意位置发起
+ assert.equal((await req(pages[1],lihan.id+'/open','POST',{source:'inbox'})).data.allowed,true);
+ assert.equal((await req(pages[0],guest.id+'/open','POST',{source:'inbox'})).data.allowed,false);
+ assert.equal((await req(pages[0],guest.id+'/messages','POST',{source:'inbox',text:'越权',request_id:'inbox-deny'})).status,409);
+ assert.equal((await req(pages[1],lihan.id+'/messages','POST',{source:'inbox',text:'收到',request_id:'reply-1'})).status,200);
+ assert.equal((await req(pages[0],guest.id+'/open','POST',{source:'inbox'})).data.allowed,true);
+
+ // 头像与名字：在「我的房间」设置后，私聊联系人与聊天室同步
+ const photo='🦊';
+ assert.equal(await pages[1].evaluate(async photo=>(await fetch('/api/chat-lobby/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'访客小G',avatar:null,photo})})).status,photo),200);
+ const renamed=(await req(pages[0],'contacts')).data.find(c=>c.id===guest.id);
+ assert.equal(renamed.name,'访客小G');assert.equal(renamed.photo,photo);
+ const roomProfile=await pages[1].evaluate(async()=>(await fetch('/api/chat-room/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:'e2e-guest-client',nickname:'随便',avatar:''})})).json());
+ assert.equal(roomProfile.nickname,'访客小G');assert.equal(roomProfile.avatar,photo);assert.equal(roomProfile.linked,true);
+
+ // 游戏画面中的私聊提醒：点击直接打开会话，各种屏幕尺寸下对话框都不超出视口、外层不出现滚动条
+ const gp=pages[1];
+ const shots=process.env.SHOT_DIR;
+ let n=0;
+ for(const [width,height] of [[1400,850],[1280,640],[390,844]]){
+   await pages[0].waitForTimeout(900);
+   assert.equal((await req(pages[0],guest.id+'/messages','POST',{source:'inbox',text:`第${++n}条来信`,request_id:`badge-${n}`})).status,200);
+   await gp.setViewportSize({width,height});
+   await gp.goto(origin+'/chat-lobby');
+   const badge=gp.locator('.lobby-private-badge');
+   await badge.waitFor({timeout:20000});
+   const badgeBox=await badge.boundingBox();
+   const stageBox=await gp.locator('.lobby-stage').boundingBox();
+   assert.ok(badgeBox.x>=stageBox.x && badgeBox.x+badgeBox.width<=stageBox.x+stageBox.width+0.5 && badgeBox.y>=stageBox.y);
+   if(shots) await gp.screenshot({path:`${shots}/badge-${width}x${height}.png`});
+   await badge.click();
+   const dialog=gp.getByRole('dialog');await dialog.waitFor();
+   await gp.locator('.chat-bubble',{hasText:`第${n}条来信`}).waitFor();
+   const input=gp.getByRole('textbox',{name:'私聊消息'});await input.waitFor();
+   await gp.waitForTimeout(300); // 等对话框入场动画结束再测量
+   const layoutState=await gp.evaluate(()=>{
+     const box=document.querySelector('.lobby-machine').getBoundingClientRect();
+     const body=document.querySelector('.lobby-machine-body');
+     return {bodyOverflow:body.scrollHeight-body.clientHeight,top:box.top,bottom:box.bottom,inner:innerHeight,
+       back:getComputedStyle(document.querySelector('.private-back')).display,contacts:getComputedStyle(document.querySelector('.private-contacts')).display};
+   });
+   assert.ok(layoutState.bodyOverflow<=1 && layoutState.top>=0 && layoutState.bottom<=layoutState.inner+0.5,JSON.stringify(layoutState));
+   assert.equal(layoutState.back==='none',width>767,JSON.stringify(layoutState));
+   if(width<=767) assert.ok(layoutState.top===0 && Math.abs(layoutState.bottom-layoutState.inner)<1,'窄屏私聊应铺满屏幕 '+JSON.stringify(layoutState));
+   assert.equal(layoutState.contacts==='none',width<=767,JSON.stringify(layoutState));
+   const composerBox=await gp.locator('.private-panel .chat-composer').boundingBox();
+   assert.ok(composerBox.y+composerBox.height<=height);
+   assert.equal(await gp.locator('.private-thread .chat-avatar').first().count(),1);
+   await input.fill(`回复${n}`);await input.press('Enter');
+   await gp.locator('.chat-bubble',{hasText:`回复${n}`}).waitFor();
+   if(shots) await gp.screenshot({path:`${shots}/inbox-${width}x${height}.png`});
+   await gp.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+ }
+ console.log('私聊浏览器检查通过：三账号隔离、定向通知、幂等发送、已读与距离失效、任意位置回复、提醒入口、多尺寸布局与头像同步');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

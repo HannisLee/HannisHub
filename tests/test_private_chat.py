@@ -14,7 +14,7 @@ class PrivateChatTest(unittest.TestCase):
         self.env.start()
         self.users = patch.object(dm, 'list_users', return_value=[{'username':x} for x in ['a','b','c']])
         self.users.start()
-        self.profile = patch.object(dm.lobby_profile, 'get_profile', side_effect=lambda x:{'name':x})
+        self.profile = patch.object(dm.lobby_profile, 'get_identities', side_effect=lambda names:{x:{'name':x,'photo':''} for x in names})
         self.profile.start()
         self.access = patch.object(dm,'available',return_value=True)
         self.access_mock = self.access.start()
@@ -42,6 +42,40 @@ class PrivateChatTest(unittest.TestCase):
         with self.assertRaises(HTTPException): dm.send('a',self.peers['b'],{'text':' '})
         self.access_mock.return_value=False
         with self.assertRaises(HTTPException): dm.send('a',self.peers['b'],{'text':'hi','request_id':'x'})
+
+    def test_reply_anywhere_after_incoming(self):
+        """发起需要面对面或工位；对方来信后在回复窗口内可在任意位置（inbox）回复。"""
+        self.access.stop()
+        try:
+            b_to_a = next(c['id'] for c in dm.contacts('b') if c['name'] == 'a')
+            # 没有任何来信：任意位置不能发起
+            self.assertFalse(dm.available('b', 'a', 'inbox'))
+            self.assertFalse(next(c['can_reply'] for c in dm.contacts('b') if c['name'] == 'a'))
+            with self.assertRaises(HTTPException):
+                dm.send('b', b_to_a, {'source': 'inbox', 'text': 'hi', 'request_id': 'r0'})
+            with patch.object(dm, 'available', return_value=True):
+                dm.send('a', self.peers['b'], {'source': 'desk', 'text': '在吗', 'request_id': 'r1'})
+            # 收信方任意位置可回复，发信方尚未收到回信仍不能在任意位置继续
+            self.assertTrue(dm.available('b', 'a', 'inbox'))
+            self.assertTrue(next(c['can_reply'] for c in dm.contacts('b') if c['name'] == 'a'))
+            self.assertFalse(dm.available('a', 'b', 'inbox'))
+            self.assertFalse(dm.available('b', 'a', 'unknown'))
+            dm.send('b', b_to_a, {'source': 'inbox', 'text': '在', 'request_id': 'r2'})
+            self.assertEqual([m['text'] for m in dm.messages('a', self.peers['b'])], ['在吗', '在'])
+            self.assertTrue(dm.available('a', 'b', 'inbox'))
+            # 超过回复窗口后恢复限制
+            later = dm.time.time() + dm.REPLY_WINDOW_SECONDS + 1
+            with patch.object(dm.time, 'time', return_value=later):
+                self.assertFalse(dm.available('b', 'a', 'inbox'))
+        finally:
+            self.access_mock = self.access.start()
+
+    def test_contacts_carry_photo_and_order_fields(self):
+        with patch.object(dm.lobby_profile, 'get_identities', side_effect=lambda names: {x: {'name': x.upper(), 'photo': '🐱'} for x in names}):
+            rows = dm.contacts('a')
+        self.assertEqual({r['name'] for r in rows}, {'B', 'C'})
+        self.assertTrue(all(r['photo'] == '🐱' and r['last_at'] == 0 and r['can_reply'] is False for r in rows))
+        self.assertTrue(all('username' not in r and 'owner' not in r for r in rows))
 
 
 if __name__ == '__main__': unittest.main()

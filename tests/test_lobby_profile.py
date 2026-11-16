@@ -49,5 +49,24 @@ class LobbyProfileTest(unittest.TestCase):
                 lobby_profile.save_profile("alice", {"name": "a", "avatar": avatar})
 
 
+    def test_photo_saved_kept_and_validated(self):
+        self.assertEqual(lobby_profile.get_profile("alice")["photo"], "")
+        image = "data:image/jpeg;base64," + "A" * 100
+        saved = lobby_profile.save_profile("alice", {"name": "小明", "avatar": None, "photo": image})
+        self.assertEqual(saved["photo"], image)
+        # 未携带 photo（旧客户端只改名字与形象）时保留原头像
+        kept = lobby_profile.save_profile("alice", {"name": "小明2", "avatar": None})
+        self.assertEqual(kept["photo"], image)
+        self.assertEqual(lobby_profile.get_identities(["alice", "bob"]), {
+            "alice": {"name": "小明2", "photo": image},
+            "bob": {"name": "bob", "photo": ""},
+        })
+        self.assertEqual(lobby_profile.save_profile("alice", {"name": "a", "avatar": None, "photo": "🐱"})["photo"], "🐱")
+        for bad in ["data:image/svg+xml;base64,AAAA", "data:image/png;base64," + "A" * 130_000, "x" * 40, "a\x00"]:
+            with self.assertRaises(HTTPException):
+                lobby_profile.save_profile("alice", {"name": "a", "avatar": None, "photo": bad})
+        self.assertEqual(lobby_profile.get_profile("alice")["photo"], "🐱")
+
+
 if __name__ == "__main__":
     unittest.main()

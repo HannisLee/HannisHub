@@ -24,16 +24,34 @@ function ChatPanel() {
     setChatEmbedded(true);
     return () => setChatEmbedded(false);
   }, []);
-  return <ChatRoom />;
+  return <ChatRoom embedded />;
 }
 
-/** 大厅机器 → 对应的功能面板与独立页面地址（留言板没有独立页面）；fill 表示面板铺满对话框（自带滚动区） */
-const MACHINES: Record<string, { Panel: ComponentType; href?: string; fill?: boolean }> = {
+/** 面对面私聊：交谈对象由场景编号（machine.hint）决定 */
+function NearPrivate({ machine, onClose }: { machine: MachineInfo; onClose: () => void }) {
+  return <PrivatePanel mode="near" sceneId={machine.hint} onClose={onClose} />;
+}
+
+/** 私聊提醒打开的收件箱：初始选中来信的联系人（machine.hint） */
+function InboxPrivate({ machine, onClose }: { machine: MachineInfo; onClose: () => void }) {
+  return <PrivatePanel mode="inbox" contactId={machine.hint} onClose={onClose} />;
+}
+
+function DeskPanel({ onClose }: { onClose: () => void }) {
+  return <DeskComputer onClose={onClose} />;
+}
+
+type PanelProps = { machine: MachineInfo; onClose: () => void };
+
+/** 大厅机器 → 对应的功能面板与独立页面地址（留言板没有独立页面）；
+ *  fill 表示面板铺满对话框（自带滚动区）；compact 为较小的对话框（私聊）；hint 覆盖标题栏说明 */
+const MACHINES: Record<string, { Panel: ComponentType<PanelProps> | ComponentType; href?: string; fill?: boolean; compact?: boolean; hint?: string }> = {
   asr: { Panel: AsrPanel, href: "/llama/asr" },
   ocr: { Panel: OcrPanel, href: "/llama/ocr" },
   chat: { Panel: ChatPanel, href: "/chat", fill: true },
-  private: { Panel: DeskComputer },
-  todo: { Panel: DeskComputer, href: "/todo" },
+  private: { Panel: NearPrivate, fill: true, compact: true, hint: "面对面交谈 · 走开后结束" },
+  inbox: { Panel: InboxPrivate, fill: true, compact: true, hint: "收到的私聊可在任意位置查看和回复" },
+  todo: { Panel: DeskPanel, href: "/todo", fill: true },
   notes: { Panel: NotesBoard },
 };
 
@@ -67,16 +85,16 @@ export function MachineDialog({ machine, onClose, actions }: MachineDialogProps)
   }, [onClose]);
 
   if (!entry) return null;
-  const { Panel, href, fill } = entry;
+  const { Panel, href, fill, compact, hint } = entry;
 
   return createPortal(
     <div className="lobby-machine-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="lobby-machine" role="dialog" aria-modal="true" aria-labelledby="lobby-machine-title">
+      <section className={`lobby-machine${compact ? " is-compact" : ""}`} role="dialog" aria-modal="true" aria-labelledby="lobby-machine-title">
         <header className="lobby-machine-bar">
           <div className="lobby-machine-name">
             <span className="lobby-dot" aria-hidden="true" />
             <span id="lobby-machine-title">{machine.title}</span>
-            <span className="lobby-machine-hint">{machine.id === "private" ? "靠近交流 · 离开结束" : machine.hint}</span>
+            <span className="lobby-machine-hint">{hint ?? machine.hint}</span>
           </div>
           <div className="lobby-machine-actions">
             {actions}
@@ -88,7 +106,7 @@ export function MachineDialog({ machine, onClose, actions }: MachineDialogProps)
           </div>
         </header>
         <div className={`lobby-machine-body${fill ? " is-fill" : ""}`}>
-          {machine.id === "private" ? <PrivatePanel sceneId={machine.hint} onClose={onClose} /> : machine.id === "todo" ? <DeskComputer onClose={onClose} /> : <Panel />}
+          <Panel machine={machine} onClose={onClose} />
         </div>
       </section>
     </div>,

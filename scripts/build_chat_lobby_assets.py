@@ -1105,7 +1105,7 @@ def build_hall() -> Room:
 
 def build_room() -> Room:
     """我的房间：入口厅楼上的小卧室（入口厅乘电梯上来）。下墙中间开口出去，回到入口厅电梯前；
-    衣柜 + 穿衣镜前的地台按 E 打开「形象与名字」。"""
+    衣柜 + 穿衣镜前的地台按 E 打开「形象与头像」（形象、名字与聊天头像）。"""
     room = Room("room", "我的房间", 12, 10, floor_tex(0, 24), wall_tex(23, 28))
     exit_x0, exit_x1 = t(5), t(7)
     room.bottom_openings.append((exit_x0, exit_x1))
@@ -1124,7 +1124,7 @@ def build_room() -> Room:
     room.prop("wardrobe", wx, 20, foot=10)
     room.prop("mirror", wx + 34, 31, foot=6)
     room.machines.append({
-        "id": "wardrobe", "title": "形象与名字", "hint": "换装、设置别人看到的名字",
+        "id": "wardrobe", "title": "形象与头像", "hint": "换装、设置名字和聊天头像",
         "zone": [wx - 4, 60, 52, 18], "signX": wx + 22, "signY": 8,
     })
     room.prop("plant_pot", 158, 34, foot=8)

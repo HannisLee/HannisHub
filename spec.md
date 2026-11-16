@@ -103,7 +103,7 @@ HannisHub/
 - `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
 - `/login`：用户登录页；首次启动且没有任何用户时切换为管理员初始化表单
 - `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；仅管理员 `lihan` 可管理用户
-- `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口，设置中可修改昵称和头像（昵称首字母、12 个预设 emoji 或上传图片，图片在浏览器内居中裁剪并压缩为 96×96 JPEG）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入时自动以本地昵称或登录账号名建立资料。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
+- `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口；名字与头像以聊天大厅「我的房间」衣柜前的设置为准（设置面板只读展示并引导前往大厅修改，另含提示音开关）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入或资料尚未绑定账号时登记资料，服务端把该浏览器绑定到当前登录账号。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
   - 乐观发送：按回车后消息立即以半透明显示在本地并清空输入框，后台按输入顺序逐条发送；请求携带客户端生成的 `nonce`，成功或被轮询确认后替换为服务端消息；15 秒超时或失败时标红并提供“重试 / 删除”。服务端对同一浏览器的同一 `nonce` 只保存一次，重试不会产生重复消息
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。同一浏览器的多个窗口通过存储事件同步已读位置，恢复焦点或可见时补同步；按消息编号移除已读提示并保留更新的未读消息，延迟响应不得重新累计已读消息或弹出提醒。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
@@ -157,8 +157,9 @@ HannisHub/
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件；`prompt-float.tsx` 为终端页使用的可拖动浮动提示词（仅输入、复制、归档） |
 | `frontend/components/chatworld/todo/` | 工位待办 `TodoPanel`（视图、快速添加、搜索排序、条目展开编辑与子任务），独立页面 `/todo` 与大厅工位对话框共用；接口客户端在 `frontend/lib/todos.ts` |
-| `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、昵称头像设置与 frimousse 表情面板组件 |
-| `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR / 聊天室面板，整页模式下隐藏独立页面链接）；`avatar-dialog.tsx` 为我的房间「形象与名字」面板；页面加载时读取 `/api/chat-lobby/profile` 并合成形象；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏；普通账号整页显示（`AppShell` 的 `immersiveForRegular`，通过 `components/layout/shell-context.tsx` 获取登录信息与退出方法），出生点改为我的房间；`desk-claim-dialog.tsx` 为空闲工位的认领确认框；`notes-board.tsx` 为留言板对话框内容；舞台底部的回车说话输入框；页面加载时读取工位归属（`/api/chat-lobby/desks`）写入桥接对象，按交互类型显示提示条，提供快捷表情按钮与短提示，工位待办对话框标题栏提供「退还工位」 |
+| `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、只读资料与提示音设置、frimousse 表情面板组件 |
+| `frontend/components/chatworld/shared/` | 聊天窗口通用组件：`chat-avatar.tsx` 提供圆形头像（默认名字首字、emoji 或图片）、12 个预设 emoji、图片居中裁剪压缩为 96×96 JPEG 及消息时间格式，聊天室、私聊与「我的房间」共用 |
+| `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR / 聊天室面板，整页模式下隐藏独立页面链接）；`avatar-dialog.tsx` 为我的房间「形象与头像」面板（像素形象、名字与聊天头像）；`private-panel.tsx` 为私聊窗口、工位电脑与游戏画面右上角的私聊提醒；页面加载时读取 `/api/chat-lobby/profile` 并合成形象；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏；普通账号整页显示（`AppShell` 的 `immersiveForRegular`，通过 `components/layout/shell-context.tsx` 获取登录信息与退出方法），出生点改为我的房间；`desk-claim-dialog.tsx` 为空闲工位的认领确认框；`notes-board.tsx` 为留言板对话框内容；舞台底部的回车说话输入框；页面加载时读取工位归属（`/api/chat-lobby/desks`）写入桥接对象，按交互类型显示提示条，提供快捷表情按钮与短提示，工位待办对话框标题栏提供「退还工位」 |
 | `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色（可切换皮肤贴图）、`presence-client.ts` 多人同步连接（节流上报、退避重连）、`remote-player.ts` 其他人的角色（插值显示、名字标签、自动行走）、`pathfinding.ts` 房间寻路网格（A* + 视线拉直）、`avatar.ts` 角色生成器部件加载与叠层合成（React 与 Phaser 共用）、`create-game.ts` 游戏工厂，与普通 UI 组件解耦；`tunes.ts` 钢琴 / 吉他短旋律（Web Audio 合成）；场景统一处理机器、工位、座位与小互动四类交互对象（重叠时取面积最小者），绘制工位名牌与头顶表情气泡 |
 | `frontend/components/terminal/` | 网页终端：顶部小高度命令条（已存状态、一键执行、白色新建按钮、管理浮动框与命令配置浮动框）、横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
 | `frontend/components/settings/` | AI 能力集中设置组件 |
@@ -226,13 +227,13 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/ai-settings/model-test` | 接收 `config_id` 与 `model`，使用指定配置发送一次最小对话请求验证模型可用性 |
 | GET | `/api/ai-settings/usage?config_id=<id>` | 查询一条或全部 AI 配置的剩余用量；当前支持 GLM 5 小时限额与 Token 限额，无用量接口的服务返回不支持说明，查询失败以条目内错误信息返回 |
 | GET | `/api/chat-room/messages?after=<id>&limit=<n>&client_id=<id>&profiles_version=<v>&read_up_to=<id>&reads_version=<v>` | 拉取聊天室消息；`read_up_to` 上报该浏览器已看到的最后一条消息编号以推进已读游标，`reads_version` 与服务端不同时附带自己消息的回执 `receipts`（`{消息id: {read:[client_id], unread:[client_id]}}`）与最新 `reads_version`；`after` 为 0 时返回最近 `limit` 条（默认 200，最多 500），大于 0 时只返回更新的消息；携带 `client_id` 时记录在线心跳；返回 `total`、在线 `online` 列表与 `profiles_version`，版本与请求不同时附带完整 `profiles` 资料表 |
-| PUT | `/api/chat-room/profile` | 接收 `client_id`、`nickname`（最多 24 字）与 `avatar`（空、最多 16 字的 emoji 文本，或不超过 120,000 字符的 png/jpeg/webp base64 data URL）保存当前浏览器资料；最多 500 份 |
+| PUT | `/api/chat-room/profile` | 接收 `client_id` 登记当前浏览器资料；已登录时把该浏览器绑定到账号（内部记录，不对外返回账号），名字与头像取自聊天大厅资料，忽略请求中的 `nickname`/`avatar`；未登录时沿用 `nickname`（最多 24 字）与 `avatar`（规则同大厅 `photo`）。返回 `{client_id, nickname, avatar, updated_at, linked}`；最多 500 份。`GET /api/chat-room/messages` 的资料表同样按绑定账号实时取大厅名字与头像，并带 `linked` |
 | POST | `/api/chat-room/files` | 以原始请求体上传附件（不超过 50 MB），文件名放在 URL 编码的 `x-file-name` 头，图片可附带 `x-image-width` / `x-image-height`；返回附件信息 `{id, name, size, mime, kind, width?, height?}`。PNG / JPEG / GIF / WebP 记为 `image`，其余（含 SVG、HTML）记为 `file` |
 | GET | `/api/chat-room/files/{id}?download=<bool>` | 读取附件：`image` 且未要求下载时以原类型内联显示，其余一律以 `application/octet-stream` 附件下载；带 `nosniff`、沙箱 CSP 与长期私有缓存头 |
 | POST | `/api/chat-room/messages` | 接收 `client_id`、`content`（最多 4,000 字）、可选 `nonce`（8-64 位字母数字）与可选 `attachment_id` 追加一条消息（有附件时文字可为空），同一浏览器重复的 `nonce` 直接返回已有消息，昵称取已保存的资料（无资料时使用请求中的 `nickname`）；最多保留最近 10,000 条 |
 | DELETE | `/api/chat-room/messages` | 清空聊天室记录，消息 id 继续递增；页面暂不提供入口 |
-| GET | `/api/chat-lobby/profile` | 读取当前登录账号在聊天大厅中的资料 `{username, name, avatar, updated_at}`；未保存过时 `name` 为登录用户名、`avatar` 为 `null`（使用默认角色） |
-| PUT | `/api/chat-lobby/profile` | 接收 `name`（去控制字符、合并空白，最多 16 字，不能为空）与 `avatar`（`null`，或含 `body`/`eyes`/`outfit` 必填、`hair`/`accessory` 可为空字符串的部件编号对象，编号限 1-48 位字母数字下划线）保存到 `data/chat_lobby_profiles.json`，以登录用户名为键，最多 500 份；保存后若该账号在线，通知聊天大厅中的其他人刷新名字与形象；所有登录账号可用 |
+| GET | `/api/chat-lobby/profile` | 读取当前登录账号在聊天大厅中的资料 `{username, name, avatar, photo, updated_at}`；未保存过时 `name` 为登录用户名、`avatar` 为 `null`（使用默认角色）、`photo` 为空字符串（默认头像：名字首字） |
+| PUT | `/api/chat-lobby/profile` | 接收 `name`（去控制字符、合并空白，最多 16 字，不能为空）与 `avatar`（`null`，或含 `body`/`eyes`/`outfit` 必填、`hair`/`accessory` 可为空字符串的部件编号对象，编号限 1-48 位字母数字下划线），以及可选的 `photo` 聊天头像（空字符串为默认、最多 16 字的 emoji 文本，或不超过 120,000 字符的 png/jpeg/webp base64 data URL；省略时保留原头像）保存到 `data/chat_lobby_profiles.json`，以登录用户名为键，最多 500 份；保存后若该账号在线，通知聊天大厅中的其他人刷新名字与形象，并使聊天室资料表换代，让聊天室与私聊显示新名字和头像；所有登录账号可用 |
 | GET | `/api/chat-lobby/desks` | 聊天大厅工位归属 `{desks: {工位编号: {name, mine}}, mine}`：只列已认领的工位，`name` 为认领者在大厅中的显示名字（不暴露登录用户名），`mine` 为自己认领的工位编号或 `null`；所有登录账号可用 |
 | PUT | `/api/chat-lobby/desks/mine` | 接收 `desk`（`desk-1`…`desk-6`）认领工位，已有工位时换到新工位（原工位自动退还）；工位已被别人认领返回 409、编号无效返回 400；成功后经同步通道广播 `{"type":"desks"}`，返回最新归属 |
 | GET | `/api/chat-lobby/notes` | 聊天大厅留言板 `{notes: [{id, name, text, color, mine, created_at}], can_moderate}`，最新在前、最多 300 张；`name` 为作者贴出时的大厅名字（不暴露登录用户名），`can_moderate` 表示当前账号（管理员）能撕掉任何便签；所有登录账号可用 |
@@ -945,25 +946,29 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 
 ### 聊天大厅私聊与工位电脑
 
-- 公共房间面向另一玩家（前方 90°、脚底距离不超过 32px）按 E 或触屏「使用」打开一对一私聊，不要求对方转身；符合条件的玩家优先于家具互动。双方距离超过 48px、换房间或对方离线时，面对面窗口在下一次检查时关闭。打开期间本机角色冻结，但多人同步继续。
+- 发起与接收规则：**发起**私聊需要面对面或坐在自己的工位电脑前；**接收**不限位置——对方在 24 小时（`REPLY_WINDOW_SECONDS`）内发来过消息时，可在任意位置查看并回复（每次来信重新计时）。历史消息的阅读始终不限位置。
+- 公共房间面向另一玩家（前方 90°、脚底距离不超过 32px）按 E 或触屏「使用」打开一对一私聊，不要求对方转身；符合条件的玩家优先于家具互动。双方距离超过 48px、换房间或对方离线时，若对方近期没有发来消息，面对面窗口在下一次检查时关闭；对方回复过则继续保留。打开期间本机角色冻结，但多人同步继续。
+- 私聊提醒：有未读时，游戏画面右上角（整页模式在账号胶囊下方）显示带感叹号的提醒胶囊（最近来信人的头像与「某某发来 N 条私聊」，窄屏只显示感叹号与头像）；点击直接以收件箱模式（inbox）打开私聊窗口并选中最近来信的联系人，无需靠近对方。收件箱中选中近期没有来信的联系人时只读，并提示前往面对面或工位发起。
 - 自己认领的工位打开「工位电脑」，包括原有待办及私聊标签。私聊支持全部其他账号联系人、搜索、历史分页、未读数和离线留言；借坐他人工位不会打开电脑。首版仅纯文本，每条最多 1000 字，Enter 发送、Shift+Enter 换行。
 - 消息持久化于 SQLite v5 迁移：`lobby_contacts`（owner、稳定随机 id）、`lobby_messages`（owner 隔离的双方副本、peer、seq、request_id、outgoing、text、created_at）、`lobby_reads`（owner、peer、单调递增 seq）。客户端请求编号使重复发送幂等；同账号发送间隔至少 0.8 秒。删除账号清理双方有关消息、已读及联系人编号。
 - 以下接口均需登录，前缀 `/api/chat-lobby/private-chat`；联系人只返回随机编号、场景编号及显示名字，不返回认证账号。数据查询始终按当前会话 owner 过滤。
 
 | 方法与路径 | 输入与返回 |
 | --- | --- |
-| GET `/contacts` | 联系人数组：`id, scene_id, name, last, unread`，含全部其他现存账号 |
+| GET `/contacts` | 联系人数组：`id, scene_id, name, photo, last, last_at, unread, can_reply`，含全部其他现存账号；`name`/`photo` 取自对方的大厅资料，`can_reply` 表示对方在回复窗口内发来过消息 |
 | GET `/{contact}/messages?before=0` | 按 seq 向前翻页，每次最多 50 条、页内正序；返回 `seq,text,outgoing,created_at` |
-| POST `/{contact}/open` | `{source:"near"或"desk", opening?:boolean}`；返回 `{allowed}`。near 首次验证朝向及 32px 距离，后续验证 48px 距离；desk 核验角色坐在自己认领工位的座位坐标 |
+| POST `/{contact}/open` | `{source:"near"、"desk"或"inbox", opening?:boolean}`；返回 `{allowed}`。对方在回复窗口内发来过消息时任何来源均允许；否则 near 首次验证朝向及 32px 距离，后续验证 48px 距离，desk 核验角色坐在自己认领工位的座位坐标，inbox 不允许 |
 | POST `/{contact}/messages` | `{source,text,request_id}`；场景资格有效后事务保存双方副本，返回 `{ok:true}`。无资格 409，非法正文 400，过快 429 |
 | PUT `/{contact}/read` | `{seq}`；限定本账号本会话已有消息范围，已读位置不回退，返回 `{ok:true}` |
 
 - 复用 `/api/chat-lobby/ws` 的定向事件 `{"type":"private-chat"}`：新消息仅通知双方账号全部标签页，已读仅通知阅读者账号；事件不含正文，不走大厅公共广播。前端重新读取消息与未读数，并每 2 秒补查当前消息、每 5 秒补查联系人；消息提交走 HTTP 确认，失败保留草稿，重试沿用请求编号。刷新后从数据库恢复历史。
-- 未读提醒不会强制弹窗；点击时如正面靠近未读联系人则打开，否则提示前往自己的工位。桌面及全屏大厅均显示提醒。正文始终以 React 文本渲染。
+- 未读提醒不会强制弹窗，只在游戏画面右上角显示感叹号提醒，点击直接打开会话。桌面及全屏大厅均显示提醒。正文始终以 React 文本渲染。
 
 #### 私聊发送区
 
-私聊复用聊天室的 `chat-row` / `chat-bubble` 消息样式及 `chat-composer` 发送区样式，自己消息靠右、对方消息靠左，展示名字与时间。输入框从单行自动增高，最多 200px；Enter 发送、Shift+Enter 换行，中文输入法确认不触发发送。复用聊天室表情选择器，按光标位置插入并遵守 1000 字限制；Esc 优先关闭表情面板，继续按 Esc 关闭私聊。发送确认后清空草稿并恢复输入焦点，发送失败保留内容；在消息底部阅读时新消息自动滚动，向上查看历史时保留当前位置。发送区提供纯文字及表情输入。
+私聊复用聊天室的 `chat-row` / `chat-bubble` 消息样式及 `chat-composer` 发送区样式，自己消息靠右、对方消息靠左，展示头像、名字与时间（5 分钟内同一方的连续消息合并头像）；名字与头像均以「我的房间」设置为准。
+
+窗口尺寸：私聊对话框为紧凑尺寸（最宽 960px、高 `min(88dvh, 760px)`），面板铺满对话框，只有联系人列表和消息区内部滚动，外层不出现滚动条；视口高度不超过 760px 时对话框贴近视口并压缩留白；窄屏（≤767px）全屏显示，联系人与会话分两屏切换，会话标题左侧提供返回按钮，输入框提示缩短为「输入消息」。工位电脑的待办标签在面板内滚动。输入框从单行自动增高，最多 200px；Enter 发送、Shift+Enter 换行，中文输入法确认不触发发送。复用聊天室表情选择器，按光标位置插入并遵守 1000 字限制；Esc 优先关闭表情面板，继续按 Esc 关闭私聊。发送确认后清空草稿并恢复输入焦点，发送失败保留内容；在消息底部阅读时新消息自动滚动，向上查看历史时保留当前位置。发送区提供纯文字及表情输入。
 
 
 ## 独立终端后台（v0.3.1）

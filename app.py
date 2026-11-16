@@ -388,9 +388,10 @@ async def chat_room_messages(
 
 
 @app.put("/api/chat-room/profile")
-async def chat_room_profile(payload: dict[str, Any] = Body(...)):
-    """保存当前浏览器在聊天室中的昵称与头像。"""
-    return JSONResponse(await run_in_threadpool(chat_room.save_profile, payload))
+async def chat_room_profile(request: Request, payload: dict[str, Any] = Body(...)):
+    """登记当前浏览器的聊天室资料：已登录时绑定账号，名字与头像取自聊天大厅「我的房间」。"""
+    username = current_username(request.session)
+    return JSONResponse(await run_in_threadpool(chat_room.save_profile, payload, username))
 
 
 @app.post("/api/chat-room/files")
@@ -783,7 +784,7 @@ async def private_messages(contact: str, request: Request, before: int = 0):
 
 @app.post("/api/chat-lobby/private-chat/{contact}/open")
 async def private_open(contact: str, request: Request, payload: dict[str, Any] = Body(...)):
-    """验证场景中的私聊入口。"""
+    """验证当前能否向该联系人发消息：面对面、自己的工位电脑，或对方近期发来过消息（任意位置可回复）。"""
     owner = _require_user(request)
     peer = await run_in_threadpool(private_chat.peer_for, owner, contact)
     allowed = await run_in_threadpool(private_chat.available, owner, peer, payload.get("source"), payload.get("opening", False))
@@ -814,7 +815,7 @@ async def private_read(contact: str, request: Request, payload: dict[str, Any] =
 
 @app.get("/api/chat-lobby/profile")
 async def chat_lobby_profile(request: Request):
-    """读取当前账号在聊天大厅中的名字与像素形象。"""
+    """读取当前账号在聊天大厅中的名字、像素形象与聊天头像。"""
     username = current_username(request.session)
     if not username:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
@@ -823,13 +824,14 @@ async def chat_lobby_profile(request: Request):
 
 @app.put("/api/chat-lobby/profile")
 async def chat_lobby_profile_save(request: Request, payload: dict[str, Any] = Body(...)):
-    """保存当前账号在聊天大厅中的名字与像素形象。"""
+    """保存当前账号在聊天大厅中的名字、像素形象与聊天头像（photo 可省略以保留原头像）。"""
     username = current_username(request.session)
     if not username:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
     profile = await run_in_threadpool(lobby_profile.save_profile, username, payload)
-    # 在线时通知同场的其他人刷新名字与形象
+    # 在线时通知同场的其他人刷新名字与形象；聊天室资料表随之换代，各窗口拉取新名字与头像
     lobby_presence.presence.update_profile(username, profile)
+    await run_in_threadpool(chat_room.bump_profiles_version)
     return JSONResponse(profile)
 
 

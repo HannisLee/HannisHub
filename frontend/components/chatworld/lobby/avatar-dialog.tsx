@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { ApiError } from "../../../lib/api";
 import { LOBBY_NAME_MAX, saveLobbyProfile, type LobbyProfile } from "../../../lib/chat-lobby";
@@ -10,6 +10,7 @@ import {
   normalizeAvatar, randomAvatar, type AvatarConfig, type AvatarParts, type AvatarSlot, type PartItem,
 } from "./game/avatar";
 import { ASSET_BASE, type Facing } from "./game/layout";
+import { Avatar, PRESET_AVATARS, resizeAvatar } from "../shared/chat-avatar";
 
 const SLOT_LABELS: Record<AvatarSlot, string> = {
   body: "肤色",
@@ -76,8 +77,9 @@ interface AvatarDialogProps {
   onSaved: (profile: LobbyProfile) => void;
 }
 
-/** 「我的房间」衣柜前按 E 打开：拼装像素形象（身体、眼睛、服装、发型、配饰）并设置名字。
- *  名字在多人同场时显示在其他人看到的角色头顶，自己在场景里看不到。 */
+/** 「我的房间」衣柜前按 E 打开：拼装像素形象（身体、眼睛、服装、发型、配饰），设置名字与聊天头像。
+ *  名字在多人同场时显示在其他人看到的角色头顶，自己在场景里看不到；
+ *  名字与头像同时用于聊天室和私聊窗口，以这里的设置为准。 */
 export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -85,6 +87,8 @@ export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
   const [defaultSheet, setDefaultSheet] = useState<HTMLImageElement | null>(null);
   const [loadError, setLoadError] = useState("");
   const [name, setName] = useState(profile.name);
+  const [photo, setPhoto] = useState(profile.photo ?? "");
+  const [photoError, setPhotoError] = useState("");
   // 未自定义过形象时沿用场景默认角色；一旦挑选任何部件即切换为自定义
   const [useDefault, setUseDefault] = useState(profile.avatar === null);
   const [config, setConfig] = useState<AvatarConfig>(profile.avatar ?? DEFAULT_AVATAR);
@@ -172,12 +176,25 @@ export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
   const currentGroup = groups.find(group => group.items.some(item => item.id === currentId)) ?? null;
 
   const trimmedName = name.trim();
+
+  const onPhotoFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      setPhoto(await resizeAvatar(file));
+      setPhotoError("");
+    } catch (error) {
+      setPhotoError(errorMessage(error));
+    }
+  };
+
   const save = async () => {
     if (!trimmedName || saving) return;
     setSaving(true);
     setSaveError("");
     try {
-      const saved = await saveLobbyProfile(trimmedName, useDefault ? null : config);
+      const saved = await saveLobbyProfile(trimmedName, useDefault ? null : config, photo);
       onSaved(saved);
     } catch (error) {
       // 404 / 405：后台进程还没有加载资料接口（请求落到了静态文件托管上），给出可操作的提示
@@ -193,8 +210,8 @@ export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
         <header className="lobby-machine-bar">
           <div className="lobby-machine-name">
             <span className="lobby-dot" aria-hidden="true" />
-            <span id="lobby-avatar-title">形象与名字</span>
-            <span className="lobby-machine-hint">换一身行头，再告诉大家你叫什么</span>
+            <span id="lobby-avatar-title">形象、名字与头像</span>
+            <span className="lobby-machine-hint">换一身行头，设置名字和聊天头像</span>
           </div>
           <div className="lobby-machine-actions">
             <button ref={closeRef} type="button" className="lobby-machine-close" onClick={onClose} aria-label="关闭面板，回到房间">
@@ -234,8 +251,33 @@ export function AvatarDialog({ profile, onClose, onSaved }: AvatarDialogProps) {
                 onChange={event => setName(event.target.value)}
                 onKeyDown={event => { if (event.key === "Enter") void save(); }}
               />
-              <span className="field-hint">多人同场时，其他人会在你头顶看到这个名字；你自己在场景里看不到。最多 {LOBBY_NAME_MAX} 个字。</span>
+              <span className="field-hint">多人同场时，其他人会在你头顶看到这个名字；聊天室和私聊也显示这个名字。最多 {LOBBY_NAME_MAX} 个字。</span>
             </label>
+
+            <div className="field">
+              <span className="field-label">聊天头像</span>
+              <div className="chat-avatar-options" role="listbox" aria-label="聊天头像">
+                <button type="button" role="option" aria-selected={photo === ""} className={`chat-avatar-option${photo === "" ? " chat-avatar-option-active" : ""}`} onClick={() => setPhoto("")} title="默认（名字首字）">
+                  <Avatar nickname={trimmedName} size="sm" />
+                </button>
+                {PRESET_AVATARS.map(item => (
+                  <button key={item} type="button" role="option" aria-selected={photo === item} className={`chat-avatar-option${photo === item ? " chat-avatar-option-active" : ""}`} onClick={() => setPhoto(item)}>
+                    <Avatar nickname="" avatar={item} size="sm" />
+                  </button>
+                ))}
+                {photo.startsWith("data:") ? (
+                  <button type="button" role="option" aria-selected className="chat-avatar-option chat-avatar-option-active" title="已上传的图片">
+                    <Avatar nickname="" avatar={photo} size="sm" />
+                  </button>
+                ) : null}
+                <label className="button button-secondary button-sm chat-avatar-upload">
+                  上传图片
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onPhotoFile(event)} />
+                </label>
+              </div>
+              <span className="field-hint">聊天室与私聊通用；默认显示名字首字。</span>
+              {photoError ? <span className="lobby-error-text lobby-avatar-error">{photoError}</span> : null}
+            </div>
           </aside>
 
           <div className="lobby-avatar-main">

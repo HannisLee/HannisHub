@@ -493,6 +493,8 @@ export interface ChatRoomProfile {
   /** 空字符串、emoji 文本或图片 data URL */
   avatar: string;
   updated_at: number;
+  /** 已绑定登录账号：名字与头像取自聊天大厅「我的房间」 */
+  linked?: boolean;
 }
 
 /** 一条自己发送的消息的已读回执：应读人群中已读与未读的 client_id */

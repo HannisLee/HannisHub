@@ -19,8 +19,12 @@ os.environ["HANNISHUB_TERMINAL_SETTINGS_PATH"] = str(auth.SETTINGS_PATH)
 if not auth.SETTINGS_PATH.exists():
     auth.configure_admin("lihan", "e2e-test-pass-123")
     auth.create_user("guest", "e2e-test-pass-123")
-from chatworld import lobby_profile
+from chatworld import chat_room, lobby_profile
 lobby_profile.PROFILES_PATH = work / "profiles.json"
+# 聊天室数据同样改用临时文件：保存大厅资料会让聊天室资料表换代，不能写到线上聊天记录
+chat_room.CHAT_ROOM_PATH = work / "chat_room.json"
+chat_room.READS_PATH = work / "chat_room_reads.json"
+chat_room.FILES_DIR = work / "chat_room_files"
 terminal_process = None
 if os.environ.get("HANNISHUB_TEST_EXTERNAL_TERMINAL") != "1":
     # 测试后台使用随机端口和同一临时配置，不接触线上终端。

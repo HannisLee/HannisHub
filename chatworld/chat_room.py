@@ -1,6 +1,7 @@
 """聊天室组件：单一公共聊天室。
 
-- 消息与用户资料（昵称、头像）以本地 JSON 文件持久保存
+- 消息与用户资料（昵称、头像）以本地 JSON 文件持久保存；资料绑定登录账号后，
+  名字与头像一律取自聊天大厅「我的房间」的设置（lobby_profile），聊天室内不再单独修改
 - 每个浏览器生成一个 client_id 作为身份；在线状态只保存在内存中，按最近心跳判断
 - 图片与文件附件保存在 data/chat_room_files/，先上传取得文件编号，再随消息发送
 - 已读回执：每个浏览器保存一个单调递增的「已读到的消息编号」游标（data/chat_room_reads.json）；
@@ -23,6 +24,8 @@ from typing import Any
 from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
+
+from chatworld import lobby_profile
 
 # 模块位于子目录，ROOT_DIR 指向项目根目录
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -47,10 +50,6 @@ MAX_NICKNAME_CHARS = 24
 # 单次请求最多返回的消息条数
 MAX_FETCH_MESSAGES = 500
 MAX_PROFILES = 500
-# 头像：emoji 文本或前端压缩后的 data URL 图片
-MAX_AVATAR_TEXT_CHARS = 16
-MAX_AVATAR_IMAGE_CHARS = 120_000
-AVATAR_IMAGE_PATTERN = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 # 客户端生成的消息编号，用于乐观发送的去重与幂等重试
 NONCE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -123,17 +122,8 @@ def _normalize_nickname(value: object) -> str:
 
 
 def _normalize_avatar(value: object) -> str:
-    """头像为空、一段短 emoji 文本，或 png/jpeg/webp 的 base64 data URL。"""
-    avatar = str(value or "").strip()
-    if not avatar:
-        return ""
-    if avatar.startswith("data:"):
-        if len(avatar) > MAX_AVATAR_IMAGE_CHARS or not AVATAR_IMAGE_PATTERN.match(avatar):
-            raise HTTPException(status_code=400, detail="头像图片格式不支持或过大")
-        return avatar
-    if len(avatar) > MAX_AVATAR_TEXT_CHARS:
-        raise HTTPException(status_code=400, detail="头像文字过长")
-    return avatar
+    """头像为空、一段短 emoji 文本，或 png/jpeg/webp 的 base64 data URL（与大厅资料共用校验）。"""
+    return lobby_profile.normalize_photo(value)
 
 
 def _online_ids(now: float) -> list[str]:
@@ -282,18 +272,49 @@ def list_messages(
     if receipts is not None:
         response["receipts"] = receipts
     if profiles_version != data["profiles_version"]:
-        response["profiles"] = data["profiles"]
+        response["profiles"] = _public_profiles(data["profiles"])
     return response
 
 
-def save_profile(payload: dict[str, Any]) -> dict[str, Any]:
-    """保存当前浏览器的昵称与头像。"""
+def _public_profiles(profiles: dict[str, Any]) -> dict[str, Any]:
+    """对外的资料表：绑定账号的浏览器使用大厅资料中的名字与头像，且不暴露登录账号。"""
+    identities = lobby_profile.get_identities({p["username"] for p in profiles.values() if p.get("username")})
+    result = {}
+    for client_id, profile in profiles.items():
+        identity = identities.get(profile.get("username") or "")
+        result[client_id] = {
+            "nickname": identity["name"] if identity else profile.get("nickname", ""),
+            "avatar": identity["photo"] if identity else profile.get("avatar", ""),
+            "updated_at": profile.get("updated_at"),
+            "linked": bool(identity),
+        }
+    return result
+
+
+def bump_profiles_version() -> None:
+    """大厅资料（名字、头像）变化后调用，让所有聊天室客户端重新拉取资料表。"""
+    with _LOCK:
+        data = _read_store()
+        data["profiles_version"] += 1
+        _write_store(data)
+
+
+def save_profile(payload: dict[str, Any], username: str | None = None) -> dict[str, Any]:
+    """保存当前浏览器的聊天室资料。
+
+    已登录时把浏览器绑定到账号，名字与头像取自大厅资料，忽略请求中的昵称与头像；
+    未登录（仅测试或旧客户端）时沿用浏览器自填的昵称与头像。
+    """
     client_id = _validate_client_id(payload.get("client_id"))
-    profile = {
-        "nickname": _normalize_nickname(payload.get("nickname")),
-        "avatar": _normalize_avatar(payload.get("avatar")),
-        "updated_at": time.time(),
-    }
+    if username:
+        identity = lobby_profile.get_identities([username])[username]
+        profile = {"username": username, "nickname": identity["name"], "avatar": identity["photo"], "updated_at": time.time()}
+    else:
+        profile = {
+            "nickname": _normalize_nickname(payload.get("nickname")),
+            "avatar": _normalize_avatar(payload.get("avatar")),
+            "updated_at": time.time(),
+        }
     with _LOCK:
         data = _read_store()
         if client_id not in data["profiles"] and len(data["profiles"]) >= MAX_PROFILES:
@@ -301,7 +322,8 @@ def save_profile(payload: dict[str, Any]) -> dict[str, Any]:
         data["profiles"][client_id] = profile
         data["profiles_version"] += 1
         _write_store(data)
-    return {"client_id": client_id, **profile}
+    public = _public_profiles({client_id: profile})[client_id]
+    return {"client_id": client_id, **public}
 
 
 def post_message(payload: dict[str, Any]) -> dict[str, Any]:
@@ -326,7 +348,7 @@ def post_message(payload: dict[str, Any]) -> dict[str, Any]:
                 if existing.get("nonce") == nonce and existing.get("client_id") == client_id:
                     return _public_message(existing)
         profile = data["profiles"].get(client_id)
-        nickname = profile["nickname"] if profile else _normalize_nickname(payload.get("nickname"))
+        nickname = _public_profiles({client_id: profile})[client_id]["nickname"] if profile else _normalize_nickname(payload.get("nickname"))
         # 发送者此刻在线；应读人群 = 最近窗口内在线人数峰值时刻的人群，去掉发送者自己
         now = time.time()
         _presence[client_id] = now

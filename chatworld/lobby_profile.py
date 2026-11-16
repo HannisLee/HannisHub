@@ -4,6 +4,8 @@
 - 名字：多人同场时显示在其他人看到的角色头顶（自己看不到自己的名字）
 - 形象：角色生成器的 5 个部件槽位（身体、眼睛、服装、发型、配饰），只保存部件编号，
   合成在前端完成；为 null 时使用场景默认角色
+- 头像（photo）：聊天窗口（聊天室、私聊）通用的圆形头像；空字符串为默认头像（名字首字），
+  也可以是一个 emoji，或前端裁剪压缩后的 png/jpeg/webp data URL。名字与头像以这里为准
 """
 
 from __future__ import annotations
@@ -28,6 +30,10 @@ MAX_PROFILES = 500
 # 部件编号即素材文件名（如 Outfit_03_02、Accessory_15_Glasses_01），只做字符与长度校验
 PART_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]{1,48}$")
 REQUIRED_SLOTS = ("body", "eyes", "outfit")
+# 头像：emoji 文本或前端压缩后的 data URL 图片（96×96，约 10 KB）
+MAX_PHOTO_TEXT_CHARS = 16
+MAX_PHOTO_IMAGE_CHARS = 120_000
+PHOTO_IMAGE_PATTERN = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 OPTIONAL_SLOTS = ("hair", "accessory")
 
 _LOCK = threading.RLock()
@@ -87,6 +93,20 @@ def _normalize_avatar(value: object) -> dict[str, str] | None:
     return avatar
 
 
+def normalize_photo(value: object) -> str:
+    """头像为空（默认）、一段短 emoji 文本，或 png/jpeg/webp 的 base64 data URL；聊天室共用此校验。"""
+    photo = str(value or "").strip()
+    if not photo:
+        return ""
+    if photo.startswith("data:"):
+        if len(photo) > MAX_PHOTO_IMAGE_CHARS or not PHOTO_IMAGE_PATTERN.match(photo):
+            raise HTTPException(status_code=400, detail="头像图片格式不支持或过大")
+        return photo
+    if len(photo) > MAX_PHOTO_TEXT_CHARS or any(ord(ch) < 32 or ord(ch) == 127 for ch in photo):
+        raise HTTPException(status_code=400, detail="头像文字过长")
+    return photo
+
+
 def _public_profile(username: str, stored: dict[str, Any] | None) -> dict[str, Any]:
     stored = stored or {}
     return {
@@ -94,6 +114,7 @@ def _public_profile(username: str, stored: dict[str, Any] | None) -> dict[str, A
         # 尚未设置名字时默认使用登录用户名
         "name": stored.get("name") or username,
         "avatar": stored.get("avatar"),
+        "photo": stored.get("photo") or "",
         "updated_at": stored.get("updated_at"),
     }
 
@@ -105,8 +126,20 @@ def get_profile(username: str) -> dict[str, Any]:
     return _public_profile(username, stored if isinstance(stored, dict) else None)
 
 
+def get_identities(usernames: set[str] | list[str]) -> dict[str, dict[str, str]]:
+    """一次读取多个账号在聊天窗口中显示的名字与头像。"""
+    with _LOCK:
+        profiles = _read_store()["profiles"]
+    result = {}
+    for username in usernames:
+        stored = profiles.get(username)
+        public = _public_profile(username, stored if isinstance(stored, dict) else None)
+        result[username] = {"name": public["name"], "photo": public["photo"]}
+    return result
+
+
 def save_profile(username: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """保存当前账号的名字与形象。"""
+    """保存当前账号的名字、形象与头像；未携带 photo 字段时保留原头像。"""
     profile = {
         "name": _normalize_name(payload.get("name")),
         "avatar": _normalize_avatar(payload.get("avatar")),
@@ -114,6 +147,11 @@ def save_profile(username: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
     with _LOCK:
         data = _read_store()
+        previous = data["profiles"].get(username)
+        if "photo" in payload:
+            profile["photo"] = normalize_photo(payload.get("photo"))
+        elif isinstance(previous, dict):
+            profile["photo"] = previous.get("photo") or ""
         if username not in data["profiles"] and len(data["profiles"]) >= MAX_PROFILES:
             raise HTTPException(status_code=400, detail="聊天大厅资料数量已达上限")
         data["profiles"][username] = profile

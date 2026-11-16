@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../../lib/api";
 import {
@@ -15,6 +16,7 @@ import { errorMessage, formatBytes } from "../../../lib/format";
 import type { AuthStatus, ChatAttachment, ChatReceipt, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../../lib/types";
 import { Icon } from "../../ui/icon";
 import { Button, ErrorState, LoadingState } from "../../ui/primitives";
+import { Avatar, formatChatTime as formatTime } from "../shared/chat-avatar";
 import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
 
@@ -24,12 +26,10 @@ const FILES = `${API_PATHS.chatRoom}/files`;
 const NICKNAME_KEY = "hannishub_chat_nickname";
 const POLL_MS = 2000;
 const SEND_TIMEOUT_MS = 15000;
-const AVATAR_SIZE = 96;
 const MAX_ATTACHMENT_MB = 50;
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
 /** 与后端一致：只有这些位图在页面内显示，其余按文件发送 */
 const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-const PRESET_AVATARS = ["🐱", "🐶", "🦊", "🐼", "🐸", "🐧", "🦄", "🐙", "🐳", "🌵", "🍀", "🌙"];
 
 /** 本地待发送消息：先显示在界面上，后台发送成功后替换为服务端消息 */
 interface PendingMessage {
@@ -77,14 +77,6 @@ function ensureClientId(): string {
   return id;
 }
 
-function formatTime(seconds: number): string {
-  const date = new Date(seconds * 1000);
-  const sameDay = date.toDateString() === new Date().toDateString();
-  return date.toLocaleString("zh-CN", sameDay
-    ? { hour: "2-digit", minute: "2-digit", hour12: false }
-    : { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
 function fileUrl(id: string, download = false): string {
   return `${FILES}/${encodeURIComponent(id)}${download ? "?download=true" : ""}`;
 }
@@ -97,42 +89,6 @@ function readImageSize(url: string): Promise<{ width: number; height: number } |
     image.onerror = () => resolve(null);
     image.src = url;
   });
-}
-
-/** 把用户选择的图片居中裁剪并压缩成 96×96 的 JPEG data URL */
-function resizeAvatar(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      const side = Math.min(image.width, image.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = AVATAR_SIZE;
-      canvas.height = AVATAR_SIZE;
-      const context = canvas.getContext("2d");
-      URL.revokeObjectURL(url);
-      if (!context) {
-        reject(new Error("浏览器不支持图片处理"));
-        return;
-      }
-      context.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("无法读取该图片"));
-    };
-    image.src = url;
-  });
-}
-
-function Avatar({ nickname, avatar, size = "md" }: { nickname: string; avatar?: string; size?: "sm" | "md" | "lg" }) {
-  const className = `chat-avatar chat-avatar-${size}`;
-  if (avatar?.startsWith("data:")) {
-    // eslint-disable-next-line @next/next/no-img-element -- data URL 头像无需经过图片优化
-    return <img className={className} src={avatar} alt="" />;
-  }
-  return <span className={className} aria-hidden="true">{avatar || (Array.from(nickname.trim())[0] ?? "?").toUpperCase()}</span>;
 }
 
 /** 已读状态图标：全部已读为带勾的实心圆，否则为按已读比例填充的饼图 */
@@ -181,7 +137,7 @@ function thumbnailStyle(width?: number, height?: number) {
 }
 
 /** 公共聊天室：顶部为在线人数与个人设置，中部为共享消息流，底部为输入框、附件与表情 */
-export function ChatRoom() {
+export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
   const [messages, setMessages] = useState<ChatRoomMessage[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const [profiles, setProfiles] = useState<Record<string, ChatRoomProfile>>({});
@@ -192,10 +148,6 @@ export function ChatRoom() {
   const [error, setError] = useState("");
   const [panel, setPanel] = useState<"" | "settings" | "online">("");
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [nicknameDraft, setNicknameDraft] = useState("");
-  const [avatarDraft, setAvatarDraft] = useState("");
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [profileNote, setProfileNote] = useState("");
   const [newBelow, setNewBelow] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; name: string; download?: string } | null>(null);
@@ -302,13 +254,14 @@ export function ChatRoom() {
     if (visibleLastId() > reportedReadRef.current) fetchMessages().catch(() => undefined);
   }, [fetchMessages, visibleLastId]);
 
+  /** 登记本浏览器的资料：服务端绑定登录账号，名字与头像取自聊天大厅「我的房间」 */
   const saveProfile = useCallback(async (nickname: string, avatar: string) => {
     const saved = await apiFetch<ChatRoomProfile & { client_id: string }>(PROFILE, {
       method: "PUT",
       body: jsonBody({ client_id: clientIdRef.current, nickname, avatar }),
     });
     storageSet(NICKNAME_KEY, saved.nickname);
-    setProfiles(current => ({ ...current, [saved.client_id]: { nickname: saved.nickname, avatar: saved.avatar, updated_at: saved.updated_at } }));
+    setProfiles(current => ({ ...current, [saved.client_id]: { nickname: saved.nickname, avatar: saved.avatar, updated_at: saved.updated_at, linked: saved.linked } }));
     // 让下次轮询重新拉取资料表，与服务端版本对齐
     profilesVersionRef.current = -1;
     return saved;
@@ -392,8 +345,8 @@ export function ChatRoom() {
         const data = await fetchMessages();
         initializedRef.current = true;
         markChatRead(lastIdRef.current);
-        // 首次进入时自动建立资料：优先沿用本地昵称，否则使用登录账号名
-        if (!data.profiles?.[id]) {
+        // 首次进入或尚未绑定账号时登记资料：名字与头像由服务端按登录账号取自「我的房间」
+        if (!data.profiles?.[id]?.linked) {
           let nickname = storageGet(NICKNAME_KEY);
           if (!nickname) {
             const auth = await apiFetch<AuthStatus>("/api/auth/status").catch(() => null);
@@ -506,40 +459,7 @@ export function ChatRoom() {
   }
 
   function togglePanel(next: "settings" | "online") {
-    if (next === "settings" && panel !== "settings") {
-      setNicknameDraft(me?.nickname ?? "");
-      setAvatarDraft(me?.avatar ?? "");
-      setProfileNote("");
-    }
     setPanel(current => (current === next ? "" : next));
-  }
-
-  async function submitProfile() {
-    if (!nicknameDraft.trim()) {
-      setProfileNote("昵称不能为空");
-      return;
-    }
-    setSavingProfile(true);
-    try {
-      await saveProfile(nicknameDraft, avatarDraft);
-      setPanel("");
-    } catch (value) {
-      setProfileNote(errorMessage(value));
-    } finally {
-      setSavingProfile(false);
-    }
-  }
-
-  async function onAvatarFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      setAvatarDraft(await resizeAvatar(file));
-      setProfileNote("");
-    } catch (value) {
-      setProfileNote(errorMessage(value));
-    }
   }
 
   function insertEmoji(emoji: string) {
@@ -807,38 +727,23 @@ export function ChatRoom() {
 
       {panel === "settings" ? (
         <div className="chat-panel chat-settings">
-          <Avatar nickname={nicknameDraft} avatar={avatarDraft} size="lg" />
+          <Avatar nickname={me?.nickname ?? ""} avatar={me?.avatar} size="lg" />
           <div className="chat-settings-fields">
-            <label className="field">
-              <span className="field-label">昵称</span>
-              <input value={nicknameDraft} onChange={event => setNicknameDraft(event.target.value)} maxLength={24} />
-            </label>
             <div className="field">
-              <span className="field-label">头像</span>
-              <div className="chat-avatar-options">
-                <button type="button" className={`chat-avatar-option${avatarDraft === "" ? " chat-avatar-option-active" : ""}`} onClick={() => setAvatarDraft("")} title="默认（昵称首字）">
-                  <Avatar nickname={nicknameDraft} size="sm" />
-                </button>
-                {PRESET_AVATARS.map(item => (
-                  <button key={item} type="button" className={`chat-avatar-option${avatarDraft === item ? " chat-avatar-option-active" : ""}`} onClick={() => setAvatarDraft(item)}>
-                    <Avatar nickname="" avatar={item} size="sm" />
-                  </button>
-                ))}
-                <label className="button button-secondary button-sm chat-avatar-upload">
-                  上传图片
-                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onAvatarFile(event)} />
-                </label>
-              </div>
+              <span className="field-label">名字与头像</span>
+              <strong className="chat-settings-name">{me?.nickname ?? "未命名"}</strong>
+              <span className="field-hint">
+                聊天室和私聊的名字、头像以聊天大厅「我的房间」衣柜前的设置为准
+                {embedded ? "，回到大厅后在房间里修改。" : <>，<Link href="/chat-lobby">前往聊天大厅修改</Link>。</>}
+              </span>
             </div>
             <label className="check-choice">
               <input type="checkbox" checked={soundEnabled} onChange={event => setChatSoundEnabled(event.target.checked)} />
               新消息提示音
               <span className="muted-line">（仅对本浏览器生效，立即保存）</span>
             </label>
-            {profileNote ? <p className="error-text">{profileNote}</p> : null}
             <div className="form-actions">
-              <Button size="sm" onClick={() => void submitProfile()} disabled={savingProfile}>保存</Button>
-              <Button size="sm" variant="quiet" onClick={() => setPanel("")}>取消</Button>
+              <Button size="sm" variant="quiet" onClick={() => setPanel("")}>关闭</Button>
             </div>
           </div>
         </div>
