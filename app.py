@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import private_chat, chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
+from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
 from server import terminal_commands, terminal_client
 from core.compression import SelectiveGZipMiddleware
@@ -892,6 +892,35 @@ async def chat_lobby_note_delete(note_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/feature-requests")
+async def feature_request_list(request: Request):
+    """功能改进建议板：全部建议（最新在前）与当前账号能否管理（改状态、删除任意一条）。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(feature_requests.list_requests, username))
+
+
+@app.post("/api/feature-requests")
+async def feature_request_post(request: Request, payload: dict[str, Any] = Body(...)):
+    """提交一条功能改进建议。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(feature_requests.post_request, username, payload))
+
+
+@app.patch("/api/feature-requests/{item_id}")
+async def feature_request_status(item_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """管理员修改建议状态。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(feature_requests.set_status, username, item_id, payload))
+
+
+@app.delete("/api/feature-requests/{item_id}")
+async def feature_request_delete(item_id: str, request: Request):
+    """删除自己提的建议（管理员可删除任何一条）。"""
+    username = _require_user(request)
+    await run_in_threadpool(feature_requests.delete_request, username, item_id)
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/todos")
 async def todo_list(request: Request):
     """当前账号的全部工位待办。"""
@@ -1171,6 +1200,7 @@ async def users_delete(username: str, request: Request):
     await run_in_threadpool(terminal_commands.purge_user, username)
     await run_in_threadpool(lobby_desks.purge_user, username)
     await run_in_threadpool(lobby_notes.purge_user, username)
+    await run_in_threadpool(feature_requests.purge_user, username)
     await run_in_threadpool(private_chat.purge_user, username)
     lobby_presence.presence.notify_desks()
     lobby_presence.presence.notify_all("notes")

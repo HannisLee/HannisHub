@@ -387,6 +387,9 @@ def _regular_user_allowed(path: str, method: str) -> bool:
         return method in {"GET", "HEAD"}
     if path.startswith("/api/chat-lobby/"):
         return True
+    # 聊天室右侧的功能改进建议板：接口内部区分管理员权限
+    if path == "/api/feature-requests" or path.startswith("/api/feature-requests/"):
+        return True
     if path.startswith("/emojibase/"):
         return method in {"GET", "HEAD"}
     if path in {"/api/auth/logout", "/api/auth/password"}:

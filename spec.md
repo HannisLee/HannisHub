@@ -38,6 +38,7 @@ HannisHub/
 │   ├── lobby_profile.py      # 聊天大厅个人资料：按登录账号保存场景名字与像素形象部件，存储于 data/chat_lobby_profiles.json（不入库）
 │   ├── lobby_presence.py     # 聊天大厅多人同步：WebSocket 广播入口厅与大厅中各账号的位置、坐姿、表情、形象与上下线，只存内存
 │   ├── lobby_desks.py        # 聊天大厅工位认领：每个工位最多一人、每人最多一个工位，存 SQLite lobby_desks 表
+│   ├── feature_requests.py   # 聊天室右侧功能改进建议板：所有账号共享的建议列表（提交、删除自己的，管理员改状态 / 删除任意），存 SQLite feature_requests 表
 │   ├── lobby_notes.py        # 聊天大厅留言板：所有账号共享的便签墙（贴、撕、管理员可撕任何一张），存 SQLite lobby_notes 表
 │   ├── todos.py              # 工位待办：按账号隔离的个人待办清单（优先级、截止日期、今天、清单、子任务），存 SQLite todos 表
 │   └── asset/                # 聊天大厅素材原件 Modern Interiors 整包（不入库）；asset_index.md 为入库的速查索引
@@ -104,6 +105,7 @@ HannisHub/
 - `/login`：用户登录页；首次启动且没有任何用户时切换为管理员初始化表单
 - `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；仅管理员 `lihan` 可管理用户
 - `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口；名字与头像以聊天大厅「我的房间」衣柜前的设置为准（设置面板只读展示并引导前往大厅修改，另含提示音开关）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入或资料尚未绑定账号时登记资料，服务端把该浏览器绑定到当前登录账号。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
+  - **功能改进建议板**（`feature-board.tsx`）：聊天室右侧默认收起为一条竖向「功能改进建议」标签（显示待处理条数），点击展开为 340px 侧栏，展开状态记在本浏览器 `localStorage` 键 `hannishub_feature_board_open`。可写建议（最多 1000 字，Ctrl+Enter 提交），下方按时间倒序列出所有人的建议及状态（待处理 / 已采纳 / 已完成 / 暂不考虑）；自己提的可以删除，管理员可在每条上直接切换状态、删除任意一条；30 秒自动刷新。窄屏（<1024px）标签改为横条、侧栏移到聊天窗口下方。只挂在 `/chat` 页面，大厅内嵌的聊天室不显示
   - 乐观发送：按回车后消息立即以半透明显示在本地并清空输入框，后台按输入顺序逐条发送；请求携带客户端生成的 `nonce`，成功或被轮询确认后替换为服务端消息；15 秒超时或失败时标红并提供“重试 / 删除”。服务端对同一浏览器的同一 `nonce` 只保存一次，重试不会产生重复消息
   - 新消息提醒：最后已读消息 id 保存在 `localStorage` 键 `hannishub_chat_last_read`。不在聊天室页面时，App Shell 每 4 秒后台检查一次（不计入在线人数），在侧栏聊天室项显示未读数（收起时为红点）、在右下角弹出可点击的提示条；标签页标题显示「(N) 」前缀，标签页图标叠加红点；别人发来新消息时用 Web Audio 合成提示音（1.5 秒内最多一次）。在聊天室页面时，页面隐藏或滚动在上方才计入未读，滚动在上方时显示「↓ N 条新消息」按钮。同一浏览器的多个窗口通过存储事件同步已读位置，恢复焦点或可见时补同步；按消息编号移除已读提示并保留更新的未读消息，延迟响应不得重新累计已读消息或弹出提醒。自己的消息不触发提醒。提示音开关在聊天设置中，保存在 `localStorage` 键 `hannishub_chat_sound`
   - 已读回执（类似飞书群聊）：每个浏览器维护单调递增的「已读到的消息编号」游标，保存在 `data/chat_room_reads.json`（最多 1,000 条，超出丢弃最久未更新者）。页面可见时，客户端取消息列表可视区域内最靠下的一条作为已读位置，随 2 秒轮询以 `read_up_to` 上报，滚动、切回页面或渲染出新消息时立即补报；页面隐藏、后台提醒轮询不上报。服务端游标只增不减，且不超过最新消息编号；发送者发消息视为已读到该条。**应读人群**在消息发送时快照：取发送前 10 分钟内「同时在线人数最多的那一刻」的在线 client_id 集合（人数相同取最近一次），去掉发送者本人，保存在消息的 `audience` 字段（不返回给客户端）；在线变化记录只保存在内存，服务重启后窗口重新累积。只有发送者能看到自己消息的回执：消息下方显示饼图与「N 人未读 / 全部已读」，点击弹出未读/已读名单。应读人群为空的消息与没有快照的旧消息不显示回执；不在应读人群中的人后来阅读不计入比例。回执随 `reads_version` 变化才返回（只含自己最近 200 条消息）
@@ -157,7 +159,7 @@ HannisHub/
 | `frontend/components/server/` | SSH 连接与远程任务页面业务组件 |
 | `frontend/components/prompts/` | 提示词编辑、三档 AI 润色、归档和润色指令设置组件；`prompt-float.tsx` 为终端页使用的可拖动浮动提示词（仅输入、复制、归档） |
 | `frontend/components/chatworld/todo/` | 工位待办 `TodoPanel`（视图、快速添加、搜索排序、条目展开编辑与子任务），独立页面 `/todo` 与大厅工位对话框共用；接口客户端在 `frontend/lib/todos.ts` |
-| `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、只读资料与提示音设置、frimousse 表情面板组件 |
+| `frontend/components/chatworld/room/` | 公共聊天室消息窗口、在线列表、只读资料与提示音设置、frimousse 表情面板组件；`feature-board.tsx` 为聊天室右侧的功能改进建议板 |
 | `frontend/components/chatworld/shared/` | 聊天窗口通用组件：`chat-avatar.tsx` 提供圆形头像（默认名字首字、emoji 或图片）、12 个预设 emoji、图片居中裁剪压缩为 96×96 JPEG 及消息时间格式，聊天室、私聊与「我的房间」共用 |
 | `frontend/components/chatworld/lobby/` | 聊天大厅页面外壳：标题与房间引导、操作提示、房间标签、机器使用提示条、加载/错误态、触屏方向垫与「使用」按钮；`machine-dialog.tsx` 为机器对话框（内嵌 ASR / OCR / 聊天室面板，整页模式下隐藏独立页面链接）；`avatar-dialog.tsx` 为我的房间「形象与头像」面板（像素形象、名字与聊天头像）；`private-panel.tsx` 为私聊窗口、工位电脑与游戏画面右上角的私聊提醒；页面加载时读取 `/api/chat-lobby/profile` 并合成形象；动态加载（`ssr: false`）Phaser 画布并在卸载时销毁游戏；普通账号整页显示（`AppShell` 的 `immersiveForRegular`，通过 `components/layout/shell-context.tsx` 获取登录信息与退出方法），出生点改为我的房间；`desk-claim-dialog.tsx` 为空闲工位的认领确认框；`notes-board.tsx` 为留言板对话框内容；舞台底部的回车说话输入框；页面加载时读取工位归属（`/api/chat-lobby/desks`）写入桥接对象，按交互类型显示提示条，提供快捷表情按钮与短提示，工位待办对话框标题栏提供「退还工位」 |
 | `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色（可切换皮肤贴图）、`presence-client.ts` 多人同步连接（节流上报、退避重连）、`remote-player.ts` 其他人的角色（插值显示、名字标签、自动行走）、`pathfinding.ts` 房间寻路网格（A* + 视线拉直）、`avatar.ts` 角色生成器部件加载与叠层合成（React 与 Phaser 共用）、`create-game.ts` 游戏工厂，与普通 UI 组件解耦；`tunes.ts` 钢琴 / 吉他短旋律（Web Audio 合成）；场景统一处理机器、工位、座位与小互动四类交互对象（重叠时取面积最小者），绘制工位名牌与头顶表情气泡 |
@@ -236,6 +238,10 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | PUT | `/api/chat-lobby/profile` | 接收 `name`（去控制字符、合并空白，最多 16 字，不能为空）与 `avatar`（`null`，或含 `body`/`eyes`/`outfit` 必填、`hair`/`accessory` 可为空字符串的部件编号对象，编号限 1-48 位字母数字下划线），以及可选的 `photo` 聊天头像（空字符串为默认、最多 16 字的 emoji 文本，或不超过 120,000 字符的 png/jpeg/webp base64 data URL；省略时保留原头像）保存到 `data/chat_lobby_profiles.json`，以登录用户名为键，最多 500 份；保存后若该账号在线，通知聊天大厅中的其他人刷新名字与形象，并使聊天室资料表换代，让聊天室与私聊显示新名字和头像；所有登录账号可用 |
 | GET | `/api/chat-lobby/desks` | 聊天大厅工位归属 `{desks: {工位编号: {name, mine}}, mine}`：只列已认领的工位，`name` 为认领者在大厅中的显示名字（不暴露登录用户名），`mine` 为自己认领的工位编号或 `null`；所有登录账号可用 |
 | PUT | `/api/chat-lobby/desks/mine` | 接收 `desk`（`desk-1`…`desk-6`）认领工位，已有工位时换到新工位（原工位自动退还）；工位已被别人认领返回 409、编号无效返回 400；成功后经同步通道广播 `{"type":"desks"}`，返回最新归属 |
+| GET | `/api/feature-requests` | 功能改进建议板 `{items: [{id, name, text, status, mine, created_at, updated_at}], can_moderate}`，最新在前、最多 500 条；`name` 为提出时的大厅名字（不暴露登录用户名），`status` 为 `open`/`accepted`/`done`/`declined`；所有登录账号可用 |
+| POST | `/api/feature-requests` | 接收 `text`（去控制字符、保留换行、最多 1000 字，空内容 400）提交一条建议，状态为 `open`；每人 10 秒内只能提一条（429）、最多保留 50 条（400），整个板超出 500 条时删除最旧的；返回新建议 |
+| PATCH | `/api/feature-requests/{id}` | 仅管理员：接收 `status`（`open`/`accepted`/`done`/`declined`，无效 400）修改建议状态，非管理员 403、不存在 404；返回更新后的建议 |
+| DELETE | `/api/feature-requests/{id}` | 删除自己提的建议，管理员可删除任何一条；不存在或不是自己的返回 404 |
 | GET | `/api/chat-lobby/notes` | 聊天大厅留言板 `{notes: [{id, name, text, color, mine, created_at}], can_moderate}`，最新在前、最多 300 张；`name` 为作者贴出时的大厅名字（不暴露登录用户名），`can_moderate` 表示当前账号（管理员）能撕掉任何便签；所有登录账号可用 |
 | POST | `/api/chat-lobby/notes` | 接收 `text`（去控制字符、保留换行、最多 140 字，空内容 400）与 `color`（`yellow`/`pink`/`blue`/`green`/`orange`/`purple`，无效值按 `yellow`）贴一张便签；每人最多同时 20 张（超出 400）、10 秒内只能贴一张（429）；成功后广播 `{"type":"notes"}` 并返回新便签 |
 | DELETE | `/api/chat-lobby/notes/{note_id}` | 撕掉自己的便签，管理员可撕掉任何一张；不存在或不是自己的返回 404；成功后广播 `{"type":"notes"}` |
@@ -717,6 +723,7 @@ GPU 进程表只展示模型管理模块当前运行期启动的受管实例，�
 | `todos` | `id`（16 位十六进制） | 工位待办（v2）：`owner`、`title`、`note`、`list` 清单、`priority`（0 无 / 1 低 / 2 中 / 3 高）、`due_date` 截止日期、`my_day` 加入「今天」的日期、`done` / `done_at`、`subtasks`（JSON 数组）、`sort` 手动排序、创建与修改时间；索引 (`owner`, `done`, `sort`) |
 | `lobby_desks` | `desk`（`desk-1`…`desk-6`） | 聊天大厅工位认领（v2）：`owner` 唯一（每人最多一个工位）、`claimed_at`；工位数量与 `scripts/build_chat_lobby_assets.py` 的 `DESK_COUNT`、`chatworld/lobby_desks.py` 的 `DESK_COUNT` 保持一致 |
 | `lobby_notes` | `id`（随机 16 位十六进制） | 聊天大厅留言板（v3）：`owner`（作者账号，用于撕自己的便签与删除账号时清理）、`name`（贴出时的大厅名字）、`text`、`color`、`created_at`；按 `created_at`、`(owner, created_at)` 建索引 |
+| `feature_requests` | `id`（随机 16 位十六进制） | 功能改进建议板（v6）：`owner`（提出人账号，用于删除自己的建议与删除账号时清理）、`name`（提出时的大厅名字）、`text`、`status`（`open`/`accepted`/`done`/`declined`，管理员维护）、`created_at`、`updated_at`；按 `created_at`、`(owner, created_at)` 建索引 |
 | `terminal_command_groups` | `id`（`tc_` + 16 位十六进制） | 终端顶部命令组（v4）：`owner`、名称 `name`、`commands` JSON 字符串（最多 20 条）、创建与修改时间；索引 `(owner, created_at)`，点击命令条时按顺序写入新 PTY |
 
 ### 根目录 ai_settings.json（不入 Git）

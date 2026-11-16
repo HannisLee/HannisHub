@@ -139,6 +139,20 @@ _MIGRATIONS: list[str] = [
     CREATE TABLE lobby_reads (owner TEXT NOT NULL, peer TEXT NOT NULL, seq INTEGER NOT NULL,
         PRIMARY KEY(owner, peer));
     """,
+    # v6：功能改进建议板（聊天室右侧，所有账号共享；owner 为提出人，status 由管理员维护）
+    """
+    CREATE TABLE feature_requests (
+        id         TEXT PRIMARY KEY,
+        owner      TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        text       TEXT NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'open',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    CREATE INDEX feature_requests_created ON feature_requests(created_at DESC);
+    CREATE INDEX feature_requests_owner ON feature_requests(owner, created_at DESC);
+    """,
 
 ]
 
