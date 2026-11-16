@@ -298,7 +298,9 @@ export class LobbyScene extends Phaser.Scene {
     });
 
     for (const sign of def.signs) this.createSign(ox + sign.x, oy + sign.y, sign.text, sign.tone === "brand");
-    for (const machine of def.machines) this.createMachineSign(ox + machine.signX, oy + machine.signY, machine);
+    for (const machine of def.machines) {
+      if (machine.signX !== undefined && machine.signY !== undefined) this.createMachineSign(ox + machine.signX, oy + machine.signY, machine);
+    }
 
     const toRect = ([x, y, w, h]: Rect) => new Phaser.Geom.Rectangle(ox + x, oy + y, w, h);
     const interactables: Interactable[] = [

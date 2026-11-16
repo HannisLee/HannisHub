@@ -53,8 +53,9 @@ export interface MachineDef {
   hint: string;
   /** 交互地台：角色脚底进入该区域即可按 E */
   zone: Rect;
-  signX: number;
-  signY: number;
+  /** 悬浮铭牌位置；缺省时不显示铭牌（如台球桌两端的球位） */
+  signX?: number;
+  signY?: number;
 }
 
 /** 可坐的位置：(x, y) 为坐下后的脚底坐标（决定前后遮挡），dir 为坐下后的朝向；站进 zone 按 E 坐下 */

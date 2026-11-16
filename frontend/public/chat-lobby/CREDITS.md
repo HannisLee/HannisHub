@@ -47,6 +47,14 @@
   - `club/player.png`：取预制角色 `Premade_Character_12`（16x16 档）的静止、行走与坐姿动画，
     重排为 6 帧 × 10 行（16x32 帧）：静止 南/北/左/右 + 行走 南/北/左/右 + 坐姿 右/左。
 
+## 台球音效（`pool/`）
+
+Pool And Billiards SFX by SURAJ KISPOTTA — https://papapleygames.itch.io/pool-and-billiards ，CC0（许可证副本 `pool/LICENSE.txt`）。
+从原 WAV 中选取击球（`ball_shoot_1/2` → `cue1/2`）、撞球（`ball_collide_ball_1–3` → `hit1–3`）、吃库（`ball_collide_wall_1/3` → `rail1/2`）、
+落袋（`ball_dropped_in_hole` → `pocket`）、轮到你（`player_turn` → `turn`）、开局（`player_found` → `start`），去掉开头静音后转为单声道 80kbps mp3。
+球台、球与球杆为 Canvas 程序化绘制，不使用图片素材。
+
 ## 署名
 
 Modern Interiors by Limezu — https://limezu.itch.io/moderninteriors
+Pool And Billiards SFX by SURAJ KISPOTTA（CC0）

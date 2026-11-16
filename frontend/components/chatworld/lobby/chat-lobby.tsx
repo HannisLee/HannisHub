@@ -6,6 +6,7 @@ import {
   claimLobbyDesk, fetchLobbyDesks, fetchLobbyProfile, LOBBY_SAY_MAX, QUICK_EMOTES, releaseLobbyDesk, type LobbyDeskState, type LobbyProfile,
 } from "../../../lib/chat-lobby";
 import { errorMessage } from "../../../lib/format";
+import { onPoolSummary, type PoolSummary } from "../../../lib/lobby-pool";
 import { useShell } from "../../layout/shell-context";
 import { AvatarDialog } from "./avatar-dialog";
 import { DeskClaimDialog } from "./desk-claim-dialog";
@@ -52,6 +53,22 @@ function coarseSnapshot() {
 }
 
 const coarseServerSnapshot = () => false;
+
+/** 台球桌交互区的提示：按球位占用情况说明按 E 会入座还是观战 */
+function poolHint(id: string, s: PoolSummary): string | null {
+  const names = s.solo ? `${s.left} 在单人练习` : s.left && s.right ? `${s.left} 对 ${s.right}` : "";
+  if (id === "pool") {
+    if (names) return `${names} · 按 E 观战`;
+    const waiting = s.left ?? s.right;
+    return waiting ? `${waiting} 在等对手 · 到球桌另一端入座` : "空闲 · 两端入座对战，按 E 查看或单人练习";
+  }
+  const side = id === "pool-left" ? "left" : id === "pool-right" ? "right" : null;
+  if (!side) return null;
+  const mine = s[side];
+  const other = s[side === "left" ? "right" : "left"];
+  if (s.solo || mine) return names ? `${names} · 按 E 观战` : `${mine} 的球位 · 按 E 观战`;
+  return other ? `${other} 在等对手 · 按 E 入座开局` : "空位 · 按 E 入座，也可单人练习";
+}
 
 function Key({ children }: { children: string }) {
   return <kbd className="lobby-key">{children}</kbd>;
@@ -130,6 +147,9 @@ export function ChatLobby() {
   // 重试时递增，LobbyCanvas 据此重建游戏
   const [gameKey, setGameKey] = useState(0);
   const coarse = useSyncExternalStore(subscribeCoarse, coarseSnapshot, coarseServerSnapshot);
+  const [poolSummary, setPoolSummary] = useState<PoolSummary | null>(null);
+
+  useEffect(() => onPoolSummary(setPoolSummary), []);
 
   // 离开页面时面板可能仍处于打开状态，重新进入时复位共享状态
   useEffect(() => {
@@ -403,7 +423,7 @@ export function ChatLobby() {
             <Key>E</Key>
             <span className="lobby-prompt-text">
               {nearby.kind === "machine" ? "使用 " : null}<strong>{nearby.title}</strong>
-              <span className="lobby-prompt-hint">{nearby.hint}</span>
+              <span className="lobby-prompt-hint">{(poolSummary && poolHint(nearby.id, poolSummary)) ?? nearby.hint}</span>
             </span>
             {coarse ? (
               <button type="button" className="lobby-prompt-button" onClick={() => { bridge.interactQueued = true; }}>

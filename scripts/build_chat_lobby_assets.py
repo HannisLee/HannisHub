@@ -1083,7 +1083,13 @@ def build_hall() -> Room:
     room.action("pinball", "弹珠机", "弹一把", [gx0 + 48, 286, 22, 14])
     pool_x = gx0 + 92
     room.put("pool_full", pool_x, 352, foot=30)
-    room.action("pool", "台球桌", "打一杆", [pool_x - 6, 352, 60, 14])
+    # 台球桌（中式八球）：左右两端为两个球位（站进去按 E 入座），正面按 E 观战 / 单人练习；只有正面一块铭牌
+    room.machines.append({
+        "id": "pool", "title": "台球桌", "hint": "中式八球 · 观战或单人练习",
+        "zone": [pool_x - 6, 352, 60, 14], "signX": pool_x + 23, "signY": 296,
+    })
+    room.machines.append({"id": "pool-left", "title": "台球桌 · 左侧球位", "hint": "入座对战", "zone": [pool_x - 22, 326, 21, 26]})
+    room.machines.append({"id": "pool-right", "title": "台球桌 · 右侧球位", "hint": "入座对战", "zone": [pool_x + 48, 326, 18, 26]})
     room.put("pool_rack", pool_x + 66, 330, foot=8)
     # 下沿两组「蛋椅 - 小圆桌 - 蛋椅」，与中下茶水间的桌椅同一排、同样的摆法：两把蛋椅开口相对、侧坐面朝圆桌
     tbm = floor_bottom - 10

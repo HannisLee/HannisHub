@@ -1,4 +1,5 @@
 import { lobbySocketUrl, type LobbyLocalState, type LobbyServerMessage } from "../../../../lib/chat-lobby";
+import { bindPoolSender, emitPool } from "../../../../lib/lobby-pool";
 
 /** 位置变化时最短发送间隔（约 10 次/秒） */
 const SEND_INTERVAL_MS = 100;
@@ -26,7 +27,16 @@ export class PresenceClient {
   private sentAt = 0;
 
   constructor(private readonly onMessage: (message: LobbyServerMessage) => void) {
+    bindPoolSender(payload => this.sendRaw(payload));
     this.connect();
+  }
+
+  /** 台球桌等附加功能的原样发送：连接未打开时返回 false */
+  private sendRaw(payload: object): boolean {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(payload));
+    return true;
   }
 
   private connect() {
@@ -44,12 +54,15 @@ export class PresenceClient {
       // 新连接立即上报一次当前状态
       this.sentKey = "";
       this.flush(true);
+      // 重连后打开着的台球面板需要重新订阅球桌
+      emitPool({ type: "pool", ev: "reconnect" });
     };
     socket.onmessage = event => {
       if (typeof event.data !== "string") return;
       try {
         const message = JSON.parse(event.data);
         if (message.type === "private-chat") window.dispatchEvent(new Event("lobby-private-chat"));
+        else if (message.type === "pool" || message.type === "pool-summary") emitPool(message);
         else this.onMessage(message as LobbyServerMessage);
       } catch {
         // 忽略无法解析的消息
@@ -115,6 +128,7 @@ export class PresenceClient {
 
   destroy() {
     this.destroyed = true;
+    bindPoolSender(null);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     const socket = this.socket;

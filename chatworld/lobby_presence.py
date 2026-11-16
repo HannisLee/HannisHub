@@ -24,6 +24,8 @@
   - {"type": "notes"}：留言板有人贴或撕便签，客户端重新读取 /api/chat-lobby/notes（发给所有连接）
   - {"type": "desks"}：工位认领有变化，客户端重新读取 /api/chat-lobby/desks（发给所有连接，包括自己）
   玩家 = {"id", "name", "avatar", "room", "x", "y", "dir", "moving", "pose"}
+- 台球桌（中式八球）消息 {"type": "pool", "op", ...} 交给 chatworld/lobby_pool.py 处理，协议见该文件；
+  连接建立时紧随快照发送一条 {"type": "pool-summary"}
 """
 
 from __future__ import annotations
@@ -42,13 +44,15 @@ from fastapi import WebSocket
 from starlette.concurrency import run_in_threadpool
 
 from chatworld import lobby_profile
+from chatworld.lobby_pool import PoolTable
 
 PUBLIC_ROOMS = frozenset({"foyer", "hall"})
 PRIVATE_ROOMS = frozenset({"room"})
 FACINGS = frozenset({"down", "up", "left", "right"})
 
 MAX_CONNECTIONS = 200
-MAX_MESSAGE_CHARS = 512
+# 台球击球消息携带整桌球的坐标，单条上限放宽到 4096 字符
+MAX_MESSAGE_CHARS = 4096
 # 客户端静止时每 5 秒发一次心跳，超过该时长没有任何消息视为连接失效
 IDLE_TIMEOUT_SECONDS = 30.0
 # 最后一个连接断开后延迟广播下线，刷新页面或短暂断网重连不会触发「离开」
@@ -132,6 +136,7 @@ class LobbyPresence:
         # 角色编号在进程生命周期内对同一账号保持不变，重连后其他人看到的仍是同一个角色
         self.ids: dict[str, str] = {}
         self.connections: set[Connection] = set()
+        self.pool = PoolTable(send=self._enqueue, connections=lambda: list(self.connections))
 
     # ---------- 序列化 ----------
 
@@ -224,6 +229,7 @@ class LobbyPresence:
 
     def _detach(self, conn: Connection) -> None:
         self.connections.discard(conn)
+        self.pool.drop(conn)
         member = self.members.get(conn.username)
         if member is None or conn not in member.connections:
             return
@@ -243,6 +249,8 @@ class LobbyPresence:
         if member.connections or self.members.get(member.username) is not member:
             return
         del self.members[member.username]
+        if self.pool.release(member.username):
+            self.pool.notify()
         if member.visible:
             self._broadcast(member, {"type": "leave", "id": member.id})
 
@@ -275,6 +283,12 @@ class LobbyPresence:
         conn.say_at = now
         self._broadcast(member, {"type": "say", "id": member.id, "text": text})
 
+    def _handle_pool(self, conn: Connection, data: dict[str, Any]) -> None:
+        """台球桌消息：入座时使用该账号在大厅中的名字。"""
+        member = self.members.get(conn.username)
+        if member is not None:
+            self.pool.handle(conn, member.name, data)
+
     def notify_private(self, owners: set[str]) -> None:
         """私聊变化只通知参与账号的连接。"""
         for conn in list(self.connections):
@@ -298,6 +312,7 @@ class LobbyPresence:
             return
         member.name = profile["name"]
         member.avatar = profile["avatar"]
+        self.pool.rename(username, member.name)
         if member.visible:
             self._broadcast(member, {"type": "profile", "id": member.id, "name": member.name, "avatar": member.avatar})
 
@@ -321,6 +336,7 @@ class LobbyPresence:
         conn = Connection(websocket=websocket, username=username)
         self._attach(conn, profile)
         conn.queue.put_nowait(self._snapshot(username))
+        conn.queue.put_nowait(self.pool.summary_text())
         sender = asyncio.create_task(self._sender(conn))
         try:
             while not sender.done():
@@ -339,6 +355,8 @@ class LobbyPresence:
                     self._handle_emote(conn, data)
                 elif data.get("type") == "say":
                     self._handle_say(conn, data)
+                elif data.get("type") == "pool":
+                    self._handle_pool(conn, data)
         except Exception:
             # 断开、超时、发送了二进制帧等都按断开处理
             pass
