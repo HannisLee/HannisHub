@@ -275,6 +275,12 @@ class LobbyPresence:
         conn.say_at = now
         self._broadcast(member, {"type": "say", "id": member.id, "text": text})
 
+    def notify_private(self, owners: set[str]) -> None:
+        """私聊变化只通知参与账号的连接。"""
+        for conn in list(self.connections):
+            if conn.username in owners:
+                self._enqueue(conn, '{"type":"private-chat"}')
+
     def notify_all(self, kind: str) -> None:
         """通知所有连接（包括触发者自己的其他标签页）重新读取某类共享数据（工位 desks、留言板 notes）。"""
         text = json.dumps({"type": kind})

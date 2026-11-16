@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { PrivateNotice } from "./private-panel";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   claimLobbyDesk, fetchLobbyDesks, fetchLobbyProfile, LOBBY_SAY_MAX, QUICK_EMOTES, releaseLobbyDesk, type LobbyDeskState, type LobbyProfile,
@@ -28,7 +29,7 @@ const ROOM_GUIDES: Record<string, string> = {
 };
 
 /** 工位待办面板（在自己的工位坐下时打开） */
-const TODO_MACHINE: MachineInfo = { id: "todo", title: "工位待办", hint: "今天要做的事，只有自己看得到" };
+const TODO_MACHINE: MachineInfo = { id: "todo", title: "工位电脑", hint: "今天要做的事，只有自己看得到" };
 
 /** 快捷表情按钮的文字（与数字键 1–4 对应） */
 const QUICK_EMOTE_LABELS: Record<(typeof QUICK_EMOTES)[number], string> = {
@@ -190,6 +191,15 @@ export function ChatLobby() {
     setActive(machine);
   }, []);
 
+  useEffect(() => {
+    const open = (event: Event) => {
+      if (active || claiming || saying) return;
+      openMachine({id: "private", title: "私聊", hint: (event as CustomEvent<string>).detail});
+    };
+    window.addEventListener("lobby-private-open", open);
+    return () => window.removeEventListener("lobby-private-open", open);
+  }, [active, claiming, saying, openMachine]);
+
   const closeMachine = useCallback(() => {
     bridge.paused = false;
     setActive(null);
@@ -337,6 +347,7 @@ export function ChatLobby() {
         </div>
       </header>}
 
+      <PrivateNotice />
       <div className="lobby-stage">
         {profileReady ? <LobbyCanvas key={gameKey} bridge={bridge} events={events} /> : <div className="lobby-canvas-host" />}
 

@@ -1624,3 +1624,23 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .document-file-download { display: flex; align-items: center; justify-content: center; flex: 0 0 40px; color: var(--color-text-secondary); }
 .document-file-download:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .document-file-download:focus-visible { outline: 1px solid var(--color-brand); outline-offset: -2px; }
+
+/* 私聊与工位电脑沿用暖黑界面变量。 */
+.private-panel { display:flex; gap:var(--space-4); min-height:400px; height:65vh; }
+.private-panel aside { width:240px; overflow:auto; border-right:1px solid var(--color-border); padding-right:var(--space-4); }
+.private-panel section { flex:1; min-width:0; display:flex; flex-direction:column; }
+.private-panel h2 { font-family:var(--font-display); font-size:24px; }
+.private-panel button,.private-tabs button { min-height:40px; padding:8px 16px; border:1px solid var(--color-border); border-radius:var(--radius-md); background:var(--color-surface); color:var(--color-text-primary); cursor:pointer; }
+.private-panel aside button { display:block; width:100%; text-align:left; margin-top:8px; }
+.private-panel small { display:block; color:var(--color-text-secondary); }
+.private-panel aside small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.private-panel [aria-pressed=true],.private-tabs [aria-pressed=true] { border-color:var(--color-brand); }
+.private-messages { flex:1; overflow:auto; padding:16px 0; }
+.private-messages article { margin:8px 0; padding:12px; border:1px solid var(--color-border); border-radius:var(--radius-md); }
+.private-messages article[data-outgoing=true] { background:var(--color-surface-hover); }
+.private-messages p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.private-panel form { display:flex; gap:8px; }
+.private-panel textarea,.private-panel input { width:100%; background:var(--color-bg); color:var(--color-text-primary); border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:8px; }
+.private-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.private-notice { color:var(--color-brand); font-size:12px; }
+@media(max-width:767px) { .private-panel { flex-direction:column; } .private-panel aside { width:100%; max-height:160px; border-right:0; } .private-panel section { min-height:240px; } }

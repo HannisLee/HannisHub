@@ -986,6 +986,21 @@ export class LobbyScene extends Phaser.Scene {
       return;
     }
 
+    const facing = this.player.facingDir;
+    const vector = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[facing];
+    const targets = [...this.remotes.values()].filter(remote => {
+      const dx = remote.x - feetX, dy = remote.y - feetY;
+      const dot = dx * vector[0] + dy * vector[1];
+      return !remote.leaving && remote.room === roomId && dx * dx + dy * dy <= 32 ** 2
+        && dot > 0 && Math.abs(dx * vector[1] - dy * vector[0]) <= dot;
+    }).sort((a, b) => Math.hypot(a.x-feetX,a.y-feetY)-Math.hypot(b.x-feetX,b.y-feetY) || a.id.localeCompare(b.id));
+    if (targets[0]) {
+      const target = targets[0];
+      this.setNearby({kind: "machine", id: "private", title: `与 ${target.name} 私聊`, hint: "按 E 私聊"});
+      this.prompt.setPosition(this.player.x, this.player.y - 40);
+      if (interact) window.dispatchEvent(new CustomEvent("lobby-private-open", {detail: target.id}));
+      return;
+    }
     const item = this.findInteractable(feetX, feetY);
     this.setNearby(item ? this.describe(item) : null);
     if (item) {

@@ -15,6 +15,8 @@ auth.SETTINGS_PATH = work / "settings.json"
 if not auth.SETTINGS_PATH.exists():
     auth.configure_admin("lihan", "e2e-test-pass-123")
     auth.create_user("guest", "e2e-test-pass-123")
+from chatworld import lobby_profile
+lobby_profile.PROFILES_PATH = work / "profiles.json"
 import app as hub
 import uvicorn
 uvicorn.run(hub.app, host="127.0.0.1", port=port, lifespan="off", log_level="warning")

@@ -37,7 +37,7 @@ export class RemotePlayer {
   /** 正在自动离场（下线） */
   leaving = false;
   private label: Phaser.GameObjects.Container;
-  private name: string;
+  name: string;
   private skin: string;
   /** 形象去重键（同款搭配共用一张贴图） */
   avatarKey = "";

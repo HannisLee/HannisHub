@@ -127,6 +127,19 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX terminal_command_groups_owner ON terminal_command_groups(owner, created_at);
     """,
+    # v5：私聊联系人与按账号隔离的消息副本
+    """
+    CREATE TABLE lobby_contacts (owner TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE);
+    CREATE TABLE lobby_messages (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, peer TEXT NOT NULL,
+        request_id TEXT NOT NULL, outgoing INTEGER NOT NULL, text TEXT NOT NULL,
+        created_at REAL NOT NULL, UNIQUE(owner, peer, request_id, outgoing)
+    );
+    CREATE INDEX lobby_messages_owner ON lobby_messages(owner, peer, seq);
+    CREATE TABLE lobby_reads (owner TEXT NOT NULL, peer TEXT NOT NULL, seq INTEGER NOT NULL,
+        PRIMARY KEY(owner, peer));
+    """,
+
 ]
 
 _init_lock = threading.Lock()

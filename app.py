@@ -36,7 +36,7 @@ from core.auth import (
     validate_username,
 )
 from model_manager import ai_settings
-from chatworld import chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
+from chatworld import private_chat, chat_room, lobby_desks, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
 from server import terminal_commands, terminal_manager
 from core.compression import SelectiveGZipMiddleware
@@ -772,6 +772,49 @@ async def file_manager_remote_upload_abort(
     return JSONResponse(await run_in_threadpool(remote_files.abort_chunked_upload, upload_id, request, reason))
 
 
+@app.get("/api/chat-lobby/private-chat/contacts")
+async def private_contacts(request: Request):
+    """读取私聊联系人及未读数。"""
+    return await run_in_threadpool(private_chat.contacts, _require_user(request))
+
+
+@app.get("/api/chat-lobby/private-chat/{contact}/messages")
+async def private_messages(contact: str, request: Request, before: int = 0):
+    """分页读取当前账号的私聊。"""
+    return await run_in_threadpool(private_chat.messages, _require_user(request), contact, before)
+
+
+@app.post("/api/chat-lobby/private-chat/{contact}/open")
+async def private_open(contact: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """验证场景中的私聊入口。"""
+    owner = _require_user(request)
+    peer = await run_in_threadpool(private_chat.peer_for, owner, contact)
+    allowed = await run_in_threadpool(private_chat.available, owner, peer, payload.get("source"), payload.get("opening", False))
+    return {"allowed": allowed}
+
+
+@app.post("/api/chat-lobby/private-chat/{contact}/messages")
+async def private_send(contact: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """私聊落库后定向通知双方。"""
+    owner = _require_user(request)
+    result = await run_in_threadpool(private_chat.send, owner, contact, payload)
+    peer = await run_in_threadpool(private_chat.peer_for, owner, contact)
+    lobby_presence.presence.notify_private({owner, peer})
+    return result
+
+
+@app.put("/api/chat-lobby/private-chat/{contact}/read")
+async def private_read(contact: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """单调更新已读位置。"""
+    owner = _require_user(request)
+    seq = payload.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        raise HTTPException(400, "已读位置无效")
+    await run_in_threadpool(private_chat.read, owner, contact, seq)
+    lobby_presence.presence.notify_private({owner})
+    return {"ok": True}
+
+
 @app.get("/api/chat-lobby/profile")
 async def chat_lobby_profile(request: Request):
     """读取当前账号在聊天大厅中的名字与像素形象。"""
@@ -1134,6 +1177,7 @@ async def users_delete(username: str, request: Request):
     await run_in_threadpool(terminal_commands.purge_user, username)
     await run_in_threadpool(lobby_desks.purge_user, username)
     await run_in_threadpool(lobby_notes.purge_user, username)
+    await run_in_threadpool(private_chat.purge_user, username)
     lobby_presence.presence.notify_desks()
     lobby_presence.presence.notify_all("notes")
     return JSONResponse({"ok": True})

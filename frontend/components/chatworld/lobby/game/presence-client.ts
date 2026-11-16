@@ -48,7 +48,9 @@ export class PresenceClient {
     socket.onmessage = event => {
       if (typeof event.data !== "string") return;
       try {
-        this.onMessage(JSON.parse(event.data) as LobbyServerMessage);
+        const message = JSON.parse(event.data);
+        if (message.type === "private-chat") window.dispatchEvent(new Event("lobby-private-chat"));
+        else this.onMessage(message as LobbyServerMessage);
       } catch {
         // 忽略无法解析的消息
       }

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { DeskComputer, PrivatePanel } from "./private-panel";
 import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setChatEmbedded } from "../../../lib/chat-notify";
@@ -16,7 +17,6 @@ const AsrPanel = dynamic(() => import("../../llama/asr-panel").then(m => m.AsrPa
 const OcrPanel = dynamic(() => import("../../llama/ocr-panel").then(m => m.OcrPanel), { ssr: false, loading: PanelLoading });
 const ChatRoom = dynamic(() => import("../room/chat-room").then(m => m.ChatRoom), { ssr: false, loading: PanelLoading });
 const NotesBoard = dynamic(() => import("./notes-board").then(m => m.NotesBoard), { ssr: false, loading: PanelLoading });
-const TodoPanel = dynamic(() => import("../todo/todo-panel").then(m => m.TodoPanel), { ssr: false, loading: PanelLoading });
 
 /** 内嵌聊天室：打开期间暂停页面级的后台新消息检查，避免对正在看的消息弹提示、响提示音 */
 function ChatPanel() {
@@ -32,7 +32,8 @@ const MACHINES: Record<string, { Panel: ComponentType; href?: string; fill?: boo
   asr: { Panel: AsrPanel, href: "/llama/asr" },
   ocr: { Panel: OcrPanel, href: "/llama/ocr" },
   chat: { Panel: ChatPanel, href: "/chat", fill: true },
-  todo: { Panel: TodoPanel, href: "/todo" },
+  private: { Panel: DeskComputer },
+  todo: { Panel: DeskComputer, href: "/todo" },
   notes: { Panel: NotesBoard },
 };
 
@@ -75,7 +76,7 @@ export function MachineDialog({ machine, onClose, actions }: MachineDialogProps)
           <div className="lobby-machine-name">
             <span className="lobby-dot" aria-hidden="true" />
             <span id="lobby-machine-title">{machine.title}</span>
-            <span className="lobby-machine-hint">{machine.hint}</span>
+            <span className="lobby-machine-hint">{machine.id === "private" ? "靠近交流 · 离开结束" : machine.hint}</span>
           </div>
           <div className="lobby-machine-actions">
             {actions}
@@ -87,7 +88,7 @@ export function MachineDialog({ machine, onClose, actions }: MachineDialogProps)
           </div>
         </header>
         <div className={`lobby-machine-body${fill ? " is-fill" : ""}`}>
-          <Panel />
+          {machine.id === "private" ? <PrivatePanel sceneId={machine.hint} onClose={onClose} /> : machine.id === "todo" ? <DeskComputer onClose={onClose} /> : <Panel />}
         </div>
       </section>
     </div>,
