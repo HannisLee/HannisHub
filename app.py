@@ -40,6 +40,7 @@ from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lo
 from model_manager import ocr_records
 from server import terminal_commands, terminal_client
 from core.compression import SelectiveGZipMiddleware
+from core.frontend import FrontendCacheMiddleware, FrontendStaticFiles
 import model_manager.app as model_manager_app
 from server.file_manager import (
     add_favorite,
@@ -157,6 +158,7 @@ app.add_middleware(
 )
 # 最后添加的中间件位于最外层：压缩在认证之后作用于最终响应，覆盖所有挂载的子服务
 app.add_middleware(SelectiveGZipMiddleware)
+app.add_middleware(FrontendCacheMiddleware)
 
 def _frontend_page(route: str) -> FileResponse | None:
     """返回静态导出的统一前端页面；尚未构建时交由旧页面兼容。"""
@@ -1268,4 +1270,7 @@ app.mount("/prompt", prompt_service_app.app)
 
 # 静态文件挂载必须在全部 API 与子服务之后，防止根路径覆盖业务路由。
 if FRONTEND_OUT_DIR.is_dir():
+    app.mount("/_next/static", FrontendStaticFiles(
+        FRONTEND_OUT_DIR / "_next" / "static", ROOT_DIR / "frontend" / ".static-cache",
+    ), name="frontend-static")
     app.mount("/", StaticFiles(directory=FRONTEND_OUT_DIR, html=True), name="frontend")

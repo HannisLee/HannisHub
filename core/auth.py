@@ -376,6 +376,11 @@ REGULAR_HOME = "/chat-lobby"
 
 def _regular_user_allowed(path: str, method: str) -> bool:
     """普通账号默认拒绝管理接口，只放行页面所需接口。"""
+    # Next.js 静态导出的导航数据与所属页面使用同一权限，不能放行任意 .txt。
+    page_path, _, filename = path.rpartition("/")
+    if filename == "index.txt" or (filename.startswith("__next.") and filename.endswith(".txt")):
+        if page_path in {"/chat", "/chat-lobby", "/llama/asr", "/llama/ocr", "/todo"}:
+            return method in {"GET", "HEAD"}
     if path in {"/chat", "/chat/", "/chat-lobby", "/chat-lobby/", "/llama/asr", "/llama/asr/", "/llama/ocr", "/llama/ocr/",
                 "/todo", "/todo/"}:
         return method in {"GET", "HEAD"}

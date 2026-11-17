@@ -52,6 +52,19 @@ class SecurityTest(unittest.TestCase):
         finally:
             clear_login_failures(key)
 
+    def test_regular_frontend_navigation(self):
+        with patch('core.auth.current_username', return_value='other'):
+            for page in ['/chat', '/chat-lobby', '/llama/asr', '/llama/ocr', '/todo']:
+                for filename in ['index.txt', '__next._tree.txt', '__next.%21KGNoYXR3b3JsZCk.chat.__PAGE__.txt']:
+                    path = f'{page}/{filename}'
+                    self.assertEqual(self.client.get(path).status_code, 200, path)
+                    self.assertEqual(self.client.post(path, headers={'Origin': 'http://testserver'}).status_code, 403, path)
+            for path in ['/settings/index.txt', '/terminal/__next._tree.txt', '/index.txt',
+                         '/chat/secret.txt', '/chat/nested/index.txt', '/llama/asr-other/index.txt']:
+                self.assertEqual(self.client.get(path).status_code, 403, path)
+        with patch('core.auth.current_username', return_value=None):
+            self.assertEqual(self.client.get('/chat/index.txt').status_code, 401)
+
     def test_start_rejects_other_services(self):
         async def check():
             request = SimpleNamespace(session={'user': 'other'})

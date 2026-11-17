@@ -17,6 +17,7 @@ ai_settings.json.tmp
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/.static-cache/
 frontend/tsconfig.tsbuildinfo
 frontend/.eslintcache
 data/
