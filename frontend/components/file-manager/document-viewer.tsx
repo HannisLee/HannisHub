@@ -12,6 +12,8 @@ import type {
 } from "../../lib/types";
 import { Button, EmptyState, ErrorState, LoadingState } from "../ui/primitives";
 import { FileConnectionBar } from "./file-connection-bar";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 
 type MarkdownLinkHandler = (path: string) => void;
 
@@ -131,6 +133,24 @@ function normalizeLocalReference(reference: string, sourcePath: string): string 
   return parts.join("/");
 }
 
+/** 仅将 KaTeX 生成的可信标记交给浏览器；错误公式保留原文，不影响其余文档。 */
+function MarkdownMath({ source, display = false, inline = false }: { source: string; display?: boolean; inline?: boolean }) {
+  const rendered = useMemo(() => {
+    try {
+      return { html: katex.renderToString(source, { displayMode: display, trust: false, strict: "ignore", maxSize: 20 }), error: "" };
+    } catch {
+      return { html: "", error: "公式无法解析，显示 LaTeX 原文" };
+    }
+  }, [source, display]);
+  const Tag = display && !inline ? "div" : "span";
+  return rendered.error
+    ? <Tag className={`markdown-math${display ? " is-display" : ""} markdown-math-error`} title={rendered.error}>{source}</Tag>
+    : <Tag className={`markdown-math${display ? " is-display" : ""}`} dangerouslySetInnerHTML={{ __html: rendered.html }} />;
+}
+
+// 公式先于强调符号匹配，避免下标、星号与转义字符被 Markdown 拆开；代码仍作为完整 token 保留。
+const INLINE_TOKEN_PATTERN = /(!?\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)|`+[^`]+`+|\\[$\\]|\$\$(?:\\[\s\S]|[^$\\])+?\$\$|\\\[(?:\\(?!\])[^]|[^\\])+?\\\]|\\\((?:\\(?!\))[^]|[^\\])+?\\\)|\$(?!\s|\$)(?:\\[^]|[^$\\\n])*?[^\s\\$]\$(?!\d)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+
 function inlineMarkdown(
   value: string,
   rootIndex: number,
@@ -139,13 +159,17 @@ function inlineMarkdown(
   keyPrefix: string,
   connectionId?: string,
 ): ReactNode[] {
-  const tokenPattern = /(!?\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+  const tokenPattern = new RegExp(INLINE_TOKEN_PATTERN);
   const result: ReactNode[] = [];
+  const appendText = (text: string) => text.split("\n").forEach((part, index) => {
+    if (index) result.push(<br key={`${keyPrefix}-br-${result.length}`} />);
+    result.push(part);
+  });
   let cursor = 0;
   let match: RegExpExecArray | null;
   let tokenIndex = 0;
   while ((match = tokenPattern.exec(value))) {
-    if (match.index > cursor) result.push(value.slice(cursor, match.index));
+    if (match.index > cursor) appendText(value.slice(cursor, match.index));
     const token = match[0];
     const key = `${keyPrefix}-${tokenIndex++}`;
     const image = token.match(/^!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
@@ -197,7 +221,14 @@ function inlineMarkdown(
         );
       }
     } else if (token.startsWith("`")) {
-      result.push(<code key={key}>{token.slice(1, -1)}</code>);
+      result.push(<code key={key}>{token.replace(/^`+|`+$/g, "")}</code>);
+    } else if (token === "\\$" || token === "\\\\") {
+      result.push(token.slice(1));
+    } else if (token.startsWith("$") || token.startsWith("\\(") || token.startsWith("\\[")) {
+      const display = token.startsWith("$$") || token.startsWith("\\[");
+      const delimiterLength = token.startsWith("$") && !display ? 1 : 2;
+      // 行内出现的展示公式使用 span，保持段落 HTML 有效。
+      result.push(<MarkdownMath key={key} source={token.slice(delimiterLength, -delimiterLength)} display={display} inline />);
     } else if (token.startsWith("**") || token.startsWith("__")) {
       result.push(<strong key={key}>{inlineMarkdown(token.slice(2, -2), rootIndex, sourcePath, onOpenMarkdown, `${key}-strong`, connectionId)}</strong>);
     } else {
@@ -205,12 +236,14 @@ function inlineMarkdown(
     }
     cursor = match.index + token.length;
   }
-  if (cursor < value.length) result.push(value.slice(cursor));
+  if (cursor < value.length) appendText(value.slice(cursor));
   return result;
 }
 
 function splitTableRow(line: string): string[] {
-  return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+  const tokens: string[] = [];
+  const protectedLine = line.trim().replace(/^\||\|$/g, "").replace(INLINE_TOKEN_PATTERN, token => `\u0000${tokens.push(token) - 1}\u0000`);
+  return protectedLine.split("|").map(cell => cell.replace(/\u0000(\d+)\u0000/g, (_, index) => tokens[Number(index)]).trim());
 }
 
 function isTableDivider(line: string): boolean {
@@ -218,7 +251,7 @@ function isTableDivider(line: string): boolean {
 }
 
 function isBlockStart(line: string): boolean {
-  return /^\s*(#{1,6}\s+|```|~~~|>\s?|[-*+]\s+|\d+\.\s+|([-*_])(?:\s*\2){2,}\s*$)/.test(line);
+  return /^\s*(\$\$|\\\[|#{1,6}\s+|```|~~~|>\s?|[-*+]\s+|\d+\.\s+|([-*_])(?:\s*\2){2,}\s*$)/.test(line);
 }
 
 function MarkdownContent({
@@ -252,6 +285,24 @@ function MarkdownContent({
       continue;
     }
     const key = `block-${blockIndex++}`;
+    const mathOpening = line.match(/^\s*(\$\$|\\\[)/);
+    if (mathOpening) {
+      const closing = mathOpening[1] === "$$" ? "$$" : "\\]";
+      const mathLines = [line.slice(mathOpening[0].length)];
+      let end = index;
+      // 只接受第一个结束标记后没有正文的公式块，未闭合时继续按普通文本显示。
+      const closingPattern = closing === "$$" ? /(?<!\\)\$\$/ : /\\\]/;
+      while (!closingPattern.test(mathLines[mathLines.length - 1]) && end + 1 < lines.length) mathLines.push(lines[++end]);
+      const lastLine = mathLines[mathLines.length - 1];
+      const closingIndex = lastLine.search(closingPattern);
+      if (closingIndex >= 0 && !lastLine.slice(closingIndex + closing.length).trim()) {
+        mathLines[mathLines.length - 1] = lastLine.slice(0, closingIndex);
+        const source = mathLines.join("\n").trim();
+        blocks.push(<MarkdownMath key={key} source={source} display />);
+        index = end + 1;
+        continue;
+      }
+    }
     const fence = line.match(/^\s*(```+|~~~+)\s*([^\s]*)/);
     if (fence) {
       const marker = fence[1];
@@ -279,7 +330,7 @@ function MarkdownContent({
     if (line.startsWith(">")) {
       const quote: string[] = [];
       while (index < lines.length && lines[index].startsWith(">")) quote.push(lines[index++].replace(/^>\s?/, ""));
-      blocks.push(<blockquote key={key}>{quote.map((part, quoteIndex) => <span key={`${key}-${quoteIndex}`}>{inline(part, `${key}-${quoteIndex}`)}{quoteIndex < quote.length - 1 ? <br /> : null}</span>)}</blockquote>);
+      blocks.push(<blockquote key={key}><MarkdownContent content={quote.join("\n")} rootIndex={rootIndex} sourcePath={sourcePath} onOpenMarkdown={onOpenMarkdown} connectionId={connectionId} /></blockquote>);
       continue;
     }
     if (line.includes("|") && isTableDivider(lines[index + 1] || "")) {
@@ -308,7 +359,7 @@ function MarkdownContent({
     const paragraph: string[] = [line];
     index += 1;
     while (index < lines.length && lines[index].trim() && !isBlockStart(lines[index]) && !(lines[index].includes("|") && isTableDivider(lines[index + 1] || ""))) paragraph.push(lines[index++]);
-    blocks.push(<p key={key}>{paragraph.map((part, paragraphIndex) => <span key={`${key}-${paragraphIndex}`}>{inline(part, `${key}-${paragraphIndex}`)}{paragraphIndex < paragraph.length - 1 ? <br /> : null}</span>)}</p>);
+    blocks.push(<p key={key}>{inline(paragraph.join("\n"), key)}</p>);
   }
   return <article className="markdown-content">{blocks}</article>;
 }

@@ -2,6 +2,42 @@
 // PW_CORE 指向 playwright-core，CHROME 可指定浏览器，HUB_PORT 默认 18094。
 const { chromium } = require(process.env.PW_CORE);
 const assert = require('node:assert/strict');
+// 同时覆盖四种公式分隔符、Markdown 容器、错误降级与代码保护。
+const mathDocument = [
+ '# 测试文档 $x_i^2$',
+ String.raw`行内 $E=mc^2$，括号 \(\frac{a_1}{b_2}\)，单字母 $x$，**加粗 $z_1$**。`,
+ '',
+ '$$',
+ String.raw`\begin{aligned} a_1 &= \sum_{i=1}^{n} x_i \\ b_2 &= \sqrt{2} \end{aligned}`,
+ '$$',
+ '',
+ String.raw`\[\begin{pmatrix}1 & 2 \\ 3 & 4\end{pmatrix}\]`,
+ '',
+ '- 列表 $a_b$ 与 $c_d$',
+ '',
+ '> 引用公式',
+ '> $$',
+ String.raw`> \int_0^1 x\,dx`,
+ '> $$',
+ '',
+ '| 公式 | 说明 |',
+ '| --- | --- |',
+ String.raw`| $|x|$ | 绝对值 |`,
+ '',
+ String.raw`代码：\`$raw_1$\`，价格 \$5 和 \$10，未闭合 $oops`,
+ '',
+ '```latex',
+ String.raw`$$\frac{raw}{code}$$`,
+ '```',
+ '',
+ String.raw`错误 $\frac{$，后续公式 $y^2$。`,
+ '',
+ String.raw`安全 $\href{javascript:alert(1)}{x}$`,
+ '',
+ '$$' + Array.from({length:40}, (_, i) => `x_{${i}}`).join(' + ') + '$$',
+ '',
+ '公式之后的正文。',
+].join('\n').replace(/\\`/g, '`');
 // 构造有效的单页 PDF，避免用空文件误判浏览器预览成功。
 function makeTestPdf() {
  const objects = [
@@ -37,12 +73,37 @@ function makeTestPdf() {
    if (p.endsWith('/common-directories')) return route.fulfill({json:{directories:[]}});
    if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
    if (p.endsWith('/directory')) { const folder = u.searchParams.get('path') || ''; const files = entries.map(e => ({...e,path:folder ? `${folder}/${e.name}` : e.path})); if (!folder) files.push({name:'sub',path:'sub',type:'directory',size:0,modified:0,extension:''}); return route.fulfill({json:{root_index:0,root_path:remote?'/home/test':'/home/test/project',path:folder,entries:files,cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
-   if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:'# 测试文档'}}); }
+   if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:mathDocument}}); }
    if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('big.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1600"><rect width="2000" height="1600"/></svg>'}); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',headers:remote?{'Content-Security-Policy':'sandbox','Content-Disposition':'inline; filename=sample.pdf'}:{'Content-Disposition':'inline; filename=sample.pdf'},body:makeTestPdf()}); }
    return route.continue();
  });
  await page.goto(`${origin}/files/documents`);
  await page.getByRole('button',{name:'photo.png'}).waitFor();
+ await page.getByRole('button',{name:'notes.md'}).click();
+ const article = page.locator('.document-reader > .markdown-content');
+ await article.locator('.katex').first().waitFor();
+ assert.equal(await article.locator('h1 .katex').count(), 1);
+ assert.equal(await article.locator('strong .katex').count(), 1);
+ assert.equal(await article.locator('li .katex').count(), 2);
+ assert.equal(await article.locator('blockquote .katex-display').count(), 1);
+ assert.equal(await article.locator('td .katex').count(), 1);
+ assert.equal(await article.locator('td').count(), 2);
+ assert.equal(await article.locator('.katex-display').count(), 4);
+ assert.ok(await article.locator('math').count() >= 12);
+ assert.equal(await article.locator('code .katex').count(), 0);
+ assert.ok((await article.innerText()).includes('$raw_1$'));
+ assert.ok((await article.innerText()).includes('价格 $5 和 $10，未闭合 $oops'));
+ assert.equal(await article.locator('pre code').innerText(), String.raw`$$\frac{raw}{code}$$`);
+ assert.equal(await article.locator('.markdown-math-error').count(), 1);
+ assert.equal(await article.locator('a[href^="javascript:"]').count(), 0);
+ await article.getByText('公式之后的正文。',{exact:true}).waitFor();
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'折叠文件列表'}).click();
+ await page.evaluate(() => document.fonts.ready);
+ assert.ok(await article.locator('.markdown-math.is-display').last().evaluate(el => el.scrollWidth > el.clientWidth));
+ assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+ await page.getByRole('button',{name:'展开文件列表'}).click();
+ await page.setViewportSize({width:1400,height:900});
  const header = page.locator('.document-index-head');
  const toggleBox = await page.getByRole('button',{name:'折叠文件列表'}).boundingBox();
  const crumbBox = await page.getByRole('navigation',{name:'当前目录路径'}).boundingBox();
@@ -141,6 +202,9 @@ function makeTestPdf() {
  await page.waitForFunction(width => Number(document.querySelector('.document-index-resizer')?.getAttribute('aria-valuenow')) === width, resized);
  await page.getByRole('tab',{name:'38服务器'}).click();
  await page.getByRole('button',{name:'sub'}).waitFor();
+ await page.getByRole('button',{name:'notes.md'}).click();
+ await article.locator('h1 .katex').waitFor();
+ assert.equal(await article.locator('.katex-display').count(), 4);
  await page.getByRole('button',{name:'复制路径'}).click();
  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~');
  await page.getByRole('button',{name:'vector.svg'}).click();
@@ -167,6 +231,6 @@ function makeTestPdf() {
  const mobilePdf = await page.locator('iframe.document-pdf-preview').boundingBox();
  assert.ok(mobilePdf.width > 200 && mobilePdf.x + mobilePdf.width <= 390);
  assert.equal(await page.locator('.document-reader-head h1').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
- console.log('通过：PDF 布局与全屏、图片缩放、路径导航和列表折叠');
+ console.log('通过：公式渲染、代码保护、错误降级与窄屏布局，PDF 全屏、图片缩放、路径导航和列表折叠');
  await browser.close();
 })().catch(error => {console.error(error);process.exit(1)});

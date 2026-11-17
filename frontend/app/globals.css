@@ -885,6 +885,10 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { margin: 1.7em 0 0.65em; color: var(--color-text-primary); font-family: var(--font-display); font-weight: 400; letter-spacing: -0.015em; line-height: 1.2; }
 .markdown-content h1 { font-size: 2em; }.markdown-content h2 { font-size: 1.6em; }.markdown-content h3 { font-size: 1.28em; }.markdown-content h4, .markdown-content h5, .markdown-content h6 { font-family: var(--font-ui); font-size: 1em; font-weight: 500; }
 .markdown-content p { margin: 0 0 1.15em; }
+.markdown-math { color: var(--color-text-primary); }
+.markdown-math.is-display { display: block; max-width: 100%; margin: 1.4em 0; overflow-x: auto; overflow-y: hidden; }
+.markdown-math.is-display .katex-display { margin: 0; padding: var(--space-2) 0; }
+.markdown-math-error { color: var(--color-warning); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
 .markdown-content a, .markdown-link-button { color: var(--color-brand); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-brand) 55%, transparent); text-underline-offset: 0.18em; }
 .markdown-link-button { padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; }
 .markdown-content code { padding: 0.14em 0.35em; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-soft); color: var(--color-text-primary); font-size: 0.84em; }
