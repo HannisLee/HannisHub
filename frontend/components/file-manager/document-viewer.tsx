@@ -148,8 +148,32 @@ function MarkdownMath({ source, display = false, inline = false }: { source: str
     : <Tag className={`markdown-math${display ? " is-display" : ""}`} dangerouslySetInnerHTML={{ __html: rendered.html }} />;
 }
 
-// 公式先于强调符号匹配，避免下标、星号与转义字符被 Markdown 拆开；代码仍作为完整 token 保留。
-const INLINE_TOKEN_PATTERN = /(!?\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)|`+[^`]+`+|\\[$\\]|\$\$(?:\\[\s\S]|[^$\\])+?\$\$|\\\[(?:\\(?!\])[^]|[^\\])+?\\\]|\\\((?:\\(?!\))[^]|[^\\])+?\\\)|\$(?!\s|\$)(?:\\[^]|[^$\\\n])*?[^\s\\$]\$(?!\d)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+/** 图片标签只提取白名单属性，再由 React 创建元素，不执行文档中的 HTML。 */
+function parseHtmlImage(token: string): { src: string; alt: string; title?: string; style: CSSProperties } | null {
+  if (!/^<img\b/i.test(token)) return null;
+  const attributes: Record<string, string> = Object.create(null);
+  const pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  for (const match of token.slice(4, -1).matchAll(pattern)) {
+    const name = match[1].toLowerCase();
+    if (!["src", "alt", "title", "width", "height"].includes(name) || name in attributes) continue;
+    attributes[name] = (match[2] ?? match[3] ?? match[4] ?? "").replace(/&(?:amp|quot|apos|lt|gt|#\d+|#x[\da-f]+);/gi, entity => {
+      const names: Record<string, string> = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" };
+      const value = entity.slice(1, -1).toLowerCase();
+      if (value in names) return names[value];
+      const codePoint = value.startsWith("#x") ? parseInt(value.slice(2), 16) : Number(value.slice(1));
+      return codePoint > 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : "�";
+    });
+  }
+  const style: CSSProperties = {};
+  for (const dimension of ["width", "height"] as const) {
+    const value = attributes[dimension];
+    if (value && /^\d+(?:\.\d+)?(?:px|%)?$/.test(value)) style[dimension] = /(?:px|%)$/.test(value) ? value : `${value}px`;
+  }
+  return { src: attributes.src || "", alt: attributes.alt || "", title: attributes.title, style };
+}
+
+// 公式和图片标签先于强调符号匹配，避免公式下标与图片路径被拆开；代码仍作为完整 token 保留。
+const INLINE_TOKEN_PATTERN = /(<img\b(?:[^"'<>]|"[^"]*"|'[^']*')*>|!?\[[^\]]*\]\((?:<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)|`+[^`]+`+|\\[$\\]|\$\$(?:\\[\s\S]|[^$\\])+?\$\$|\\\[(?:\\(?!\])[^]|[^\\])+?\\\]|\\\((?:\\(?!\))[^]|[^\\])+?\\\)|\$(?!\s|\$)(?:\\[^]|[^$\\\n])*?[^\s\\$]\$(?!\d)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/gi;
 
 function inlineMarkdown(
   value: string,
@@ -173,22 +197,27 @@ function inlineMarkdown(
     const token = match[0];
     const key = `${keyPrefix}-${tokenIndex++}`;
     const image = token.match(/^!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
+    const htmlImage = parseHtmlImage(token);
     const link = token.match(/^\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)$/);
-    if (image) {
-      const imagePath = normalizeLocalReference(image[2], sourcePath);
+    if (image || htmlImage) {
+      const reference = htmlImage?.src ?? image![2];
+      const alt = htmlImage?.alt ?? image![1];
+      const imagePath = normalizeLocalReference(reference, sourcePath);
       result.push(
         imagePath ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            className="markdown-image"
+            className={`markdown-image${htmlImage ? " is-inline" : ""}`}
             key={key}
             src={resourceUrl(rootIndex, imagePath, connectionId)}
-            alt={image[1]}
+            alt={alt}
+            title={htmlImage?.title}
+            style={htmlImage?.style}
             loading="lazy"
           />
         ) : (
           <span className="markdown-missing-image" key={key}>
-            图片：{image[1] || image[2]}
+            图片：{alt || reference}
           </span>
         )
       );

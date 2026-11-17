@@ -38,6 +38,56 @@ const mathDocument = [
  '',
  '公式之后的正文。',
 ].join('\n').replace(/\\`/g, '`');
+// 复现 38 服务器文档中的并排 HTML 图片，不将事件、样式或其他 HTML 交给浏览器执行。
+const imageDocument = [
+ '# 图片标签',
+ '<img src="1117-02-assets/05_stage1_rgb_0069.png" width="45%" alt="阶段一 RGB"> <img src="1117-02-assets/05_stage1_normal_0069.png" width="45%" alt="阶段一法线">',
+ '',
+ '<IMG',
+ ' SRC=\'photo.png\' ALT=\'多行 &quot;图&quot; &amp; 示例\' WIDTH=\'120\' HEIGHT="60" title="标题 > 示例" style="position:fixed" onload="window.htmlImageInjected=true">',
+ '',
+ '<img src=photo.png alt=无引号 width=80 />',
+ '',
+ '![Markdown 图片](photo.png)',
+ '',
+ '`<img src="code.png">`',
+ '',
+ '```html',
+ '<img src="code-block.png">',
+ '```',
+ '',
+ '<img src="javascript:alert(1)" alt="非法图片" onerror="window.htmlImageInjected=true">',
+ '',
+ '[下一篇](notes.md)',
+].join('\n');
+
+async function checkDocumentImages(page, prefix) {
+ const article = page.locator('.document-reader > .markdown-content');
+ const rgb = article.getByAltText('阶段一 RGB', {exact:true});
+ const normal = article.getByAltText('阶段一法线', {exact:true});
+ await rgb.waitFor();
+ await rgb.scrollIntoViewIfNeeded();
+ await page.waitForFunction(() => [...document.querySelectorAll('.markdown-image.is-inline')].every(el => el.complete && el.naturalWidth > 0));
+ assert.ok((await rgb.getAttribute('src')).startsWith(prefix));
+ assert.equal(new URL(await rgb.getAttribute('src'), page.url()).searchParams.get('path'), '1117-02-assets/05_stage1_rgb_0069.png');
+ const rgbBox = await rgb.boundingBox();
+ const normalBox = await normal.boundingBox();
+ const articleBox = await article.boundingBox();
+ assert.ok(Math.abs(rgbBox.y - normalBox.y) < 2);
+ assert.ok(Math.abs(rgbBox.width / articleBox.width - 0.45) < 0.01);
+ assert.ok(normalBox.x > rgbBox.x && normalBox.x + normalBox.width <= articleBox.x + articleBox.width + 1);
+ const multiline = article.getByAltText('多行 "图" & 示例', {exact:true});
+ assert.equal(await multiline.getAttribute('title'), '标题 > 示例');
+ assert.equal(await multiline.evaluate(el => el.style.width), '120px');
+ assert.equal(await multiline.evaluate(el => el.style.height), '60px');
+ assert.equal(await multiline.getAttribute('onload'), null);
+ assert.equal(await multiline.evaluate(el => el.style.position), '');
+ assert.equal(await article.locator('img').count(), 5);
+ assert.equal(await article.locator('code img').count(), 0);
+ assert.equal(await article.locator('pre code').innerText(), '<img src="code-block.png">');
+ assert.equal(await article.locator('.markdown-missing-image').innerText(), '图片：非法图片');
+ assert.equal(await page.evaluate(() => window.htmlImageInjected), undefined);
+}
 // 构造有效的单页 PDF，避免用空文件误判浏览器预览成功。
 function makeTestPdf() {
  const objects = [
@@ -64,7 +114,7 @@ function makeTestPdf() {
  const origin = `http://127.0.0.1:${process.env.HUB_PORT || '18094'}`;
  await page.goto(`${origin}/login`);
  assert.equal(await page.evaluate(async () => (await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:'lihan',password:'e2e-test-pass-123'})})).status), 200);
- const entries = ['notes.md','photo.png','vector.svg','big.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
+ const entries = ['notes.md','images.md','photo.png','vector.svg','big.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
  await page.route('**/api/file-manager/**', async route => {
    const u = new URL(route.request().url());
    const p = u.pathname;
@@ -73,7 +123,7 @@ function makeTestPdf() {
    if (p.endsWith('/common-directories')) return route.fulfill({json:{directories:[]}});
    if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
    if (p.endsWith('/directory')) { const folder = u.searchParams.get('path') || ''; const files = entries.map(e => ({...e,path:folder ? `${folder}/${e.name}` : e.path})); if (!folder) files.push({name:'sub',path:'sub',type:'directory',size:0,modified:0,extension:''}); return route.fulfill({json:{root_index:0,root_path:remote?'/home/test':'/home/test/project',path:folder,entries:files,cached:false,generated_at:0,expires_at:0,cache_ttl_seconds:0,max_entries:1000,truncated:false}}); }
-   if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:'notes.md',root_index:0,size:12,modified:1700000000,content:mathDocument}}); }
+   if (p.endsWith('/markdown')) { const path=u.searchParams.get('path'); return route.fulfill({json:{path,name:path.split('/').pop(),root_index:0,size:12,modified:1700000000,content:path.endsWith('images.md')?imageDocument:mathDocument}}); }
    if (p.endsWith('/resource')) { const path=u.searchParams.get('path'); if(path.endsWith('big.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1600"><rect width="2000" height="1600"/></svg>'}); if(path.endsWith('.svg')) return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'}); if(path.endsWith('.png')) return route.fulfill({status:200,contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=','base64')}); if(path.endsWith('.pdf')) return route.fulfill({status:200,contentType:'application/pdf',headers:remote?{'Content-Security-Policy':'sandbox','Content-Disposition':'inline; filename=sample.pdf'}:{'Content-Disposition':'inline; filename=sample.pdf'},body:makeTestPdf()}); }
    return route.continue();
  });
@@ -104,6 +154,10 @@ function makeTestPdf() {
  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
  await page.getByRole('button',{name:'展开文件列表'}).click();
  await page.setViewportSize({width:1400,height:900});
+ await page.getByRole('button',{name:'images.md'}).click();
+ await checkDocumentImages(page, '/api/file-manager/resource?');
+ await article.getByRole('button',{name:'下一篇'}).click();
+ await article.locator('h1 .katex').waitFor();
  const header = page.locator('.document-index-head');
  const toggleBox = await page.getByRole('button',{name:'折叠文件列表'}).boundingBox();
  const crumbBox = await page.getByRole('navigation',{name:'当前目录路径'}).boundingBox();
@@ -205,6 +259,14 @@ function makeTestPdf() {
  await page.getByRole('button',{name:'notes.md'}).click();
  await article.locator('h1 .katex').waitFor();
  assert.equal(await article.locator('.katex-display').count(), 4);
+ await page.getByRole('button',{name:'images.md'}).click();
+ await checkDocumentImages(page, '/api/file-manager/remote/remote38/resource?');
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'折叠文件列表'}).click();
+ await checkDocumentImages(page, '/api/file-manager/remote/remote38/resource?');
+ assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+ await page.getByRole('button',{name:'展开文件列表'}).click();
+ await page.setViewportSize({width:1400,height:900});
  await page.getByRole('button',{name:'复制路径'}).click();
  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~');
  await page.getByRole('button',{name:'vector.svg'}).click();
@@ -231,6 +293,6 @@ function makeTestPdf() {
  const mobilePdf = await page.locator('iframe.document-pdf-preview').boundingBox();
  assert.ok(mobilePdf.width > 200 && mobilePdf.x + mobilePdf.width <= 390);
  assert.equal(await page.locator('.document-reader-head h1').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
- console.log('通过：公式渲染、代码保护、错误降级与窄屏布局，PDF 全屏、图片缩放、路径导航和列表折叠');
+ console.log('通过：本机与远程 HTML 图片、并排尺寸、多行属性与安全属性过滤，公式渲染与窄屏布局，PDF 全屏、图片缩放、路径导航和列表折叠');
  await browser.close();
 })().catch(error => {console.error(error);process.exit(1)});
