@@ -175,6 +175,50 @@ const shot=async(page,name)=>{if(shotDir)await page.screenshot({path:`${shotDir}
     assert.equal(await button.getAttribute('aria-pressed'),'true');
     await stopSong.click(); assert.equal(await pressed(),0,`${name}停播清理亮键`);
   }
+  // 教学等待正确输入；重复音必须松开再按，错误输入与长按均不跳过。
+  await page.getByLabel('音阶',{exact:true}).selectOption('pentatonic');
+  await page.getByRole('button',{name:'教学跟弹',exact:true}).click();
+  assert.equal(await page.getByLabel('音阶',{exact:true}).inputValue(),'major');
+  assert.equal(await page.getByLabel('音阶',{exact:true}).isDisabled(),true);
+  await twinkle.click();
+  const lesson=page.locator('[data-lesson-index]');
+  const next=page.locator('[data-piano-note][data-next="true"]');
+  assert.equal(await next.getAttribute('data-piano-note'),'60');
+  assert.equal(await pressed(),0,'教学不自动发音');
+  await page.keyboard.press('x');
+  assert.equal(await lesson.getAttribute('data-lesson-index'),'0','按错不前进');
+  await page.getByText('刚才的音不对，再试试标出的键。',{exact:true}).waitFor();
+  await page.keyboard.down('z');
+  assert.equal(await lesson.getAttribute('data-lesson-index'),'1');
+  await page.keyboard.down('z');
+  assert.equal(await lesson.getAttribute('data-lesson-index'),'1','重复按下事件不跳音');
+  await page.keyboard.up('z'); await page.keyboard.press('z');
+  assert.equal(await lesson.getAttribute('data-lesson-index'),'2');
+  assert.equal(await next.getAttribute('data-piano-note'),'67','提示移到下一音 G4');
+  const expected=[0,0,7,7,9,9,7,5,5,4,4,2,2,0,7,7,5,5,4,4,2,7,7,5,5,4,4,2,0,0,7,7,9,9,7,5,5,4,4,2,2,0];
+  for(let i=2;i<expected.length;i++) {
+    assert.equal(await next.getAttribute('data-piano-note'),String(60+expected[i]),`第 ${i+1} 音正确`);
+    const label=await next.getAttribute('aria-label');
+    await page.keyboard.press(label.match(/键盘 ([A-Z])/)[1].toLowerCase());
+    assert.equal(await lesson.getAttribute('data-lesson-index'),String(i+1));
+  }
+  await page.getByText('整首完成！',{exact:true}).waitFor();
+  assert.equal(await next.count(),0);
+  await twinkle.click(); assert.equal(await lesson.getAttribute('data-lesson-index'),'0','重新练习');
+  await ode.click(); assert.equal(await next.getAttribute('data-piano-note'),'64','教学切曲');
+  await key(64).click(); assert.equal(await lesson.getAttribute('data-lesson-index'),'1','点击琴键也能推进');
+  await page.getByLabel('主音',{exact:true}).selectOption('2');
+  assert.equal(await lesson.count(),0,'换调退出练习');
+  await twinkle.click(); assert.equal(await next.getAttribute('data-piano-note'),'62','跟随主音变化');
+  await stopSong.click(); assert.equal(await lesson.count(),0,'停止退出教学');
+  await twinkle.click();
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),'教学提示适配窄屏');
+  await shot(page,'piano-teaching-narrow');
+  await page.getByRole('button',{name:'自动演奏',exact:true}).click();
+  await next.waitFor({state:'detached'});
+  assert.equal(await next.count(),0,'切模式清理教学');
+  assert.equal(await page.getByLabel('音阶',{exact:true}).inputValue(),'pentatonic','恢复原音阶');
   await page.setViewportSize({width:390,height:844});
   assert.ok(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),'新增曲目控件适配窄屏');
   await shot(page,'piano-songs-narrow');

@@ -48,3 +48,14 @@
 .songs button[aria-pressed="true"] { border-color: var(--color-brand); color: var(--color-brand); }
 .songs button:disabled { opacity: .4; cursor: default; }
 .songs button:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+
+.modes { margin-top: var(--space-6); }
+.lesson { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-4); padding: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 14px; }
+.lesson strong { font-weight: 500; }
+.lesson span { color: var(--color-text-secondary); font-size: 13px; }
+.lesson kbd { display: inline-block; padding: var(--space-1) var(--space-3); border: 1px solid var(--color-brand); border-radius: var(--radius-sm); color: var(--color-brand); font-size: 22px; }
+.key[data-next="true"] { outline: 3px solid var(--color-brand); outline-offset: -4px; }
+.key[data-next="true"]::before { content: "下一键"; color: var(--color-brand); font-size: 12px; }
+.key[data-next="true"][aria-pressed="true"]::before { color: var(--color-on-light); }
+.mapping [data-next="true"] { border-color: var(--color-brand); outline: 1px solid var(--color-brand); }
+.controls select:disabled { opacity: .65; }
