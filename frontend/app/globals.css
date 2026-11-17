@@ -1359,6 +1359,7 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .terminal-tabs { display: flex; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
 .terminal-tabs::-webkit-scrollbar { display: none; }
 .terminal-tab { position: relative; display: flex; flex: 0 0 auto; max-width: 220px; align-items: center; gap: var(--space-2); height: 40px; padding: 0 var(--space-2) 0 var(--space-4); border-right: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 13px; cursor: pointer; user-select: none; transition: background-color 160ms ease, color 160ms ease; }
+.terminal-tab.is-dragging { opacity: 0.45; }
 .terminal-tab:hover { background: var(--color-surface-hover); color: var(--color-text-secondary); }
 .terminal-tab.is-active { background: var(--color-surface-soft); color: var(--color-text-primary); }
 .terminal-tab.is-active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 1px; background: var(--color-surface-soft); content: ""; }

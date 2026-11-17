@@ -19,7 +19,21 @@ import type { TerminalEndReason } from "./terminal-view";
 const TerminalView = dynamic(() => import("./terminal-view"), { ssr: false });
 
 const ACTIVE_STORAGE_KEY = "hannishub_terminal_active";
+const ORDER_STORAGE_KEY = "hannishub_terminal_order";
 const LIST_REFRESH_MS = 30_000;
+
+function orderSessions(items: LocalSession[]): LocalSession[] {
+  try {
+    const saved: unknown = JSON.parse(window.localStorage.getItem(ORDER_STORAGE_KEY) || "[]");
+    const ids = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
+    const positions = new Map(ids.map((id, index) => [id, index]));
+    return [...items].sort((a, b) => (positions.get(a.id) ?? Infinity) - (positions.get(b.id) ?? Infinity));
+  } catch { return items; }
+}
+
+function saveOrder(items: LocalSession[]): void {
+  try { window.localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(items.map(item => item.id))); } catch { /* 存储不可用时保留当前页面顺序 */ }
+}
 
 const END_NOTICE: Record<TerminalEndReason, string> = {
   exit: "已退出",
@@ -82,6 +96,7 @@ export function TerminalWorkspace() {
   const [managerOpen, setManagerOpen] = useState(false);
   const [runningCommandId, setRunningCommandId] = useState<string | null>(null);
   const [floatPosition, setFloatPosition] = useState<FloatingPoint | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const sessionsRef = useRef<LocalSession[]>([]);
   const floatDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   useEffect(() => {
@@ -97,7 +112,11 @@ export function TerminalWorkspace() {
     try {
       const data = await apiFetch<TerminalSessionList>(`${API_PATHS.terminal}/sessions`);
       setNow(Date.now());
-      setSessions(data.sessions.map(withDeadline));
+      setSessions(current => {
+        const incoming = data.sessions.map(withDeadline);
+        const currentOrder = new Map(current.map((item, index) => [item.id, index]));
+        return current.length ? incoming.sort((a, b) => (currentOrder.get(a.id) ?? Infinity) - (currentOrder.get(b.id) ?? Infinity)) : orderSessions(incoming);
+      });
       setTimeoutSeconds(data.idle_timeout_seconds);
       setError("");
       setActiveIdState(current => {
@@ -145,6 +164,20 @@ export function TerminalWorkspace() {
       window.clearInterval(interval);
     };
   }, [refreshCommands]);
+
+  function moveSession(id: string, targetId: string, after = false) {
+    setSessions(current => {
+      const from = current.findIndex(item => item.id === id);
+      if (from < 0 || id === targetId) return current;
+      const next = [...current];
+      const [item] = next.splice(from, 1);
+      const target = next.findIndex(entry => entry.id === targetId);
+      if (target < 0) return current;
+      next.splice(target + (after ? 1 : 0), 0, item);
+      saveOrder(next);
+      return next;
+    });
+  }
 
   async function createSession() {
     setCreating(true);
@@ -385,11 +418,25 @@ export function TerminalWorkspace() {
               role="tab"
               aria-selected={session.id === activeId}
               tabIndex={0}
-              className={`terminal-tab${session.id === activeId ? " is-active" : ""}`}
+              className={`terminal-tab${session.id === activeId ? " is-active" : ""}${draggingId === session.id ? " is-dragging" : ""}`}
+              draggable={editing?.id !== session.id}
+              onDragStart={event => { setDraggingId(session.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", session.id); }}
+              onDragEnd={() => setDraggingId(null)}
+              onDragOver={event => { if (draggingId && draggingId !== session.id) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
+              onDrop={event => { event.preventDefault(); if (draggingId) { const rect = event.currentTarget.getBoundingClientRect(); moveSession(draggingId, session.id, event.clientX > rect.left + rect.width / 2); } setDraggingId(null); }}
               onClick={() => setActiveId(session.id)}
-              onKeyDown={event => { if (event.key === "Enter") setActiveId(session.id); }}
+              onKeyDown={event => {
+                if (event.target !== event.currentTarget) return;
+                if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+                  event.preventDefault();
+                  const index = sessions.findIndex(item => item.id === session.id);
+                  const right = event.key === "ArrowRight";
+                  const target = sessions[index + (right ? 1 : -1)];
+                  if (target) moveSession(session.id, target.id, right);
+                } else if (event.key === "Enter") setActiveId(session.id);
+              }}
               onDoubleClick={() => setEditing({ id: session.id, value: session.title })}
-              title={`${session.title} · 双击重命名 · 约 ${formatRemaining(remainingOf(session))}后因无操作释放`}
+              title={`${session.title} · 拖动排序，Alt + 方向键调整顺序 · 双击重命名 · 约 ${formatRemaining(remainingOf(session))}后因无操作释放`}
             >
               <span className={`terminal-tab-dot${connected[session.id] ? " is-online" : ""}`} />
               {editing?.id === session.id ? (
