@@ -444,6 +444,14 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
+        # 交互文档采用无同源权限的沙箱，仅通过短期目录票据读取预览资源。
+        if path.startswith("/api/file-manager/html-preview/"):
+            from server.html_preview import authorize_scope
+            if authorize_scope(scope):
+                await self.app(scope, receive, send)
+            else:
+                await JSONResponse({"detail": "预览已过期或资源路径无效"}, status_code=401)(scope, receive, send)
+            return
         if scope.get("method") not in {"GET", "HEAD", "OPTIONS"} and not _same_origin(scope):
             await JSONResponse({"detail": "请求来源不受信任"}, status_code=403)(scope, receive, send)
             return

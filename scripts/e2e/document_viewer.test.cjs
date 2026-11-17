@@ -2,28 +2,26 @@
 // PW_CORE 指向 playwright-core，CHROME 可指定浏览器，HUB_PORT 默认 18094。
 const { chromium } = require(process.env.PW_CORE);
 const assert = require('node:assert/strict');
-const htmlDocument = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="theme.css"><h1>HTML 测试文档</h1><img src="asset.svg" alt="HTML 相对图片"><button onclick="this.textContent=\'脚本已执行\'">静态按钮</button><script>parent.document.body.dataset.htmlInjected="yes"</script>';
+const htmlDocument = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="theme.css"><h1>HTML 测试文档</h1><img src="asset.svg" alt="HTML 相对图片"><button onclick="this.textContent=\'脚本已执行\'">交互按钮</button><script>try{parent.document.body.dataset.htmlInjected="yes"}catch{document.body.dataset.isolated="yes"}addEventListener("keydown",e=>{if(e.key==="Escape")parent.postMessage({type:"hannishub-html-escape"},"*")})</script>';
 
 async function checkHtmlPreview(page, remote) {
  const iframe = page.locator('.document-html-preview');
  await iframe.waitFor();
- assert.ok((await iframe.getAttribute('src')).includes(remote ? '/remote/remote38/preview/' : '/preview/0/'));
- assert.equal(await iframe.getAttribute('sandbox'), 'allow-same-origin');
- assert.equal(await iframe.getAttribute('sandbox'), 'allow-same-origin');
- assert.ok((await iframe.getAttribute('src')).includes(remote ? '/remote/remote38/preview/' : '/preview/0/'));
+ assert.ok((await iframe.getAttribute('src')).includes(remote ? '/html-preview/test-remote/' : '/html-preview/test-local/'));
+ assert.equal(await iframe.getAttribute('sandbox'), 'allow-scripts');
  const frame = page.frameLocator('.document-html-preview');
- await frame.getByRole('heading', {name:'HTML 测试文档'}).waitFor();
- await page.waitForFunction(() => {
-  const document = window.document.querySelector('.document-html-preview')?.contentDocument;
-  return document?.querySelector('img')?.naturalWidth === 10 && getComputedStyle(document.querySelector('h1')).color === 'rgb(12, 34, 56)';
- });
- await frame.getByRole('button', {name:'静态按钮'}).click();
- assert.equal(await frame.getByRole('button', {name:'静态按钮'}).count(), 1);
+ await frame.locator('body[data-isolated="yes"]').waitFor();
+ await frame.locator('body').evaluate(() => document.readyState==='complete' ? undefined : new Promise(resolve => addEventListener('load',resolve,{once:true})));
+ await frame.locator('img').evaluate(el => el.complete && el.naturalWidth ? undefined : new Promise(resolve => el.addEventListener('load',resolve,{once:true})));
+ assert.equal(await frame.locator('img').evaluate(el => el.naturalWidth),10);
+ assert.equal(await frame.locator('h1').evaluate(el => getComputedStyle(el).color),'rgb(12, 34, 56)');
+ await frame.getByRole('button', {name:'交互按钮'}).click();
+ await frame.getByRole('button', {name:'脚本已执行'}).waitFor();
  assert.equal(await page.evaluate(() => document.body.dataset.htmlInjected), undefined);
  await iframe.evaluate(el => el.dataset.previewIdentity = 'same-frame');
  await page.getByRole('button',{name:'全屏查看',exact:true}).click();
  assert.equal(await iframe.getAttribute('data-preview-identity'), 'same-frame');
- await page.keyboard.press('Escape');
+ await frame.locator('body').press('Escape');
  await page.getByRole('button',{name:'全屏查看',exact:true}).waitFor();
 }
 
@@ -144,8 +142,12 @@ function makeTestPdf() {
    const u = new URL(route.request().url());
    const p = u.pathname;
    const remote = p.includes('/remote/');
-   if (p.includes('/preview/')) {
-     const headers = {'Content-Security-Policy':"sandbox allow-same-origin; script-src 'none'; object-src 'none'; form-action 'none'"};
+   if (p.endsWith('/html-preview-ticket')) {
+     const payload=route.request().postDataJSON();
+     return route.fulfill({json:{url:`/api/file-manager/html-preview/test-${payload.connection_id==='local'?'local':'remote'}/${payload.path.split('/').pop()}`}});
+   }
+   if (p.includes('/html-preview/')) {
+     const headers = {'Content-Security-Policy':"sandbox allow-scripts; object-src 'none'; form-action 'none'",'Access-Control-Allow-Origin':'*'};
      if (/\.html?$/.test(p)) return route.fulfill({headers,contentType:'text/html',body:htmlDocument});
      if (p.endsWith('/theme.css')) return route.fulfill({headers,contentType:'text/css',body:'h1 {color:rgb(12,34,56)}'});
      if (p.endsWith('/asset.svg')) return route.fulfill({headers,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'});
@@ -339,6 +341,6 @@ function makeTestPdf() {
  const mobilePdf = await page.locator('iframe.document-pdf-preview').boundingBox();
  assert.ok(mobilePdf.width > 200 && mobilePdf.x + mobilePdf.width <= 390);
  assert.equal(await page.locator('.document-reader-head h1').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
- console.log('通过：本机与远程 HTML/HTM 静态预览、相对图片与样式、沙箱、全屏与位置恢复，HTML 图片、公式、PDF、图片缩放和目录导航');
+ console.log('通过：本机与远程 HTML/HTM 交互预览、相对图片与样式、沙箱、全屏与位置恢复，HTML 图片、公式、PDF、图片缩放和目录导航');
  await browser.close();
 })().catch(error => {console.error(error);process.exit(1)});

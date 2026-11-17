@@ -118,14 +118,6 @@ function resourceUrl(rootIndex: number, path: string, connectionId?: string): st
   return `${API_PATHS.fileManager}/resource?${new URLSearchParams({ root: String(rootIndex), path })}`;
 }
 
-/** 保留资源目录层级，使 HTML 内的相对图片、样式与脚本使用同一受限接口。 */
-function htmlPreviewUrl(rootIndex: number, path: string, connectionId: string): string {
-  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-  return connectionId !== "local"
-    ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId)}/preview/${encodedPath}`
-    : `${API_PATHS.fileManager}/preview/${rootIndex}/${encodedPath}`;
-}
-
 function normalizeLocalReference(reference: string, sourcePath: string): string | null {
   const value = reference.trim().replace(/^<|>$/g, "").split(/[?#]/, 1)[0];
   if (!value || value.startsWith("/") || value.startsWith("#") || /^[a-z][a-z\d+.-]*:/i.test(value)) return null;
@@ -530,6 +522,8 @@ export function DocumentViewer() {
   const [previewError, setPreviewError] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
   const [pdfExpanded, setPdfExpanded] = useState(false);
+  const [htmlPreview, setHtmlPreview] = useState<{ key: string; url: string; error: string } | null>(null);
+  const htmlFrameRef = useRef<HTMLIFrameElement>(null);
   const [indexWidth, setIndexWidth] = useState(300);
   const [indexCollapsed, setIndexCollapsed] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -542,7 +536,35 @@ export function DocumentViewer() {
   const selectedEntry = directory?.entries.find(entry => entry.type !== "directory" && entry.path === selectedPath);
   const selectedKind = fileKind(selectedPath);
   const framedPreview = selectedKind === "pdf" || selectedKind === "html";
-  const previewUrl = selectedKind === "html" ? htmlPreviewUrl(rootIndex, selectedPath, activeConnectionId) : resourceUrl(rootIndex, selectedPath, activeConnectionId);
+  const htmlPreviewKey = `${activeConnectionId}:${rootIndex}:${selectedPath}`;
+  const currentHtmlPreview = htmlPreview?.key === htmlPreviewKey ? htmlPreview : null;
+  const previewUrl = selectedKind === "html" ? currentHtmlPreview?.url || "" : resourceUrl(rootIndex, selectedPath, activeConnectionId);
+
+  useLayoutEffect(() => {
+    if (selectedKind === "html" && previewUrl) htmlFrameRef.current?.contentWindow?.focus();
+  }, [pdfExpanded, selectedKind, previewUrl]);
+
+  useEffect(() => {
+    if (selectedKind !== "html") return;
+    let active = true;
+    const controller = new AbortController();
+    apiFetch<{ url: string }>(`${API_PATHS.fileManager}/html-preview-ticket`, {
+      method: "POST", body: jsonBody({ root: rootIndex, path: selectedPath, connection_id: activeConnectionId }), signal: controller.signal,
+    }).then(value => {
+      if (active) setHtmlPreview({ key: htmlPreviewKey, url: value.url, error: "" });
+    }).catch(reason => {
+      if (active) setHtmlPreview({ key: htmlPreviewKey, url: "", error: errorMessage(reason) });
+    });
+    return () => { active = false; controller.abort(); };
+  }, [selectedKind, selectedPath, rootIndex, activeConnectionId, htmlPreviewKey]);
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.source === htmlFrameRef.current?.contentWindow && event.data?.type === "hannishub-html-escape") setPdfExpanded(false);
+    }
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   useEffect(() => {
     if (!pdfExpanded) return;
@@ -987,16 +1009,18 @@ export function DocumentViewer() {
                   <img className="document-image-preview" src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} alt={selectedEntry.name} onError={() => setPreviewError(true)} />
                   <Button variant="secondary" size="sm" type="button" onClick={() => setImageExpanded(true)}>全屏查看</Button>
                 </div>
+              ) : selectedKind === "html" && !previewUrl ? (
+                currentHtmlPreview?.error ? <ErrorState message={currentHtmlPreview.error} /> : <LoadingState label="正在打开 HTML 文档…" />
               ) : framedPreview ? (
                 <div className={`document-pdf-container${pdfExpanded ? " is-expanded" : ""}`} role={pdfExpanded ? "dialog" : undefined} aria-modal={pdfExpanded ? true : undefined} aria-label={pdfExpanded ? `${selectedEntry.name} 全屏查看` : undefined}>
                   <div className="document-pdf-actions">
                     {pdfExpanded ? <strong title={selectedEntry.name}>{selectedEntry.name}</strong> : null}
-                    {selectedKind === "html" ? <span className="muted-line">HTML 静态预览</span> : null}
+                    {selectedKind === "html" ? <span className="muted-line">HTML 交互预览</span> : null}
                     <a className="document-pdf-open" href={previewUrl} target="_blank" rel="noopener noreferrer">新标签页打开</a>
                     <Button variant="secondary" size="sm" type="button" onClick={() => setPdfExpanded(value => !value)}>{pdfExpanded ? "退出全屏" : "全屏查看"}</Button>
                   </div>
                   {selectedKind === "html" ? (
-                    <iframe key={previewUrl} className="document-pdf-preview document-html-preview" title={`${selectedEntry.name} 预览`} src={previewUrl} sandbox="allow-same-origin" referrerPolicy="no-referrer" />
+                    <iframe ref={htmlFrameRef} key={previewUrl} className="document-pdf-preview document-html-preview" title={`${selectedEntry.name} 预览`} src={previewUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={() => htmlFrameRef.current?.contentWindow?.focus()} />
                   ) : <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={`${previewUrl}#view=FitH&navpanes=0`} />}
                 </div>
               ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、HTML、图片、SVG 和 PDF。" />}

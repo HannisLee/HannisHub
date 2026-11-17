@@ -658,6 +658,25 @@ async def file_manager_preview(root: int, path: str):
     })
 
 
+@app.post("/api/file-manager/html-preview-ticket")
+async def file_manager_html_preview_ticket(request: Request, payload: dict = Body(...)):
+    """为独立沙箱签发当前文档目录的短期只读预览票据。"""
+    from server.html_preview import issue_ticket
+    root = payload.get("root", 0)
+    path = payload.get("path")
+    connection_id = payload.get("connection_id", "local")
+    if not isinstance(root, int) or root < 0 or not isinstance(path, str) or not isinstance(connection_id, str):
+        raise HTTPException(status_code=422, detail="预览参数格式不正确")
+    return JSONResponse(await run_in_threadpool(issue_ticket, current_username(request.session) or "", root, connection_id, path))
+
+
+@app.get("/api/file-manager/html-preview/{token}/{path:path}")
+async def file_manager_html_preview_resource(request: Request, token: str, path: str):
+    """读取目录票据范围内的交互 HTML 或配套资源，不赋予登录会话。"""
+    from server.html_preview import resource_response
+    return await run_in_threadpool(resource_response, token, path, request.headers.get("range"))
+
+
 @app.get("/api/file-manager/connections")
 async def file_manager_connections():
     """返回文件管理可用的连接列表（包含本机与已保存的 SSH 服务器连接）。"""
