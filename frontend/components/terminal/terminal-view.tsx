@@ -66,7 +66,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
   const termRef = useRef<Terminal | null>(null);
   const rightClickSelection = useRef("");
   const forwardingSelectionMouse = useRef(false);
-  const fitRef = useRef<FitAddon | null>(null);
+  const scheduleFitRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(active);
   // 回调放进 ref，避免父组件重渲染导致终端重建
   const callbacks = useRef({ onEnded, onActivity, onStatus });
@@ -103,7 +103,6 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
       return false;
     });
     termRef.current = term;
-    fitRef.current = fit;
 
     let socket: WebSocket | null = null;
     let disposed = false;
@@ -111,11 +110,29 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
     let retryDelay = 500;
     let retryTimer: number | undefined;
     let resizeTimer: number | undefined;
+    let fitFrame: number | undefined;
 
     const send = (message: object) => {
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
     };
-    const sendSize = () => send({ type: "resize", cols: term.cols, rows: term.rows });
+    const visible = () => !disposed && activeRef.current && !document.hidden && host.clientWidth > 0 && host.clientHeight > 0;
+    const sendSize = () => {
+      if (visible()) send({ type: "resize", cols: term.cols, rows: term.rows });
+    };
+    // 字体度量和屏幕缩放可能晚于外框变化；下一帧统一校准，并主动同步 PTY。
+    // 即使本地行列数没变，重新获得焦点时也要纠正其他连接留下的尺寸。
+    const scheduleFit = () => {
+      if (!visible() || fitFrame !== undefined) return;
+      fitFrame = window.requestAnimationFrame(() => {
+        fitFrame = undefined;
+        if (!visible()) return;
+        fit.fit();
+        term.refresh(0, term.rows - 1);
+        window.clearTimeout(resizeTimer);
+        sendSize();
+      });
+    };
+    scheduleFitRef.current = scheduleFit;
     const finish = (reason: TerminalEndReason) => {
       if (ended) return;
       ended = true;
@@ -131,8 +148,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
         retryDelay = 500;
         // 服务端会先回放输出缓冲，清屏后重新绘制，避免重连时内容重复
         term.reset();
-        if (activeRef.current) fit.fit();
-        sendSize();
+        scheduleFit();
         callbacks.current.onStatus(sessionId, true);
       };
       ws.onmessage = event => {
@@ -167,32 +183,48 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(sendSize, 120);
     });
-    // 只有可见时才按容器尺寸重算行列；隐藏标签的容器尺寸为 0
-    const observer = new ResizeObserver(() => {
-      if (activeRef.current && host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
-    });
+    // 同时观察绘制区域：字形度量变化时，外框不一定变化。
+    const observer = new ResizeObserver(scheduleFit);
     observer.observe(host);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (screen) observer.observe(screen);
+    window.addEventListener("resize", scheduleFit);
+    window.addEventListener("focus", scheduleFit);
+    window.addEventListener("pageshow", scheduleFit);
+    document.addEventListener("visibilitychange", scheduleFit);
+    document.addEventListener("fullscreenchange", scheduleFit);
+    window.visualViewport?.addEventListener("resize", scheduleFit);
+    document.fonts.addEventListener("loadingdone", scheduleFit);
+    void document.fonts.ready.then(scheduleFit);
     connect();
 
     return () => {
       disposed = true;
       window.clearTimeout(retryTimer);
       window.clearTimeout(resizeTimer);
+      if (fitFrame !== undefined) window.cancelAnimationFrame(fitFrame);
       observer.disconnect();
+      window.removeEventListener("resize", scheduleFit);
+      window.removeEventListener("focus", scheduleFit);
+      window.removeEventListener("pageshow", scheduleFit);
+      document.removeEventListener("visibilitychange", scheduleFit);
+      document.removeEventListener("fullscreenchange", scheduleFit);
+      window.visualViewport?.removeEventListener("resize", scheduleFit);
+      document.fonts.removeEventListener("loadingdone", scheduleFit);
       dataListener.dispose();
       resizeListener.dispose();
       socket?.close();
       term.dispose();
       termRef.current = null;
-      fitRef.current = null;
+      scheduleFitRef.current = null;
     };
   }, [sessionId]);
 
   useEffect(() => {
     activeRef.current = active;
-    if (!active) { setMenu(null); return; }
     const frame = window.requestAnimationFrame(() => {
-      fitRef.current?.fit();
+      if (!active) { setMenu(null); return; }
+      scheduleFitRef.current?.();
       termRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
