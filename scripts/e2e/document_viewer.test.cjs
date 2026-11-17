@@ -2,6 +2,31 @@
 // PW_CORE 指向 playwright-core，CHROME 可指定浏览器，HUB_PORT 默认 18094。
 const { chromium } = require(process.env.PW_CORE);
 const assert = require('node:assert/strict');
+const htmlDocument = '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="theme.css"><h1>HTML 测试文档</h1><img src="asset.svg" alt="HTML 相对图片"><button onclick="this.textContent=\'脚本已执行\'">静态按钮</button><script>parent.document.body.dataset.htmlInjected="yes"</script>';
+
+async function checkHtmlPreview(page, remote) {
+ const iframe = page.locator('.document-html-preview');
+ await iframe.waitFor();
+ assert.ok((await iframe.getAttribute('src')).includes(remote ? '/remote/remote38/preview/' : '/preview/0/'));
+ assert.equal(await iframe.getAttribute('sandbox'), 'allow-same-origin');
+ assert.equal(await iframe.getAttribute('sandbox'), 'allow-same-origin');
+ assert.ok((await iframe.getAttribute('src')).includes(remote ? '/remote/remote38/preview/' : '/preview/0/'));
+ const frame = page.frameLocator('.document-html-preview');
+ await frame.getByRole('heading', {name:'HTML 测试文档'}).waitFor();
+ await page.waitForFunction(() => {
+  const document = window.document.querySelector('.document-html-preview')?.contentDocument;
+  return document?.querySelector('img')?.naturalWidth === 10 && getComputedStyle(document.querySelector('h1')).color === 'rgb(12, 34, 56)';
+ });
+ await frame.getByRole('button', {name:'静态按钮'}).click();
+ assert.equal(await frame.getByRole('button', {name:'静态按钮'}).count(), 1);
+ assert.equal(await page.evaluate(() => document.body.dataset.htmlInjected), undefined);
+ await iframe.evaluate(el => el.dataset.previewIdentity = 'same-frame');
+ await page.getByRole('button',{name:'全屏查看',exact:true}).click();
+ assert.equal(await iframe.getAttribute('data-preview-identity'), 'same-frame');
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'全屏查看',exact:true}).waitFor();
+}
+
 // 同时覆盖四种公式分隔符、Markdown 容器、错误降级与代码保护。
 const mathDocument = [
  '# 测试文档 $x_i^2$',
@@ -114,11 +139,17 @@ function makeTestPdf() {
  const origin = `http://127.0.0.1:${process.env.HUB_PORT || '18094'}`;
  await page.goto(`${origin}/login`);
  assert.equal(await page.evaluate(async () => (await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:'lihan',password:'e2e-test-pass-123'})})).status), 200);
- const entries = ['notes.md','images.md','photo.png','vector.svg','big.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
+ const entries = ['notes.md','images.md','report.html','short.htm','photo.png','vector.svg','big.svg','sample.pdf','data.xyz'].map(name => ({name, path:name, type:'file', size:123, modified:1700000000, extension:name.split('.').pop()}));
  await page.route('**/api/file-manager/**', async route => {
    const u = new URL(route.request().url());
    const p = u.pathname;
    const remote = p.includes('/remote/');
+   if (p.includes('/preview/')) {
+     const headers = {'Content-Security-Policy':"sandbox allow-same-origin; script-src 'none'; object-src 'none'; form-action 'none'"};
+     if (/\.html?$/.test(p)) return route.fulfill({headers,contentType:'text/html',body:htmlDocument});
+     if (p.endsWith('/theme.css')) return route.fulfill({headers,contentType:'text/css',body:'h1 {color:rgb(12,34,56)}'});
+     if (p.endsWith('/asset.svg')) return route.fulfill({headers,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'});
+   }
    if (p.endsWith('/connections')) return route.fulfill({json:{connections:[{id:'local',name:'本机',type:'local'},{id:'remote38',name:'38服务器',type:'ssh'}]}});
    if (p.endsWith('/common-directories')) return route.fulfill({json:{directories:[]}});
    if (p.endsWith('/settings')) return route.fulfill({json:{roots:['/home/test/project'],resolved_roots:['/home/test/project'],home_dir:'/home/test'}});
@@ -157,6 +188,14 @@ function makeTestPdf() {
  await page.getByRole('button',{name:'images.md'}).click();
  await checkDocumentImages(page, '/api/file-manager/resource?');
  await article.getByRole('button',{name:'下一篇'}).click();
+ await article.locator('h1 .katex').waitFor();
+ await page.getByRole('button',{name:'report.html'}).click();
+ await checkHtmlPreview(page, false);
+ await page.reload();
+ await page.locator('.document-html-preview').waitFor();
+ await page.getByRole('button',{name:'short.htm'}).click();
+ await checkHtmlPreview(page, false);
+ await page.getByRole('button',{name:'notes.md'}).click();
  await article.locator('h1 .katex').waitFor();
  const header = page.locator('.document-index-head');
  const toggleBox = await page.getByRole('button',{name:'折叠文件列表'}).boundingBox();
@@ -267,6 +306,13 @@ function makeTestPdf() {
  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
  await page.getByRole('button',{name:'展开文件列表'}).click();
  await page.setViewportSize({width:1400,height:900});
+ await page.getByRole('button',{name:'report.html'}).click();
+ await checkHtmlPreview(page, true);
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector('.shell-content')).marginLeft) < 1);
+ const htmlBox = await page.locator('.document-html-preview').boundingBox();
+ assert.ok(htmlBox.width > 200 && htmlBox.x + htmlBox.width <= 390);
+ await page.setViewportSize({width:1400,height:900});
  await page.getByRole('button',{name:'复制路径'}).click();
  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '~');
  await page.getByRole('button',{name:'vector.svg'}).click();
@@ -293,6 +339,6 @@ function makeTestPdf() {
  const mobilePdf = await page.locator('iframe.document-pdf-preview').boundingBox();
  assert.ok(mobilePdf.width > 200 && mobilePdf.x + mobilePdf.width <= 390);
  assert.equal(await page.locator('.document-reader-head h1').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
- console.log('通过：本机与远程 HTML 图片、并排尺寸、多行属性与安全属性过滤，公式渲染与窄屏布局，PDF 全屏、图片缩放、路径导航和列表折叠');
+ console.log('通过：本机与远程 HTML/HTM 静态预览、相对图片与样式、沙箱、全屏与位置恢复，HTML 图片、公式、PDF、图片缩放和目录导航');
  await browser.close();
 })().catch(error => {console.error(error);process.exit(1)});

@@ -1190,15 +1190,15 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                       {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) && !VIEWABLE_EXTENSIONS.has(entry.extension) ? (
                         <span className="muted-line">暂不支持预览</span>
                       ) : null}
-                      {entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension) ? (
+                      {entry.type === "directory" || (entry.type === "file" && POINT_CLOUD_EXTENSIONS.has(entry.extension)) ? (
                         <a
                           className="button button-secondary button-sm"
                           href={getEntryDownloadUrl(entry)}
                           download
-                          title={`下载 ${entry.name}`}
+                          title={`${entry.type === "directory" ? "打包下载" : "下载"} ${entry.name}`}
                           aria-label={`下载 ${entry.name}`}
                         >
-                          下载
+                          {entry.type === "directory" ? "下载 ZIP" : "下载"}
                         </a>
                       ) : null}
                     </span>
@@ -1263,15 +1263,15 @@ export function FileManagerPanel({ mode }: { mode: "browser" | "point-cloud" }) 
                     <span role="cell">{formatDate(entry.modified)}</span>
                     <span role="cell">{entry.type === "file" ? formatBytes(entry.size) : "—"}</span>
                     <span role="cell" className="file-manager-table-action">
-                      {entry.type === "file" ? (
+                      {entry.type === "file" || entry.type === "directory" ? (
                         <a
                           className="button button-secondary button-sm"
                           href={getEntryDownloadUrl(entry)}
                           download
-                          title={`下载 ${entry.name}`}
+                          title={`${entry.type === "directory" ? "打包下载" : "下载"} ${entry.name}`}
                           aria-label={`下载 ${entry.name}`}
                         >
-                          下载
+                          {entry.type === "directory" ? "下载 ZIP" : "下载"}
                         </a>
                       ) : null}
                     </span>

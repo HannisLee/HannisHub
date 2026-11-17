@@ -647,6 +647,17 @@ async def file_manager_resource(
     return FileResponse(file_path, filename=file_path.name, content_disposition_type="inline", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/file-manager/preview/{root}/{path:path}")
+async def file_manager_preview(root: int, path: str):
+    """以保留目录层级的地址静态预览 HTML 及其相对资源，不执行脚本。"""
+    file_path = await run_in_threadpool(resolve_file, root, path)
+    return FileResponse(file_path, filename=file_path.name, content_disposition_type="inline", headers={
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox allow-same-origin; script-src 'none'; object-src 'none'; form-action 'none'",
+    })
+
+
 @app.get("/api/file-manager/connections")
 async def file_manager_connections():
     """返回文件管理可用的连接列表（包含本机与已保存的 SSH 服务器连接）。"""
@@ -713,6 +724,14 @@ async def file_manager_remote_resource(
         request.headers.get("range"),
         inline=True,
     )
+
+
+@app.get("/api/file-manager/remote/{connection_id}/preview/{path:path}")
+async def file_manager_remote_preview(request: Request, connection_id: str, path: str):
+    """经受限远端资源接口静态预览 HTML 及其相对资源，不执行脚本。"""
+    response = await run_in_threadpool(remote_files.file_response, connection_id, path, request.headers.get("range"), inline=True)
+    response.headers["Content-Security-Policy"] = "sandbox allow-same-origin; script-src 'none'; object-src 'none'; form-action 'none'"
+    return response
 
 
 @app.post("/api/file-manager/remote/{connection_id}/upload")

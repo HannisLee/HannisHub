@@ -69,12 +69,13 @@ function readRemoteLocation(connectionId: string): RemoteDocumentLocation {
   return value;
 }
 
-function fileKind(path: string): "markdown" | "image" | "pdf" | "other" {
+function fileKind(path: string): "markdown" | "image" | "pdf" | "html" | "other" {
   const name = path.split("/").pop() || "";
   const extension = name.includes(".") ? name.split(".").pop()?.toLowerCase() || "" : "";
   if (MARKDOWN_EXTENSIONS.has(extension)) return "markdown";
   if (IMAGE_EXTENSIONS.has(extension)) return "image";
   if (extension === "pdf") return "pdf";
+  if (extension === "html" || extension === "htm") return "html";
   return "other";
 }
 
@@ -115,6 +116,14 @@ function resourceUrl(rootIndex: number, path: string, connectionId?: string): st
     return `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId)}/resource?${new URLSearchParams({ path })}`;
   }
   return `${API_PATHS.fileManager}/resource?${new URLSearchParams({ root: String(rootIndex), path })}`;
+}
+
+/** 保留资源目录层级，使 HTML 内的相对图片、样式与脚本使用同一受限接口。 */
+function htmlPreviewUrl(rootIndex: number, path: string, connectionId: string): string {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  return connectionId !== "local"
+    ? `${API_PATHS.fileManager}/remote/${encodeURIComponent(connectionId)}/preview/${encodedPath}`
+    : `${API_PATHS.fileManager}/preview/${rootIndex}/${encodedPath}`;
 }
 
 function normalizeLocalReference(reference: string, sourcePath: string): string | null {
@@ -532,6 +541,8 @@ export function DocumentViewer() {
   const activeConnection = connections.find(c => c.id === activeConnectionId);
   const selectedEntry = directory?.entries.find(entry => entry.type !== "directory" && entry.path === selectedPath);
   const selectedKind = fileKind(selectedPath);
+  const framedPreview = selectedKind === "pdf" || selectedKind === "html";
+  const previewUrl = selectedKind === "html" ? htmlPreviewUrl(rootIndex, selectedPath, activeConnectionId) : resourceUrl(rootIndex, selectedPath, activeConnectionId);
 
   useEffect(() => {
     if (!pdfExpanded) return;
@@ -916,7 +927,7 @@ export function DocumentViewer() {
         }}>{copyStatus || "复制路径"}</Button>
       </div>
 
-      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}${selectedKind === "pdf" && selectedEntry ? " is-pdf" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
+      <div ref={workspaceRef} className={`document-workspace${indexCollapsed ? " is-index-collapsed" : ""}${framedPreview && selectedEntry ? " is-pdf" : ""}`} style={{ "--document-index-width": `${indexWidth}px` } as CSSProperties}>
         <aside className="document-index">
           {!indexCollapsed ? <>
           <div className="document-file-list">
@@ -959,7 +970,7 @@ export function DocumentViewer() {
             onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); updateIndexWidth(indexWidth + (event.key === "ArrowRight" ? 16 : -16)); } }} />
           </> : null}
         </aside>
-        <main className={`document-reader${selectedKind === "pdf" && selectedEntry ? " is-pdf" : ""}`}>
+        <main className={`document-reader${framedPreview && selectedEntry ? " is-pdf" : ""}`}>
           {loadingDocument ? (
             <LoadingState label="正在打开文档…" />
           ) : selectedEntry && selectedKind !== "markdown" ? (
@@ -976,16 +987,19 @@ export function DocumentViewer() {
                   <img className="document-image-preview" src={resourceUrl(rootIndex, selectedPath, activeConnectionId)} alt={selectedEntry.name} onError={() => setPreviewError(true)} />
                   <Button variant="secondary" size="sm" type="button" onClick={() => setImageExpanded(true)}>全屏查看</Button>
                 </div>
-              ) : selectedKind === "pdf" ? (
+              ) : framedPreview ? (
                 <div className={`document-pdf-container${pdfExpanded ? " is-expanded" : ""}`} role={pdfExpanded ? "dialog" : undefined} aria-modal={pdfExpanded ? true : undefined} aria-label={pdfExpanded ? `${selectedEntry.name} 全屏查看` : undefined}>
                   <div className="document-pdf-actions">
                     {pdfExpanded ? <strong title={selectedEntry.name}>{selectedEntry.name}</strong> : null}
-                    <a className="document-pdf-open" href={resourceUrl(rootIndex, selectedPath, activeConnectionId)} target="_blank" rel="noopener noreferrer">新标签页打开</a>
+                    {selectedKind === "html" ? <span className="muted-line">HTML 静态预览</span> : null}
+                    <a className="document-pdf-open" href={previewUrl} target="_blank" rel="noopener noreferrer">新标签页打开</a>
                     <Button variant="secondary" size="sm" type="button" onClick={() => setPdfExpanded(value => !value)}>{pdfExpanded ? "退出全屏" : "全屏查看"}</Button>
                   </div>
-                  <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={`${resourceUrl(rootIndex, selectedPath, activeConnectionId)}#view=FitH&navpanes=0`} />
+                  {selectedKind === "html" ? (
+                    <iframe key={previewUrl} className="document-pdf-preview document-html-preview" title={`${selectedEntry.name} 预览`} src={previewUrl} sandbox="allow-same-origin" referrerPolicy="no-referrer" />
+                  ) : <iframe className="document-pdf-preview" title={`${selectedEntry.name} 预览`} src={`${previewUrl}#view=FitH&navpanes=0`} />}
                 </div>
-              ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、图片、SVG 和 PDF。" />}
+              ) : <EmptyState title="暂不支持预览此文件" detail="目前支持 Markdown、HTML、图片、SVG 和 PDF。" />}
             </>
           ) : markdownDocument && markdownDocument.path === selectedPath ? (
             <>
@@ -1006,7 +1020,7 @@ export function DocumentViewer() {
           ) : (
             <EmptyState
               title="选择文件开始查看"
-              detail="支持查看 Markdown、图片、SVG 和 PDF。"
+              detail="支持查看 Markdown、HTML、图片、SVG 和 PDF。"
             />
           )}
         </main>
