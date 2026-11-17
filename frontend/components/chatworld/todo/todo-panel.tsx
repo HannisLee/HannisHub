@@ -6,10 +6,10 @@ import {
   clearCompletedTodos, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
   TODO_LIST_MAX, TODO_NOTE_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo, type Todo, type TodoInput, type TodoPriority,
 } from "../../../lib/todos";
-import { Button, EmptyState, ErrorState, LoadingState, PageHeader, ProgressBar } from "../../ui/primitives";
+import { Button, EmptyState, ErrorState, LoadingState, ProgressBar } from "../../ui/primitives";
 
-/** 左侧视图：今天、计划中、重要、全部、已完成，以及按清单筛选（list:清单名） */
-type View = "today" | "planned" | "important" | "all" | "done" | `list:${string}`;
+/** 左侧视图：今天、逾期、计划中、重要、全部、已完成，以及按清单筛选（list:清单名） */
+type View = "today" | "planned" | "important" | "overdue" | "all" | "done" | `list:${string}`;
 type SortMode = "manual" | "due" | "priority" | "created";
 
 interface Group {
@@ -21,12 +21,13 @@ interface Group {
 }
 
 const VIEW_TITLES: Record<string, string> = {
-  today: "今天", planned: "计划中", important: "重要", all: "全部待办", done: "已完成",
+  today: "今天", planned: "计划中", important: "重要", overdue: "已逾期", all: "全部待办", done: "已完成",
 };
 const VIEW_HINTS: Record<string, string> = {
   today: "加入今天的事、今天到期和已逾期的事",
   planned: "设了截止日期的待办，按日期分组",
   important: "高优先级的待办",
+  overdue: "截止日期已过的待办，可在详情中重新安排日期",
   all: "全部未完成的待办",
   done: "按完成时间倒序",
 };
@@ -70,6 +71,8 @@ export function TodoPanel() {
   const [view, setView] = useState<View>("today");
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [search, setSearch] = useState("");
+  const [searchAll, setSearchAll] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   // 快速添加
@@ -91,7 +94,6 @@ export function TodoPanel() {
     try {
       const data = await fetchTodos();
       setTodos(data.todos);
-      setError("");
     } catch (value) {
       setError(errorMessage(value));
       setTodos(current => current ?? []);
@@ -165,6 +167,10 @@ export function TodoPanel() {
     const matches = (todo: Todo) => !query || todo.title.toLowerCase().includes(query) || todo.note.toLowerCase().includes(query)
       || todo.list.toLowerCase().includes(query) || todo.subtasks.some(sub => sub.title.toLowerCase().includes(query));
     const pool = all.filter(matches);
+    if (query && searchAll) return [
+      { key: "search-open", title: "未完成", items: sortTodos(pool.filter(todo => !todo.done), sortMode) },
+      { key: "search-done", title: "已完成", items: pool.filter(todo => todo.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0)) },
+    ];
     const pending = pool.filter(todo => !todo.done);
     const finished = pool.filter(todo => todo.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0));
     const sorted = (items: Todo[]) => sortTodos(items, sortMode);
@@ -192,6 +198,7 @@ export function TodoPanel() {
         .map(([key, title, test]) => ({ key, title, items: sortTodos(dated.filter(todo => test(todo.due_date)), "due") }))
         .filter(group => group.items.length);
     }
+    if (view === "overdue") return [{ key: "late", title: "已逾期", items: sorted(pending.filter(todo => todo.due_date && todo.due_date < today)) }];
     if (view === "important") {
       return [{ key: "important", title: "高优先级", items: sorted(pending.filter(todo => todo.priority === 3)) }];
     }
@@ -204,7 +211,7 @@ export function TodoPanel() {
       ];
     }
     return [{ key: "all", title: "未完成", items: sorted(pending) }, ...doneGroup(finished)];
-  }, [all, view, sortMode, search, today, inToday]);
+  }, [all, view, sortMode, search, searchAll, today, inToday]);
 
   async function add(event: FormEvent) {
     event.preventDefault();
@@ -222,6 +229,10 @@ export function TodoPanel() {
     try {
       const saved = await createTodo(input);
       setTodos(current => [...(current ?? []), saved]);
+      if (view === "done" || view === "overdue" || search.trim()) {
+        setView("all");
+        setSearch("");
+      }
       setTitle("");
       setDue("");
       setPriority(0);
@@ -254,10 +265,15 @@ export function TodoPanel() {
     }
   }
 
+  const clearScope = view.startsWith("list:") ? view.slice(5) : undefined;
+  const clearCount = all.filter(todo => todo.done && (clearScope === undefined || todo.list === clearScope)).length;
+  const canClear = !search.trim() && (view === "all" || view === "done" || view.startsWith("list:"));
+
   async function clearDone() {
+    if (!canClear) return;
     const scope = view.startsWith("list:") ? view.slice(5) : undefined;
     const count = all.filter(todo => todo.done && (scope === undefined || todo.list === scope)).length;
-    if (!count || !window.confirm(`删除 ${count} 条已完成的待办？`)) return;
+    if (!count || !window.confirm(`永久删除${scope === undefined ? "全部清单" : `「${scope || UNLISTED}」清单`}中 ${count} 条已完成的待办？此操作无法撤销。`)) return;
     try {
       await clearCompletedTodos(scope);
       await load();
@@ -271,36 +287,34 @@ export function TodoPanel() {
   const canMove = sortMode === "manual" && !search.trim() && view !== "planned" && view !== "done";
 
   const navItem = (key: View, label: string, count: number) => (
-    <button key={key} type="button" className={`todo-nav-item${view === key ? " is-active" : ""}`} onClick={() => { setView(key); setExpanded(null); }}>
+    <button key={key} type="button" aria-current={view === key ? "page" : undefined} className={`todo-nav-item${view === key ? " is-active" : ""}`} onClick={() => { setView(key); setExpanded(null); }}>
       <span>{label}</span>
       {count ? <span className="todo-nav-count">{count}</span> : null}
     </button>
   );
 
   return <>
-    <PageHeader
-      kicker="聊天大厅 / 我的工位"
-      title="工位待办"
-      description={`${dateLabel(today, "")}${overdue ? ` · ${overdue} 项已逾期` : ""}。只有你自己看得到，按账号保存。`}
-    />
     {error ? <ErrorState message={error} /> : null}
     {todos === null ? <LoadingState /> : (
       <div className="todo-layout">
         <nav className="todo-nav" aria-label="待办视图">
           {navItem("today", "今天", counts.today)}
+          {navItem("overdue", "已逾期", overdue)}
           {navItem("planned", "计划中", counts.planned)}
           {navItem("important", "重要", counts.important)}
           {navItem("all", "全部", counts.all)}
           {navItem("done", "已完成", counts.done)}
-          {lists.length ? <p className="todo-nav-label">清单</p> : null}
+          <p className="todo-nav-label">清单</p>
+          {navItem("list:", UNLISTED, open.filter(todo => !todo.list).length)}
           {lists.map(([name, count]) => navItem(`list:${name}`, name, count))}
         </nav>
 
         <section className="todo-main">
           <header className="todo-main-head">
             <div>
-              <h2 className="todo-view-title">{viewTitle}</h2>
-              <p className="todo-view-hint">{viewHint}</p>
+              <h2 className="todo-view-title">{search.trim() && searchAll ? "搜索结果" : viewTitle}</h2>
+              <p className="todo-view-hint">{search.trim() && searchAll ? "搜索全部清单，包含已完成的待办" : viewHint}</p>
+              <p className="todo-view-hint">{dateLabel(today, "")} · 待完成 {counts.all}{overdue ? ` · 逾期 ${overdue}` : ""}</p>
             </div>
             {view === "today" && todayTotal ? (
               <div className="todo-progress" aria-label="今天的进度">
@@ -341,16 +355,18 @@ export function TodoPanel() {
 
           <div className="todo-toolbar">
             <input className="todo-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索标题、备注、清单、子任务" aria-label="搜索待办" />
+            <label className="todo-search-scope"><input type="checkbox" checked={searchAll} onChange={event => setSearchAll(event.target.checked)} />搜索全部</label>
             <select className="select-compact" value={sortMode} onChange={event => setSortMode(event.target.value as SortMode)} aria-label="排序">
               {(Object.keys(SORT_LABELS) as SortMode[]).map(mode => <option key={mode} value={mode}>排序：{SORT_LABELS[mode]}</option>)}
             </select>
-            {counts.done ? <Button size="sm" variant="quiet" onClick={() => void clearDone()}>清除已完成</Button> : null}
+            {canClear && clearCount ? <Button size="sm" variant="quiet" onClick={() => void clearDone()}>清除已完成（{clearCount}）</Button> : null}
+            <Button size="sm" variant="quiet" disabled={refreshing} onClick={async () => { setRefreshing(true); setError(""); try { await load(); } finally { setRefreshing(false); } }}>{refreshing ? "刷新中…" : "刷新"}</Button>
           </div>
 
           {groups.every(group => !group.items.length) ? (
             <EmptyState
               title={search.trim() ? "没有匹配的待办" : view === "today" ? "今天还没有安排" : "这里还是空的"}
-              detail={search.trim() ? "换个关键词试试。" : view === "today" ? "在上方输入框写下今天要做的第一件事。" : "在上方输入框添加一条待办。"}
+              detail={search.trim() ? "换个关键词，或勾选「搜索全部」跨清单查找。" : view === "today" ? "在上方输入框写下今天要做的第一件事。" : "在上方输入框添加一条待办。"}
             />
           ) : groups.map(group => {
             if (!group.items.length && group.key !== "today") return null;
@@ -485,7 +501,7 @@ function TodoDetail({ todo, today, lists, onPatch }: { todo: Todo; today: string
       <label className="todo-field">
         <span>标题</span>
         <input value={title} maxLength={TODO_TITLE_MAX} onChange={event => setTitle(event.target.value)} onBlur={commitTitle}
-          onKeyDown={event => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} />
+          onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) (event.target as HTMLInputElement).blur(); }} />
       </label>
       <div className="todo-detail-grid">
         <label className="todo-field">
@@ -494,10 +510,17 @@ function TodoDetail({ todo, today, lists, onPatch }: { todo: Todo; today: string
             {([0, 1, 2, 3] as TodoPriority[]).map(p => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
           </select>
         </label>
-        <label className="todo-field">
-          <span>截止日期</span>
-          <input type="date" value={todo.due_date} onChange={event => onPatch({ due_date: event.target.value })} />
-        </label>
+        <div className="todo-field">
+          <label className="todo-field">
+            <span>截止日期</span>
+            <input type="date" value={todo.due_date} onChange={event => onPatch({ due_date: event.target.value })} />
+          </label>
+          <span className="todo-date-shortcuts">
+            <button type="button" onClick={() => onPatch({ due_date: today })}>今天</button>
+            <button type="button" onClick={() => onPatch({ due_date: localDate(1) })}>明天</button>
+            <button type="button" disabled={!todo.due_date} onClick={() => onPatch({ due_date: "" })}>清除日期</button>
+          </span>
+        </div>
         <label className="todo-field">
           <span>清单</span>
           <input value={list} maxLength={TODO_LIST_MAX} list={listId} placeholder={UNLISTED} onChange={event => setList(event.target.value)}
@@ -518,7 +541,13 @@ function TodoDetail({ todo, today, lists, onPatch }: { todo: Todo; today: string
               <li key={sub.id} className={sub.done ? "is-done" : ""}>
                 <input type="checkbox" checked={sub.done} aria-label={`完成子任务「${sub.title}」`}
                   onChange={event => onPatch({ subtasks: todo.subtasks.map(item => (item.id === sub.id ? { ...item, done: event.target.checked } : item)) })} />
-                <span>{sub.title}</span>
+                <input className="todo-subtask-title" aria-label={`子任务标题「${sub.title}」`} defaultValue={sub.title} key={`${sub.id}:${sub.title}`} maxLength={TODO_TITLE_MAX}
+                  onBlur={event => {
+                    const title = event.target.value.trim();
+                    if (!title) event.target.value = sub.title;
+                    else if (title !== sub.title) onPatch({ subtasks: todo.subtasks.map(item => item.id === sub.id ? { ...item, title } : item) });
+                  }}
+                  onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur(); }} />
                 <button type="button" className="todo-icon is-danger" aria-label={`删除子任务「${sub.title}」`}
                   onClick={() => onPatch({ subtasks: todo.subtasks.filter(item => item.id !== sub.id) })}>
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
@@ -528,7 +557,7 @@ function TodoDetail({ todo, today, lists, onPatch }: { todo: Todo; today: string
           </ul>
         ) : null}
         <form className="todo-subtask-add" onSubmit={addSubtask}>
-          <input value={subtask} maxLength={TODO_TITLE_MAX} onChange={event => setSubtask(event.target.value)} placeholder="添加子任务，回车保存" aria-label="添加子任务" />
+          <input disabled={todo.subtasks.length >= TODO_SUBTASK_MAX} value={subtask} maxLength={TODO_TITLE_MAX} onChange={event => setSubtask(event.target.value)} placeholder={todo.subtasks.length >= TODO_SUBTASK_MAX ? `最多 ${TODO_SUBTASK_MAX} 个子任务` : "添加子任务，回车保存"} aria-label="添加子任务" />
         </form>
       </div>
 

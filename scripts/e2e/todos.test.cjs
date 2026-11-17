@@ -1,0 +1,109 @@
+// 仅连接隔离测试 Hub，验证待办筛选、跨视图搜索、编辑保存、清理范围与窄屏布局。
+const { chromium } = require(process.env.PW_CORE);
+const assert = require('node:assert/strict');
+
+(async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHROME });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const origin = `http://127.0.0.1:${process.env.HUB_PORT || 18149}`;
+    await page.goto(origin + '/login');
+    const api = (path, method = 'GET', data) => page.evaluate(async ({ path, method, data }) => {
+      const response = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
+      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+      return response.json();
+    }, { path, method, data });
+    await api('/api/auth/login', 'POST', { username: 'guest', password: 'e2e-test-pass-123' });
+    // 每次使用独有清单，不清理其他测试的数据。
+    const prefix = `待办回归${Date.now()}`;
+    const listA = prefix + '甲', listB = prefix + '乙';
+    const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA'));
+    const late = await api('/api/todos', 'POST', { title: prefix + '逾期', due_date: '2020-01-01', list: listA, subtasks: [{ id: 'step1', title: '原子任务', done: false }] });
+    await api('/api/todos', 'POST', { title: prefix + '未来', due_date: '2099-01-01', list: listB });
+    const doneA = await api('/api/todos', 'POST', { title: prefix + '完成甲', done: true, list: listA });
+    const doneB = await api('/api/todos', 'POST', { title: prefix + '完成乙', done: true, list: listB });
+    await api('/api/todos', 'POST', { title: prefix + '未分类' });
+    await page.goto(origin + '/todo');
+    const nav = page.getByRole('navigation', { name: '待办视图' });
+    await nav.waitFor();
+    assert.equal(await page.getByRole('heading', { name: '工位待办', exact: true }).count(), 0);
+    assert.equal(await page.locator('.page-header').count(), 0);
+    await nav.getByRole('button', { name: /^已逾期/ }).click();
+    const row = page.locator('.todo-item', { hasText: late.title });
+    await row.waitFor();
+    await row.locator('.todo-row-main').click();
+    const patchResponse = () => page.waitForResponse(r => r.url().endsWith(`/api/todos/${late.id}`) && r.request().method() === 'PATCH');
+    let saved = patchResponse();
+    await row.getByRole('button', { name: '今天', exact: true }).click();
+    await saved;
+    await row.waitFor({ state: 'detached' });
+    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).due_date, today);
+    await nav.getByRole('button', { name: /^全部/ }).click();
+    await row.locator('.todo-row-main').click();
+    const sub = row.getByRole('textbox', { name: '子任务标题「原子任务」' });
+    await sub.fill('修改后的子任务');
+    saved = patchResponse();
+    await sub.press('Enter');
+    await saved;
+    saved = patchResponse();
+    await row.getByRole('button', { name: '清除日期', exact: true }).click();
+    await saved;
+    await page.reload();
+    await nav.getByRole('button', { name: /^全部/ }).click();
+    await row.locator('.todo-row-main').click();
+    assert.equal(await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).inputValue(), '修改后的子任务');
+    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).due_date, '');
+    await nav.getByRole('button', { name: /^未分类/ }).click();
+    await page.locator('.todo-item', { hasText: prefix + '未分类' }).waitFor();
+    assert.equal(await page.locator('.todo-item', { hasText: late.title }).count(), 0);
+    await nav.getByRole('button', { name: /^今天/ }).click();
+    await page.getByRole('searchbox', { name: '搜索待办' }).fill(prefix);
+    assert.equal(await page.locator('.todo-item').count(), 0);
+    await page.getByRole('checkbox', { name: '搜索全部' }).check();
+    await page.getByRole('heading', { name: '搜索结果', exact: true }).waitFor();
+    assert.equal(await page.locator('.todo-item').count(), 5);
+    assert.equal(await page.getByRole('button', { name: /清除已完成/ }).count(), 0);
+    await page.getByRole('searchbox', { name: '搜索待办' }).fill('');
+    await nav.getByRole('button', { name: new RegExp('^' + listA) }).click();
+    let message = '';
+    page.once('dialog', async dialog => { message = dialog.message(); await dialog.accept(); });
+    const cleared = page.waitForResponse(r => r.url().endsWith('/api/todos/clear-completed'));
+    await page.getByRole('button', { name: '清除已完成（1）' }).click();
+    await cleared;
+    assert.ok(message.includes(listA));
+    const remaining = (await api('/api/todos')).todos;
+    assert.ok(!remaining.some(t => t.id === doneA.id));
+    assert.ok(remaining.some(t => t.id === doneB.id));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await nav.getByRole('button', { name: /^全部/ }).click();
+    await row.locator('.todo-row-main').click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    if (process.env.SHOT_DIR) await page.screenshot({ path: process.env.SHOT_DIR + '/todo-mobile.png', fullPage: true });
+    // 保存失败后恢复服务器数据，同时保留错误提示供用户重试。
+    await page.route(`**/api/todos/${late.id}`, route => route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: '模拟保存失败' }) }) : route.continue());
+    const rollback = page.waitForResponse(r => new URL(r.url()).pathname === '/api/todos' && r.request().method() === 'GET');
+    await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).fill('失败的修改');
+    await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).press('Enter');
+    await rollback;
+    await page.getByText('模拟保存失败', { exact: true }).waitFor();
+    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).subtasks[0].title, '修改后的子任务');
+    await page.unroute(`**/api/todos/${late.id}`);
+    await api('/api/todos', 'POST', { title: prefix + '外部新增' });
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await page.locator('.todo-item', { hasText: prefix + '外部新增' }).waitFor();
+    assert.equal(await page.getByText('模拟保存失败', { exact: true }).count(), 0);
+    // 在已完成视图添加后显示新条目，避免添加成功却看不到内容。
+    await nav.getByRole('button', { name: /^已完成/ }).click();
+    await page.getByRole('textbox', { name: '待办内容', exact: true }).fill(prefix + '新待办');
+    await page.getByRole('button', { name: '添加', exact: true }).click();
+    await page.getByRole('heading', { name: '全部待办', exact: true }).waitFor();
+    await page.locator('.todo-item', { hasText: prefix + '新待办' }).waitFor();
+    assert.deepEqual(errors, []);
+    console.log('待办标题精简、逾期改期、子任务改名持久化、未分类、全局搜索、清理范围、窄屏通过');
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
