@@ -1,3 +1,4 @@
+import { onPianoNote } from "../../../../lib/lobby-piano";
 import Phaser from "phaser";
 import {
   ASSET_BASE, assetUrl, type ActionDef, type DeskDef, type DoorDef, type InteractKind, type LobbyBridge,
@@ -207,6 +208,15 @@ export class LobbyScene extends Phaser.Scene {
       this.presence?.destroy();
       this.presence = null;
     });
+    let lastPianoAt = -Infinity;
+    const stopPianoNotes = onPianoNote(() => {
+      if (this.destroyed || this.current.def.id !== "hall" || this.time.now - lastPianoAt < 900) return;
+      lastPianoAt = this.time.now;
+      const piano = this.children.list.find(child => child instanceof Phaser.GameObjects.Sprite && child.texture.key === "piano") as Phaser.GameObjects.Sprite | undefined;
+      piano?.play({ key: "anim-piano", repeat: 1 });
+      this.emote("piano", true);
+    });
+    this.events.once(Phaser.Scenes.Events.DESTROY, stopPianoNotes);
     this.events_.onReady?.();
   }
 
@@ -494,6 +504,7 @@ export class LobbyScene extends Phaser.Scene {
       const seat = item.seat;
       this.player.sit(room.x + seat.x, room.y + seat.y, seat.dir);
       if (seat.play === "piano") {
+        this.emote("piano");
         this.events_.onInteract?.({ id: "piano", title: "钢琴", hint: "键盘自由演奏" });
       }
     } else if (item.action) {
@@ -506,9 +517,9 @@ export class LobbyScene extends Phaser.Scene {
   // ---------- 表情气泡 ----------
 
   /** 自己发表情：头顶冒泡并广播给同房间的人 */
-  private emote(key: string) {
+  private emote(key: string, pianoPlaying = false) {
     const texts = LOBBY_EMOTES[key];
-    if (!texts || this.paused || this.transitioning) return;
+    if (!texts || (this.paused && !pianoPlaying) || this.transitioning) return;
     const now = this.time.now;
     if (now - this.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
     this.lastEmoteAt = now;

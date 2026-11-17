@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { emitPianoNote } from "../../../lib/lobby-piano";
+import { SONGS } from "./songs";
 import { PianoSound } from "./sound";
 import styles from "./piano.module.css";
 
@@ -24,6 +26,8 @@ export function PianoPanel() {
   const [volume, setVolume] = useState(65);
   const [pedal, setPedal] = useState(false);
   const [active, setActive] = useState<Map<string, number>>(new Map());
+  const [song, setSong] = useState<{ id: string; index: number; total: number } | null>(null);
+  const playSong = useRef<(id: string | null) => void>(() => undefined);
   const [error, setError] = useState("");
   const sound = useRef<PianoSound | null>(null);
   const held = useRef(new Map<string, number>());
@@ -39,7 +43,14 @@ export function PianoPanel() {
   }, []);
 
   useEffect(() => {
+    let nextTimer: ReturnType<typeof setTimeout> | undefined;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    let automatic = false;
     const clear = () => {
+      clearTimeout(nextTimer);
+      clearTimeout(releaseTimer);
+      automatic = false;
+      setSong(null);
       sound.current?.silence();
       held.current.clear();
       setActive(new Map());
@@ -49,6 +60,7 @@ export function PianoPanel() {
       if (held.current.has(id)) return;
       try {
         sound.current?.play(id, midi);
+        emitPianoNote();
         held.current.set(id, midi);
         setActive(new Map(held.current));
         setError("");
@@ -58,6 +70,23 @@ export function PianoPanel() {
       sound.current?.stop(id);
       held.current.delete(id);
       setActive(new Map(held.current));
+    };
+    playSong.current = id => {
+      clear();
+      const selected = SONGS.find(item => item.id === id);
+      if (!selected) return;
+      automatic = true;
+      const base = notes[0];
+      const step = (index: number) => {
+        if (index >= selected.notes.length) { automatic = false; setSong(null); return; }
+        const [offset, beats] = selected.notes[index];
+        const duration = beats * selected.beat;
+        start("song", base + offset);
+        setSong({ id: selected.id, index: index + 1, total: selected.notes.length });
+        releaseTimer = setTimeout(() => stop("song"), duration * 0.82);
+        nextTimer = setTimeout(() => step(index + 1), duration);
+      };
+      step(0);
     };
     const down = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || typing(event.target)) return;
@@ -69,7 +98,10 @@ export function PianoPanel() {
       const index = KEYS.findIndex(key => event.code === `Key${key}`);
       if (index < 0) return;
       event.preventDefault();
-      if (!event.repeat) start(event.code, notes[index]);
+      if (!event.repeat) {
+        if (automatic) clear();
+        start(event.code, notes[index]);
+      }
     };
     const up = (event: KeyboardEvent) => {
       if (event.code === "Space") { sound.current?.pedal(false); setPedal(false); }
@@ -81,6 +113,7 @@ export function PianoPanel() {
       if (!target) return;
       event.preventDefault();
       target.setPointerCapture(event.pointerId);
+      if (automatic) clear();
       start(`pointer-${event.pointerId}`, Number(target.dataset.pianoNote));
     };
     const pointerUp = (event: PointerEvent) => stop(`pointer-${event.pointerId}`);
@@ -94,6 +127,7 @@ export function PianoPanel() {
     document.addEventListener("visibilitychange", hidden);
     return () => {
       clear();
+      playSong.current = () => undefined;
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", clear);
@@ -122,7 +156,9 @@ export function PianoPanel() {
         try {
           const id = `accessible-${midi}-${performance.now()}`;
           const audio = sound.current;
+          playSong.current(null);
           audio?.play(id, midi);
+          emitPianoNote();
           window.setTimeout(() => audio?.stop(id), 250);
         }
         catch { setError("声音暂时无法启用，请检查浏览器的音频权限。"); }
@@ -139,6 +175,13 @@ export function PianoPanel() {
       <label>音量 {volume}%<input aria-label="音量" type="range" min="0" max="100" value={volume} onChange={e => { const n = Number(e.target.value); setVolume(n); sound.current?.setVolume(n / 100); }} /></label>
       <button className={styles.pedal} type="button" aria-pressed={pedal} onClick={() => { sound.current?.pedal(!pedal); setPedal(!pedal); }}>延音 {pedal ? "开" : "关"}<kbd>Space</kbd></button>
     </div>
+    <div className={styles.songs} aria-label="示范曲">
+      <span>听一首</span>
+      {SONGS.map(item => <button type="button" key={item.id} aria-pressed={song?.id === item.id} onClick={() => playSong.current(item.id)}>{song?.id === item.id ? "正在演奏 · " : "▷ "}{item.name}</button>)}
+      <button type="button" disabled={!song} onClick={() => playSong.current(null)}>停止演奏</button>
+      <span role="status">{song ? `${song.index} / ${song.total} 音` : "点击自动演奏，琴键同步亮起"}</span>
+    </div>
+    <p className={styles.tip}>示范曲按当前主音与八度演奏大调旋律；弹下琴键即可接手。</p>
     <div className={styles.readout} aria-label="正在演奏"><span>{playing.size ? [...playing].sort((a, b) => a - b).map(noteName).join(" · ") : "准备好，就按下第一个音"}</span><span>{pedal ? "延音踏板已踩下" : "支持多键和弦"}</span></div>
     <div className={styles.scroll}><div className={styles.keyboard} style={{ minWidth: Math.max(600, whites.length * 44) }}>{whites.map(midi => renderKey(midi, false))}{range.filter(black).map(midi => renderKey(midi, true))}</div></div>
     <div className={styles.mapping}>{[1, 0].map(row => <div key={row}><span>{row ? "高音" : "低音"}</span>{ROWS[row].map(key => { const midi = notes[KEYS.indexOf(key)]; return <div key={key} data-playing={playing.has(midi)}><kbd>{key}</kbd><small>{noteName(midi)}</small></div>; })}</div>)}</div>

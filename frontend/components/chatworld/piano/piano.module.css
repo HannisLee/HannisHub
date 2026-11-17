@@ -42,3 +42,9 @@
   .mapping > div > div { min-width: 0; flex: 1; padding: var(--space-2) 0; }
   .keyboard { height: 220px; }
 }
+
+.songs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); font-size: 13px; color: var(--color-text-secondary); }
+.songs button { min-height: 44px; padding: 0 var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-primary); cursor: pointer; }
+.songs button[aria-pressed="true"] { border-color: var(--color-brand); color: var(--color-brand); }
+.songs button:disabled { opacity: .4; cursor: default; }
+.songs button:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
