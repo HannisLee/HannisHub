@@ -176,7 +176,7 @@ export function PianoPanel() {
       <button className={styles.pedal} type="button" aria-pressed={pedal} onClick={() => { sound.current?.pedal(!pedal); setPedal(!pedal); }}>延音 {pedal ? "开" : "关"}<kbd>Space</kbd></button>
     </div>
     <div className={styles.songs} aria-label="示范曲">
-      <span>听一首</span>
+      <span>经典曲库 · {SONGS.length} 首</span>
       {SONGS.map(item => <button type="button" key={item.id} aria-pressed={song?.id === item.id} onClick={() => playSong.current(item.id)}>{song?.id === item.id ? "正在演奏 · " : "▷ "}{item.name}</button>)}
       <button type="button" disabled={!song} onClick={() => playSong.current(null)}>停止演奏</button>
       <span role="status">{song ? `${song.index} / ${song.total} 音` : "点击自动演奏，琴键同步亮起"}</span>

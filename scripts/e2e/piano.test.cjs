@@ -129,6 +129,7 @@ const shot=async(page,name)=>{if(shotDir)await page.screenshot({path:`${shotDir}
   await shot(page,'piano-narrow');
   // 使用浏览器真实触屏事件验证双指和取消手势。
   const cdp=await ctx.newCDPSession(page);
+  await key(60).scrollIntoViewIfNeeded();
   const one=await key(60).boundingBox(), two=await key(62).boundingBox();
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:one.x+one.width/2,y:one.y+one.height-35,id:1},{x:two.x+two.width/2,y:two.y+two.height-35,id:2}]});
   assert.equal(await pressed(),2,'双指同时演奏');
@@ -167,6 +168,13 @@ const shot=async(page,name)=>{if(shotDir)await page.screenshot({path:`${shotDir}
   await ode.click();
   await page.waitForFunction(()=>document.querySelector('[aria-label="示范曲"] button:last-of-type').disabled,{},{timeout:25000});
   assert.equal(await pressed(),0,'整首欢乐颂播完自动结束');
+  for (const [name, offset] of [['玛丽有只小羊羔',4],['伦敦桥',7],['划船歌',0],['铃儿响叮当',4],['很久很久以前',0],['月光下',0]]) {
+    const button=page.getByRole('button',{name:new RegExp(name)});
+    await button.click();
+    assert.equal(await key(60+offset).getAttribute('aria-pressed'),'true',`${name}首音亮起`);
+    assert.equal(await button.getAttribute('aria-pressed'),'true');
+    await stopSong.click(); assert.equal(await pressed(),0,`${name}停播清理亮键`);
+  }
   await page.setViewportSize({width:390,height:844});
   assert.ok(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),'新增曲目控件适配窄屏');
   await shot(page,'piano-songs-narrow');
