@@ -38,8 +38,6 @@ interface RuntimeRoom {
   def: RoomDef;
   portals: { def: PortalDef; rect: Phaser.Geom.Rectangle }[];
   interactables: Interactable[];
-  /** 可演奏的钢琴精灵（坐上琴凳时播放按键动画） */
-  pianos: Phaser.GameObjects.Sprite[];
   /** holdUntil：到达时开合一次的门在此时刻之前保持打开，不受距离判定影响 */
   doors: { def: DoorDef; sprite: Phaser.GameObjects.Sprite; cx: number; cy: number; open: boolean; holdUntil: number }[];
   onceAnims: Phaser.GameObjects.Sprite[];
@@ -276,12 +274,11 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     const onceAnims: Phaser.GameObjects.Sprite[] = [];
-    const pianos: Phaser.GameObjects.Sprite[] = [];
     for (const anim of def.anims) {
       const sprite = this.add.sprite(ox + anim.x, oy + anim.y, anim.key, 0).setOrigin(0);
       sprite.setDepth(oy + (anim.depth ?? anim.y + sprite.height));
-      // 钢琴只在有人弹奏时播放，不参与「到达时播放一次」
-      if (anim.key === "piano") pianos.push(sprite);
+      // 钢琴在大厅保持静态，实际演奏交给模拟钢琴面板。
+      if (anim.key === "piano") sprite.setFrame(0);
       else if (anim.frames === "once") onceAnims.push(sprite);
       else {
         // 随机起始帧，避免同款物件（显示器、音箱）同步闪动
@@ -313,7 +310,6 @@ export class LobbyScene extends Phaser.Scene {
       def,
       portals: def.portals.map(portal => ({ def: portal, rect: toRect(portal.rect) })),
       interactables,
-      pianos,
       doors,
       onceAnims,
     };
@@ -470,7 +466,7 @@ export class LobbyScene extends Phaser.Scene {
     if (item.machine) return { kind: "machine", id: item.id, title: item.machine.title, hint: item.machine.hint };
     if (item.desk) return this.deskInfo(item.desk);
     if (item.seat) {
-      return { kind: "seat", id: item.id, title: item.seat.title, hint: item.seat.play === "piano" ? "坐下弹一段" : "按方向键起身" };
+      return { kind: "seat", id: item.id, title: item.seat.title, hint: item.seat.play === "piano" ? "坐下打开钢琴 · 键盘自由演奏" : "按方向键起身" };
     }
     return { kind: "action", id: item.id, title: item.action!.title, hint: item.action!.hint };
   }
@@ -497,28 +493,14 @@ export class LobbyScene extends Phaser.Scene {
     } else if (item.seat) {
       const seat = item.seat;
       this.player.sit(room.x + seat.x, room.y + seat.y, seat.dir);
-      if (seat.play === "piano") this.playPiano(room.x + seat.x, room.y + seat.y);
+      if (seat.play === "piano") {
+        this.events_.onInteract?.({ id: "piano", title: "钢琴", hint: "键盘自由演奏" });
+      }
     } else if (item.action) {
       if (item.action.id === "cat") this.petCat(item.rect);
       else this.emote(item.action.id);
       if (item.action.sound) playTune(item.action.sound);
     }
-  }
-
-  /** 坐上琴凳：最近的一架钢琴播放按键动画，并弹一段随机旋律 */
-  private playPiano(x: number, y: number) {
-    let piano: Phaser.GameObjects.Sprite | null = null;
-    let best = Infinity;
-    for (const sprite of this.current.pianos) {
-      const d = Phaser.Math.Distance.Between(x, y, sprite.x + sprite.width / 2, sprite.y + sprite.height);
-      if (d < best) {
-        best = d;
-        piano = sprite;
-      }
-    }
-    piano?.play({ key: "anim-piano", repeat: 3 });
-    playTune("piano");
-    this.emote("piano");
   }
 
   // ---------- 表情气泡 ----------

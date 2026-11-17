@@ -22,6 +22,8 @@ const NotesBoard = dynamic(() => import("./notes-board").then(m => m.NotesBoard)
 const PoolPanel = dynamic(() => import("../pool/pool-panel").then(m => m.PoolPanel), { ssr: false, loading: PanelLoading });
 const LinkupPanel = dynamic(() => import("../linkup/linkup-panel").then(m => m.LinkupPanel), { ssr: false, loading: PanelLoading });
 
+const PianoPanel = dynamic(() => import("../piano/piano-panel").then(m => m.PianoPanel), { ssr: false, loading: PanelLoading });
+
 /** 内嵌聊天室：打开期间暂停页面级的后台新消息检查，避免对正在看的消息弹提示、响提示音 */
 function ChatPanel() {
   useEffect(() => {
@@ -67,6 +69,7 @@ const MACHINES: Record<string, {
   inbox: { Panel: InboxPrivate, fill: true, compact: true, hint: "收到的私聊可在任意位置查看和回复" },
   todo: { Panel: DeskPanel, href: "/todo", fill: true },
   notes: { Panel: NotesBoard },
+  piano: { Panel: PianoPanel, fill: true, hint: "模拟钢琴 · 键盘 / 鼠标 / 触屏演奏" },
   pool: POOL_ENTRY,
   "pool-left": POOL_ENTRY,
   "pool-right": POOL_ENTRY,

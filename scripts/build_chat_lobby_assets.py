@@ -1018,7 +1018,7 @@ def build_hall() -> Room:
     room.put("whiteboard", wb_x, wb_b, foot=8)
     room.action("board", "白板", "看看今日一句", [wb_x - 2, wb_b, 36, 12])
 
-    # ---- 中部：钢琴角（坐上琴凳弹一段）
+    # ---- 中部：钢琴角（坐上琴凳打开模拟钢琴）
     px, pb = door_x - 4, 280
     room.rug((px - 22, 238, px + 62, 300), floor_tex(12, 26), edge=(60, 40, 30))
     room.anim("piano", px, pb - 32, solid=[px + 1, pb - 12, 30, 12], frames="once")
