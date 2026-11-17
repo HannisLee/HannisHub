@@ -126,6 +126,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function ChatLobby() {
   const shell = useShell();
   const immersive = shell?.immersive ?? false;
+  useEffect(() => { bridge.admin = shell?.admin ?? false; }, [shell?.admin]);
   const [phase, setPhase] = useState<Phase>("loading");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");

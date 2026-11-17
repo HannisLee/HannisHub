@@ -9,6 +9,8 @@ import { Button } from "../../ui/primitives";
 import { ChatEmojiPicker } from "../room/emoji-picker";
 import { Avatar, formatChatTime } from "../shared/chat-avatar";
 import { TodoPanel } from "../todo/todo-panel";
+import { useShell } from "../../layout/shell-context";
+import { ADMIN_PRIVATE_VIEW_EVENT } from "../../../lib/admin-notify";
 
 const BASE = "/api/chat-lobby/private-chat";
 /** 私聊有变化（新消息、已读）时的页面事件：WebSocket 定向通知与本页发送后都会派发 */
@@ -90,6 +92,7 @@ interface PrivatePanelProps {
 
 /** 私聊窗口：左侧联系人（面对面时隐藏），右侧消息与发送区；窄屏时联系人与会话分两屏切换。 */
 export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanelProps) {
+  const admin = useShell()?.admin ?? false;
   const { contacts: loaded, error: contactsError } = usePrivateContacts();
   const contacts = useMemo(() => loaded ?? [], [loaded]);
   const [picked, setPicked] = useState(mode === "inbox" ? contactId ?? "" : "");
@@ -112,6 +115,11 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
 
   // 面对面时交谈对象由场景编号决定
   const selected = mode === "near" ? contacts.find(c => c.scene_id === sceneId)?.id ?? "" : picked;
+  useEffect(() => {
+    if (!admin) return;
+    window.dispatchEvent(new CustomEvent(ADMIN_PRIVATE_VIEW_EVENT, { detail: selected || null }));
+    return () => { window.dispatchEvent(new CustomEvent(ADMIN_PRIVATE_VIEW_EVENT, { detail: null })); };
+  }, [admin, selected]);
   const peer = contacts.find(c => c.id === selected);
   const lastMessage = messages.at(-1)?.seq;
 

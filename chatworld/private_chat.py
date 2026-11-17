@@ -32,7 +32,8 @@ def contacts(owner):
         result = []
         for r in peers:
             last = db.execute('SELECT text, created_at FROM lobby_messages WHERE owner=? AND peer=? ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
-            incoming = db.execute('SELECT max(created_at) FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0', (owner, r['owner'])).fetchone()[0]
+            incoming_row = db.execute('SELECT seq, text, created_at FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0 ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
+            incoming = incoming_row['created_at'] if incoming_row else None
             read = db.execute('SELECT seq FROM lobby_reads WHERE owner=? AND peer=?', (owner, r['owner'])).fetchone()
             count = db.execute('SELECT count(*) FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0 AND seq>?', (owner, r['owner'], read[0] if read else 0)).fetchone()[0]
             identity = identities[r['owner']]
@@ -42,6 +43,9 @@ def contacts(owner):
                 'last': last[0] if last else '', 'last_at': last[1] if last else 0, 'unread': count,
                 'can_reply': bool(incoming and now - incoming < REPLY_WINDOW_SECONDS),
             })
+            if owner == 'lihan':
+                result[-1].update(last_incoming_seq=incoming_row['seq'] if incoming_row else 0,
+                                  last_incoming=incoming_row['text'] if incoming_row else '')
         return result
 
 

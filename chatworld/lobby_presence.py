@@ -2,6 +2,7 @@
 
 - 只同步公共房间（入口厅 foyer、大厅 hall）；我的房间（room）为私有，只广播「进入私有房间」，不广播坐标
 - 以登录账号为单位显示角色：同一账号多开标签页时，以最近有动作的连接为准，其余连接只接收别人、不重复显示自己
+- 管理员可使用 background=1 跨页面连接按已认领工位代挂；前台大厅真实位置优先，普通账号维持原有规则
 - 账号的最后一个连接断开后等待 LEAVE_GRACE_SECONDS 再广播下线，刷新页面不会让别人看到角色离开又出现；
   客户端收到下线后，让该角色自动走回私有房间再消失
 - 在线状态只放在内存中，不写文件；服务重启后所有人重新连接即可恢复
@@ -37,13 +38,14 @@ import math
 import re
 import secrets
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
 from starlette.concurrency import run_in_threadpool
 
-from chatworld import lobby_profile
+from chatworld import lobby_profile, lobby_desks
 from chatworld.lobby_pool import PoolTable
 
 PUBLIC_ROOMS = frozenset({"foyer", "hall"})
@@ -79,6 +81,9 @@ class Connection:
 
     websocket: WebSocket
     username: str
+    # 仅管理员的跨页面连接使用工位代挂；普通账号不接受此模式。
+    background: bool = False
+    focused: bool = True
     queue: asyncio.Queue[str | None] = field(default_factory=lambda: asyncio.Queue(maxsize=SEND_QUEUE_SIZE))
     # 该连接最近一次上报的状态
     state: dict[str, Any] | None = None
@@ -136,7 +141,7 @@ class LobbyPresence:
         # 角色编号在进程生命周期内对同一账号保持不变，重连后其他人看到的仍是同一个角色
         self.ids: dict[str, str] = {}
         self.connections: set[Connection] = set()
-        self.pool = PoolTable(send=self._enqueue, connections=lambda: list(self.connections))
+        self.pool = PoolTable(send=self._enqueue, connections=lambda: [conn for conn in self.connections if not conn.background])
 
     # ---------- 序列化 ----------
 
@@ -171,7 +176,7 @@ class LobbyPresence:
         """发给除该账号自己以外的所有连接。"""
         text = json.dumps(payload, ensure_ascii=False)
         for conn in list(self.connections):
-            if conn.username != member.username:
+            if conn.username != member.username and not conn.background:
                 self._enqueue(conn, text)
 
     async def _sender(self, conn: Connection) -> None:
@@ -207,12 +212,53 @@ class LobbyPresence:
             return
         changed = state != conn.state
         conn.state = state
+        if conn.username == "lihan":
+            if changed:
+                conn.active_at = time.monotonic()
+            self._select_admin(member, conn if changed else None)
+            return
         if not changed:
             return
         conn.active_at = time.monotonic()
         # 有动作的连接接管显示：同账号多开时以最近操作的标签页为准
         member.primary = conn
         self._publish(member)
+
+    def _select_admin(self, member: Member, changed: Connection | None = None) -> None:
+        """前台大厅优先；切到其他页面时使用工位连接，后台大厅不抢占位置。"""
+        candidates = [c for c in member.connections if c.state]
+        if not candidates:
+            return
+        def priority(c: Connection):
+            rank = (2 if c.focused else 1) if c.background else (3 if c.focused else 0)
+            return rank, c.active_at
+        selected = max(candidates, key=priority)
+        previous = member.primary
+        member.primary = selected
+        if previous is not selected or changed is selected:
+            self._publish(member)
+
+    @staticmethod
+    def _admin_desk_state() -> dict[str, Any]:
+        """从已认领工位与真实地图生成坐姿，未认领时保持私有，不自动抢占工位。"""
+        mine = lobby_desks.owned_desk("lihan")
+        layout = json.loads((Path(__file__).resolve().parents[1] / "frontend/public/chat-lobby/club/layout.json").read_text())
+        for room in layout["rooms"]:
+            for desk in room.get("desks", []):
+                if desk["id"] == mine:
+                    seat = desk["seat"]
+                    return {"room": room["id"], "x": room["x"] + seat["x"], "y": room["y"] + seat["y"], "dir": seat["dir"], "moving": False, "pose": "sit"}
+        return {"room": "room"}
+
+    def _handle_activity(self, conn: Connection, data: dict[str, Any]) -> None:
+        if conn.username != "lihan":
+            return
+        conn.focused = data.get("active") is True
+        if conn.focused:
+            conn.active_at = time.monotonic()
+        member = self.members.get(conn.username)
+        if member:
+            self._select_admin(member)
 
     def _attach(self, conn: Connection, profile: dict[str, Any]) -> Member:
         member = self.members.get(conn.username)
@@ -234,6 +280,9 @@ class LobbyPresence:
         if member is None or conn not in member.connections:
             return
         member.connections.remove(conn)
+        if conn.username == "lihan" and member.connections:
+            self._select_admin(member)
+            return
         if member.primary is conn:
             # 主连接关闭：交给剩余连接中最近有动作的一个，其状态若不同会表现为一次瞬移
             # 没有其他连接时保留旧主连接，宽限期内新进入的人仍能在快照里看到该角色停在原地
@@ -328,19 +377,28 @@ class LobbyPresence:
 
     async def serve(self, websocket: WebSocket, username: str) -> None:
         """处理一个已通过鉴权的 WebSocket 连接，直到断开。"""
+        background = websocket.query_params.get("background") == "1"
+        if background and username != "lihan":
+            await websocket.close(code=CLOSE_FORBIDDEN)
+            return
         if len(self.connections) >= MAX_CONNECTIONS:
             await websocket.close(code=CLOSE_FULL)
             return
         profile = await run_in_threadpool(lobby_profile.get_profile, username)
         await websocket.accept()
-        conn = Connection(websocket=websocket, username=username)
-        self._attach(conn, profile)
-        conn.queue.put_nowait(self._snapshot(username))
-        conn.queue.put_nowait(self.pool.summary_text())
+        conn = Connection(websocket=websocket, username=username, background=background, focused=not background)
+        member = self._attach(conn, profile)
+        if background:
+            conn.state = await run_in_threadpool(self._admin_desk_state)
+            self._select_admin(member, conn)
+        if not background:
+            conn.queue.put_nowait(self._snapshot(username))
+            conn.queue.put_nowait(self.pool.summary_text())
         sender = asyncio.create_task(self._sender(conn))
         try:
             while not sender.done():
-                text = await asyncio.wait_for(websocket.receive_text(), IDLE_TIMEOUT_SECONDS)
+                # 浏览器后台计时器可能降至每分钟一次；管理员代挂仍由 WebSocket 断线与心跳共同回收。
+                text = await asyncio.wait_for(websocket.receive_text(), 90.0 if conn.background else IDLE_TIMEOUT_SECONDS)
                 if len(text) > MAX_MESSAGE_CHARS or not self._allow(conn):
                     continue
                 try:
@@ -348,6 +406,17 @@ class LobbyPresence:
                 except json.JSONDecodeError:
                     continue
                 if not isinstance(data, dict):
+                    continue
+                if conn.background:
+                    if data.get("type") == "background":
+                        state = await run_in_threadpool(self._admin_desk_state)
+                        changed = state != conn.state
+                        conn.state = state
+                        self._handle_activity(conn, data)
+                        self._select_admin(member, conn if changed else None)
+                    continue
+                if data.get("type") == "activity":
+                    self._handle_activity(conn, data)
                     continue
                 if data.get("type") == "state":
                     self._handle_state(conn, data)

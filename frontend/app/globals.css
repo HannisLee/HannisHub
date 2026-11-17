@@ -876,6 +876,20 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .document-pdf-open:hover { color: var(--color-text-primary); }
 .document-pdf-preview { display: block; width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); }
 .document-html-preview { background: var(--color-control-light); color-scheme: light; }
+
+/* 管理员跨页面消息入口与原生私聊对话框。 */
+.admin-message-controls { position: relative; display: flex; align-items: center; gap: var(--space-1); }
+.admin-message-settings { position: absolute; top: calc(100% + var(--space-3)); right: 0; z-index: 100; display: grid; gap: var(--space-3); width: min(320px, calc(100vw - 32px)); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.admin-message-settings label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); font-size: 13px; }
+.admin-message-settings p { margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
+.admin-message-toast { border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.admin-private-dialog { max-width: calc(100vw - var(--space-8)); max-height: calc(100dvh - var(--space-8)); margin: auto; padding: 0; color: var(--color-text-primary); }
+.admin-private-dialog::backdrop { background: color-mix(in srgb, var(--color-bg) 78%, transparent); }
+@media (max-width: 767px) {
+  .admin-private-dialog { max-width: 100vw; max-height: 100dvh; }
+  .admin-message-controls .button-sm { padding-inline: var(--space-2); }
+  .admin-message-settings { position: fixed; top: 68px; right: var(--space-4); }
+}
 .document-pdf-container.is-expanded { position: fixed; z-index: 1000; inset: 0; padding: var(--space-3); background: var(--color-bg); }
 
 .document-reader-head { display: grid; gap: var(--space-1); min-width: 0; margin: 0 auto var(--space-6); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-divider); }

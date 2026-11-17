@@ -26,10 +26,19 @@ export class PresenceClient {
   private sentKey = "";
   private sentAt = 0;
 
-  constructor(private readonly onMessage: (message: LobbyServerMessage) => void) {
+  constructor(private readonly onMessage: (message: LobbyServerMessage) => void, private readonly admin = false) {
     bindPoolSender(payload => this.sendRaw(payload));
     this.connect();
+    if (admin) {
+      window.addEventListener("focus", this.reportActivity);
+      window.addEventListener("blur", this.reportActivity);
+      document.addEventListener("visibilitychange", this.reportActivity);
+    }
   }
+
+  private reportActivity = () => {
+    if (this.admin) this.sendRaw({ type: "activity", active: document.visibilityState === "visible" && document.hasFocus() });
+  };
 
   /** 台球桌等附加功能的原样发送：连接未打开时返回 false */
   private sendRaw(payload: object): boolean {
@@ -51,6 +60,7 @@ export class PresenceClient {
     this.socket = socket;
     socket.onopen = () => {
       this.retry = 0;
+      this.reportActivity();
       // 新连接立即上报一次当前状态
       this.sentKey = "";
       this.flush(true);
@@ -127,6 +137,9 @@ export class PresenceClient {
   }
 
   destroy() {
+    window.removeEventListener("focus", this.reportActivity);
+    window.removeEventListener("blur", this.reportActivity);
+    document.removeEventListener("visibilitychange", this.reportActivity);
     this.destroyed = true;
     bindPoolSender(null);
     if (this.retryTimer) clearTimeout(this.retryTimer);

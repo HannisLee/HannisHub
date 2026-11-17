@@ -30,6 +30,17 @@ let soundLoaded = false;
 const listeners = new Set<() => void>();
 const unreadIds = new Set<number>();
 let lastRead = 0;
+let adminAlertHandler: ((messages: readonly ChatRoomMessage[]) => void) | null = null;
+
+/** 管理员外壳接管跨页面提醒；普通账号继续使用原有提示音。 */
+export function setAdminChatAlertHandler(handler: typeof adminAlertHandler) {
+  adminAlertHandler = handler;
+}
+
+export function announceChatMessages(messages: readonly ChatRoomMessage[]) {
+  if (adminAlertHandler) adminAlertHandler(messages);
+  else playChatDing();
+}
 
 function emit(next: Partial<NotifyState>) {
   state = { ...state, ...next };

@@ -11,7 +11,7 @@ import {
   getLastRead,
   isFromOthers,
   markChatRead,
-  playChatDing,
+  announceChatMessages,
   readChatClientId,
   setChatUnread,
   showChatToast,
@@ -66,7 +66,7 @@ export function useChatWatcher(enabled: boolean) {
       if (fresh.length === 0) return;
       addChatUnread(fresh);
       showChatToast(fresh[fresh.length - 1]);
-      playChatDing();
+      announceChatMessages(fresh);
     }
 
     let timer: number | undefined;

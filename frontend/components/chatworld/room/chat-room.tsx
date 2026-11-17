@@ -9,7 +9,7 @@ import {
   getLastRead,
   isFromOthers,
   markChatRead,
-  playChatDing,
+  announceChatMessages,
   setChatSoundEnabled,
 } from "../../../lib/chat-notify";
 import { errorMessage, formatBytes } from "../../../lib/format";
@@ -19,6 +19,8 @@ import { Button, ErrorState, LoadingState } from "../../ui/primitives";
 import { Avatar, formatChatTime as formatTime } from "../shared/chat-avatar";
 import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
+import { useShell } from "../../layout/shell-context";
+import { ADMIN_PRIVATE_VIEW_EVENT } from "../../../lib/admin-notify";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
 const PROFILE = `${API_PATHS.chatRoom}/profile`;
@@ -138,6 +140,7 @@ function thumbnailStyle(width?: number, height?: number) {
 
 /** 公共聊天室：顶部为在线人数与个人设置，中部为共享消息流，底部为输入框、附件与表情 */
 export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
+  const admin = useShell()?.admin ?? false;
   const [messages, setMessages] = useState<ChatRoomMessage[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const [profiles, setProfiles] = useState<Record<string, ChatRoomProfile>>({});
@@ -174,7 +177,8 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
   const me = profiles[clientId];
 
   /** 当前是否在看最新消息：页面可见且滚动在底部 */
-  const isWatching = useCallback(() => !document.hidden && stickToBottomRef.current, []);
+  const isAttended = useCallback(() => !document.hidden && (!admin || (document.hasFocus() && !document.querySelector(".admin-private-dialog[open]"))), [admin]);
+  const isWatching = useCallback(() => isAttended() && stickToBottomRef.current, [isAttended]);
 
   const updatePending = useCallback((update: (current: PendingMessage[]) => PendingMessage[]) => {
     const before = pendingRef.current;
@@ -210,14 +214,14 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
     }
     // 不在看最新消息：计入未读、提示音，滚动在上方时显示「新消息」按钮
     addChatUnread(fromOthers);
-    playChatDing();
+    announceChatMessages(fromOthers);
     if (!stickToBottomRef.current) setNewBelow(count => count + fromOthers.length);
   }, [isWatching, updatePending]);
 
   /** 当前真正看到的最后一条服务端消息编号：页面可见时，取列表可视区域内最靠下的那条；否则为 0 */
   const visibleLastId = useCallback((): number => {
     const box = listRef.current;
-    if (!box || document.visibilityState !== "visible") return 0;
+    if (!box || document.visibilityState !== "visible" || !isAttended()) return 0;
     const view = box.getBoundingClientRect();
     const rows = box.querySelectorAll<HTMLElement>("[data-msg-id]");
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -225,7 +229,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
       if (rect.top < view.bottom - 8 && rect.bottom > view.top) return Number(rows[index].dataset.msgId) || 0;
     }
     return 0;
-  }, []);
+  }, [isAttended]);
 
   const fetchMessages = useCallback(async () => {
     const readUpTo = visibleLastId();
@@ -344,7 +348,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
       try {
         const data = await fetchMessages();
         initializedRef.current = true;
-        markChatRead(lastIdRef.current);
+        if (!admin || isAttended()) markChatRead(lastIdRef.current);
         // 首次进入或尚未绑定账号时登记资料：名字与头像由服务端按登录账号取自「我的房间」
         if (!data.profiles?.[id]?.linked) {
           let nickname = storageGet(NICKNAME_KEY);
@@ -367,15 +371,23 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
     }, POLL_MS);
     // 回到页面且停在底部时，视为已读
     const onVisible = () => {
-      if (!document.hidden && stickToBottomRef.current) markChatRead(lastIdRef.current);
-      if (!document.hidden) syncRead();
+      if (isWatching() && (!admin || listRef.current?.isConnected)) markChatRead(lastIdRef.current);
+      if (isAttended()) syncRead();
     };
     document.addEventListener("visibilitychange", onVisible);
+    if (admin) {
+      window.addEventListener("focus", onVisible);
+      window.addEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
+    }
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
+      if (admin) {
+        window.removeEventListener("focus", onVisible);
+        window.removeEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
+      }
     };
-  }, [fetchMessages, saveProfile, syncRead]);
+  }, [admin, fetchMessages, isAttended, isWatching, saveProfile, syncRead]);
 
   // 停留在底部时，新消息（含本地待发送消息）自动滚动到底
   useEffect(() => {
@@ -445,7 +457,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
     stickToBottomRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
     if (stickToBottomRef.current) {
       setNewBelow(0);
-      if (!document.hidden) markChatRead(lastIdRef.current);
+      if (isAttended()) markChatRead(lastIdRef.current);
     }
     syncRead();
   }

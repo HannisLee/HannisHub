@@ -12,6 +12,7 @@ import { ChatToastView, useChatNotify, useChatNotifyEffects, useChatWatcher } fr
 import { DocumentTitle } from "./document-title";
 import { ShellContext, type ShellInfo } from "./shell-context";
 import { SidebarNav } from "./sidebar-nav";
+import { AdminMessageControls, AdminMessageOverlays, useAdminMessages } from "./admin-messages";
 
 /** 侧栏收起状态按浏览器标签页保存，刷新与跨页面跳转后保持同一形态 */
 const COLLAPSE_STORAGE_KEY = "hannishub_sidebar_collapsed";
@@ -85,9 +86,12 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
 
   // 聊天室新消息提醒：聊天室页面与内嵌聊天面板由聊天组件自己处理，其他情况在后台检查
   const onChatPage = pathname === "/chat" || pathname === "/chat/";
+  const admin = isAdmin(auth?.username);
+  const adminMessages = useAdminMessages(!!auth?.authenticated && admin, pathname === "/chat-lobby" || pathname === "/chat-lobby/");
   const { unread, embedded } = useChatNotify();
+  const totalUnread = unread + (admin ? adminMessages.unread : 0);
   useChatWatcher(!!auth?.authenticated && !onChatPage && !embedded);
-  useChatNotifyEffects(unread);
+  useChatNotifyEffects(totalUnread);
 
   useEffect(() => {
     let active = true;
@@ -131,7 +135,6 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
     router.replace("/login");
   }, [router]);
 
-  const admin = isAdmin(auth?.username);
   const immersive = immersiveForRegular && !!auth?.authenticated && !admin;
   const shellInfo = useMemo<ShellInfo>(
     () => ({ username: auth?.username ?? "", admin, immersive, logout }),
@@ -150,7 +153,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
   if (immersive) {
     return (
       <ShellContext.Provider value={shellInfo}>
-        <DocumentTitle title={pageTitle} unread={unread} />
+        <DocumentTitle title={pageTitle} unread={totalUnread} />
         <main className={`immersive-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
       </ShellContext.Provider>
     );
@@ -163,7 +166,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
   return (
     <ShellContext.Provider value={shellInfo}>
       <div className="app-shell">
-        <DocumentTitle title={pageTitle} unread={unread} />
+        <DocumentTitle title={pageTitle} unread={totalUnread} />
         <div className={`shell-overlay${mobileDrawerOpen ? " is-visible" : ""}`} onClick={closeDrawer} />
         <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
           <div className="sidebar-head">
@@ -200,13 +203,14 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
             <button className="menu-toggle" type="button" onClick={toggleNavigation} aria-expanded={navigationOpen} aria-controls="main-sidebar" aria-label={navigationOpen ? "收起导航" : "展开导航"}>☰</button>
             <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current.label}</strong></div>
             <div className="topbar-user">
+              {admin ? <AdminMessageControls /> : null}
               <span className="user-name">{auth.username || "管理员"}</span>
               <Button variant="quiet" size="sm" onClick={logout}>退出</Button>
             </div>
           </header>
           <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
         </div>
-        {onChatPage ? null : <ChatToastView />}
+        {admin ? <AdminMessageOverlays /> : onChatPage ? null : <ChatToastView />}
       </div>
     </ShellContext.Provider>
   );

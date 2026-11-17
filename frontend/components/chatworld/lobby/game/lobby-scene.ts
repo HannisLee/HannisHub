@@ -202,8 +202,8 @@ export class LobbyScene extends Phaser.Scene {
     if (spawn.cycleDoor) this.time.delayedCall(250, () => this.cycleDoors(start));
     this.cameras.main.fadeIn(400, 20, 20, 19);
 
-    // 多人同步：游戏销毁（离开页面）时断开连接，其他人随后看到该角色走回私有房间
-    this.presence = new PresenceClient(message => this.handlePresence(message));
+    // 游戏销毁时断开场景连接；管理员可由外壳接回工位，其余账号沿用下线逻辑
+    this.presence = new PresenceClient(message => this.handlePresence(message), this.bridge.admin);
     this.events.once(Phaser.Scenes.Events.DESTROY, () => {
       this.destroyed = true;
       this.presence?.destroy();

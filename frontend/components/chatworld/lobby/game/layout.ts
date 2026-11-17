@@ -175,6 +175,8 @@ export interface DeskClaim {
 
 /** React 与 Phaser 共享的可变桥接对象：React 写入，场景每帧读取，避免跨层重渲染 */
 export interface LobbyBridge {
+  /** 仅管理员跨页面在线状态需要感知大厅窗口是否正在操作。 */
+  admin?: boolean;
   touch: { x: number; y: number };
   /** 自定义形象：合成好的 96x320 帧表（null 时使用默认角色）；version 变化时场景重新贴图 */
   avatar: { sheet: HTMLCanvasElement | null; version: number };

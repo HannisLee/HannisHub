@@ -21,6 +21,13 @@ DESK_COUNT = 6
 DESK_IDS = frozenset(f"desk-{n}" for n in range(1, DESK_COUNT + 1))
 
 
+def owned_desk(username: str) -> str | None:
+    """跨页面代挂只需读取当前账号的工位，不枚举其他人的资料。"""
+    with connect() as conn:
+        row = conn.execute("SELECT desk FROM lobby_desks WHERE owner = ?", (username,)).fetchone()
+    return row["desk"] if row and row["desk"] in DESK_IDS else None
+
+
 def desk_state(username: str) -> dict[str, Any]:
     """全部已认领的工位（显示名字与是否为自己的）以及自己的工位编号。"""
     with connect() as conn:
