@@ -8,3 +8,4 @@ itsdangerous
 tqdm
 paramiko>=3.4
 websockets>=15
+pillow

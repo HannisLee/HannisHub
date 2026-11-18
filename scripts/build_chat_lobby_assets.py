@@ -872,9 +872,16 @@ def build_foyer() -> Room:
 DESK_COUNT = 6
 
 
+def wrap_zone(solid: list[int], side: int = 10, up: int = 8, down: int = 12) -> list[int]:
+    """以家具碰撞盒为基准向四周扩出站立交互区（左右 side、上 up、下 down），
+    让椅子前后左右都能触发；碰撞盒内部站不进去，扩进去的部分不影响判定。"""
+    x, y, w, h = solid
+    return [x - side, y - up, w + side * 2, h + up + down]
+
+
 def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str, chair: str) -> None:
     """一个工位：长条木桌 + 桌面双屏滚动显示器（屏幕与键盘完整落在桌面内）+ 桌角小物 + 桌前转椅。
-    转椅为背对镜头的高背办公椅（16x32，与角色等高），坐下时椅背挡住角色后背，只露出头和肩膀；站到椅子后方按 E。"""
+    转椅为背对镜头的高背办公椅（16x32，与角色等高），坐下时椅背挡住角色后背，只露出头和肩膀；走到椅子旁按 E。"""
     dw, dh = OBJECTS["work_desk"].size
     bottom = top + dh
     room.put("work_desk", x, bottom, foot=14)
@@ -894,7 +901,7 @@ def workstation(room: Room, desk_id: str, x: int, top: int, accessory: str, chai
     room.put(chair, cx - cw // 2, chair_bottom, solid=[cx - 6, chair_bottom - 5, 12, 5])
     room.desks.append({
         "id": desk_id,
-        "zone": [cx - 14, chair_bottom - 3, 28, 15],
+        "zone": wrap_zone([cx - 6, chair_bottom - 5, 12, 5], up=6),
         # 坐下：脚底在椅子底边上方 18px（角色上沿高出椅背 19px），椅背（深度为椅子底边）画在角色前面，只露出头和肩膀
         "seat": {"x": cx, "y": chair_bottom - 18, "dir": "up"},
         "signX": cx, "signY": top - 7,
@@ -938,7 +945,7 @@ def build_hall() -> Room:
             n += 1
             workstation(room, f"desk-{n}", 31 + col * 84, top, accessories[n - 1], chairs[n - 1])
     assert n == DESK_COUNT
-    room.signs.append({"x": 151, "y": 228, "text": "工位区 · 站到椅子后按 E 坐下 / 认领", "tone": "muted"})
+    room.signs.append({"x": 151, "y": 228, "text": "工位区 · 走到椅子旁按 E 坐下 / 认领", "tone": "muted"})
 
     # ---- 右上：机器区。两个工作间同一套做法：专属墙面 + 深色地毯（强调色内框）+ 靠墙设备 + 台前操作椅，
     # 站上地毯按 E 交互。ASR 是录音棚（吸音棉墙、REC 灯、监听音箱、调音台、吊杆话筒、补光灯），
@@ -992,7 +999,8 @@ def build_hall() -> Room:
     for key, sx, sb, facing in stools:
         sw = OBJECTS[key].width
         room.put(key, sx - sw // 2, sb, solid=[sx - 4, sb - 4, 8, 4])
-        zone = [sx - 22, sb - 9, 14, 14] if facing == "right" else [sx + 8, sb - 9, 14, 14]
+        # 上下留白小于凳间距（20px），同侧两张凳子的交互区不重叠
+        zone = wrap_zone([sx - 4, sb - 4, 8, 4], up=6, down=8)
         room.seat(sx + (2 if facing == "right" else -2), sb + 1, facing, zone, title="坐高脚凳")
     room.machines.append({
         "id": "chat", "title": "聊天室", "hint": "和大家一起聊天",
@@ -1023,9 +1031,13 @@ def build_hall() -> Room:
     room.rug((px - 22, 238, px + 62, 300), floor_tex(12, 26), edge=(60, 40, 30))
     room.anim("piano", px, pb - 32, solid=[px + 1, pb - 12, 30, 12], frames="once")
     bw = OBJECTS["piano_bench"].width
-    room.put("piano_bench", px + 16 - bw // 2, pb + 12, solid=[px + 10, pb + 6, 12, 5])
-    room.seat(px + 16, pb + 10, "up", [px + 4, pb + 10, 24, 14], title="弹钢琴")
-    room.seats[-1]["play"] = "piano"
+    bench_solid = [px + 10, pb + 6, 12, 5]
+    room.put("piano_bench", px + 16 - bw // 2, pb + 12, solid=bench_solid)
+    piano_seat = room.seat(px + 16, pb + 10, "up", wrap_zone(bench_solid, up=6), title="弹钢琴")
+    piano_seat["play"] = "piano"
+    # 与街机一样的悬浮铭牌，挂在钢琴上方
+    piano_seat["signX"] = px + 16
+    piano_seat["signY"] = pb - 46
     room.put("guitar", px + 38, pb, foot=6)
     room.put("guitar_blue", px + 52, pb + 2, foot=6)
     room.action("guitar", "吉他", "拨一段旋律", [px + 34, pb - 2, 34, 16], sound="guitar")
@@ -1036,11 +1048,12 @@ def build_hall() -> Room:
     room.put("sofa_front", sofa_x, sofa_b, foot=12)
     for i in range(3):
         sx = sofa_x + 8 + i * 16
-        room.seat(sx, sofa_b + 1, "down", [sx - 7, sofa_b, 14, 14], title="坐沙发")
+        # 三个坐垫区左右相接不重叠，向前（镜头方向）加深，正面走近即可触发
+        room.seat(sx, sofa_b + 1, "down", [sx - 8, sofa_b, 16, 20], title="坐沙发")
     for key, ax in (("armchair_red", 40), ("armchair_blue", 148)):
         aw = OBJECTS[key].width
-        room.put(key, ax, sofa_b + 2, foot=10)
-        room.seat(ax + aw // 2, sofa_b + 3, "down", [ax + aw // 2 - 8, sofa_b + 2, 16, 14], title="坐扶手椅")
+        chair = room.put(key, ax, sofa_b + 2, foot=10)
+        room.seat(ax + aw // 2, sofa_b + 3, "down", wrap_zone(chair["solid"]), title="坐扶手椅")
     room.put("coffee_table", sofa_x + 5, sofa_b + 34, foot=12)
     room.prop("lamp_floor", 22, 236, foot=6)
     room.put("lamp_floor", 196, sofa_b - 2, foot=6)
@@ -1050,7 +1063,8 @@ def build_hall() -> Room:
     room.action("train", "小火车", "看小火车转圈", [36, 368, 88, 14])
     room.put("bookshelf_wide", 136, floor_bottom - 8, foot=12)
     room.put("bookshelf", 172, floor_bottom - 8, foot=12)
-    room.action("book", "书柜", "翻一本书", [132, floor_bottom - 22, 72, 14])
+    # 交互区要盖到书柜碰撞盒下方的柜前地面，否则站在柜前反而触发不了
+    room.action("book", "书柜", "翻一本书", [132, floor_bottom - 22, 72, 22])
     room.put("plant_big", 206, floor_bottom - 4, foot=10)
 
     # ---- 中下：茶水间（橱柜台面 + 咖啡机 + 冰箱），两张小圆桌配侧向餐椅
@@ -1068,10 +1082,13 @@ def build_hall() -> Room:
         room.put("table_round_dark", tx - 12, tbm, foot=14)
         lw = OBJECTS["chair_side_r"].width
         rx = tx - 14 - lw
-        room.put("chair_side_r", rx, tbm, solid=[rx + 1, tbm - 5, lw - 2, 5])
-        room.seat(rx + 8, tbm + 1, "right", [tx - 34, tbm - 14, 14, 16], title="坐下")
-        room.put("chair_side_l", tx + 14, tbm, solid=[tx + 15, tbm - 5, OBJECTS["chair_side_l"].width - 2, 5])
-        room.seat(tx + 14 + OBJECTS["chair_side_l"].width - 8, tbm + 1, "left", [tx + 22, tbm - 14, 14, 16], title="坐下")
+        left_solid = [rx + 1, tbm - 5, lw - 2, 5]
+        room.put("chair_side_r", rx, tbm, solid=left_solid)
+        # 左右留白收窄到 8px：相邻两桌的椅区在桌间通道处不重叠
+        room.seat(rx + 8, tbm + 1, "right", wrap_zone(left_solid, side=8), title="坐下")
+        right_solid = [tx + 15, tbm - 5, OBJECTS["chair_side_l"].width - 2, 5]
+        room.put("chair_side_l", tx + 14, tbm, solid=right_solid)
+        room.seat(tx + 14 + OBJECTS["chair_side_l"].width - 8, tbm + 1, "left", wrap_zone(right_solid, side=8), title="坐下")
 
     # ---- 右下：游戏角（街机连连看、弹珠机、完整台球桌与球杆架、蛋椅）
     gx0, gx1 = 400, w - 22
@@ -1102,10 +1119,12 @@ def build_hall() -> Room:
         left, right = f"egg_{color}_r", f"egg_{color}"
         ew = OBJECTS[left].width
         lx, rx = tx - 14 - ew, tx + 14
-        room.put(left, lx, tbm, solid=[lx + 2, tbm - 6, ew - 4, 6])
-        room.seat(lx + ew - 7, tbm + 1, "right", [lx - 2, tbm - 4, ew + 2, 14], title="坐蛋椅")
-        room.put(right, rx, tbm, solid=[rx + 2, tbm - 6, ew - 4, 6])
-        room.seat(rx + 7, tbm + 1, "left", [rx, tbm - 4, ew + 2, 14], title="坐蛋椅")
+        left_solid = [lx + 2, tbm - 6, ew - 4, 6]
+        room.put(left, lx, tbm, solid=left_solid)
+        room.seat(lx + ew - 7, tbm + 1, "right", wrap_zone(left_solid), title="坐蛋椅")
+        right_solid = [rx + 2, tbm - 6, ew - 4, 6]
+        room.put(right, rx, tbm, solid=right_solid)
+        room.seat(rx + 7, tbm + 1, "left", wrap_zone(right_solid), title="坐蛋椅")
     room.put("lamp_floor_red", gx1 - 18, 290, foot=6)
 
     room.spawns["fromFoyer"] = {"x": door_x + 16, "y": 96, "dir": "down"}
@@ -1145,12 +1164,13 @@ def build_room() -> Room:
     room.put("plant_desk", 23, 92, solid=False, depth=107)
     room.put("lamp_desk_cream", 38, 91, solid=False, depth=107)
     room.put("bookshelf", 56, 106, foot=12)
-    room.put("chair_office", 28, 132, solid=[30, 127, 12, 5])
-    room.seat(36, 114, "up", [24, 129, 24, 14], title="坐下")
+    chair = room.put("chair_office", 28, 132, solid=[30, 127, 12, 5])
+    room.seat(36, 114, "up", wrap_zone(chair["solid"], up=6), title="坐下")
     # 右下：地毯上一把蛋椅侧对小圆桌（开口朝向桌子，可以坐），桌边睡猫
     room.decal("rug_beige", 122, 102)
-    room.put("egg_blue_r", 124, 126, solid=[126, 120, 15, 6])
-    room.seat(136, 127, "right", [120, 122, 21, 14], title="坐蛋椅")
+    egg_solid = [126, 120, 15, 6]
+    room.put("egg_blue_r", 124, 126, solid=egg_solid)
+    room.seat(136, 127, "right", wrap_zone(egg_solid), title="坐蛋椅")
     room.put("table_round", 145, 126, foot=14)
     room.anim("cat", 136, 128, depth=144)
 

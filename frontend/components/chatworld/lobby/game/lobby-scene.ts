@@ -306,7 +306,10 @@ export class LobbyScene extends Phaser.Scene {
 
     for (const sign of def.signs) this.createSign(ox + sign.x, oy + sign.y, sign.text, sign.tone === "brand");
     for (const machine of def.machines) {
-      if (machine.signX !== undefined && machine.signY !== undefined) this.createMachineSign(ox + machine.signX, oy + machine.signY, machine);
+      if (machine.signX !== undefined && machine.signY !== undefined) this.createFloatingSign(ox + machine.signX, oy + machine.signY, machine.title);
+    }
+    for (const seat of def.seats ?? []) {
+      if (seat.signX !== undefined && seat.signY !== undefined) this.createFloatingSign(ox + seat.signX, oy + seat.signY, seat.title);
     }
 
     const toRect = ([x, y, w, h]: Rect) => new Phaser.Geom.Rectangle(ox + x, oy + y, w, h);
@@ -363,9 +366,9 @@ export class LobbyScene extends Phaser.Scene {
     return this.add.container(0, 0, [g, label]).setDepth(55000);
   };
 
-  /** 机器上方的悬浮铭牌：品牌色指示点 + 名称，轻微上下浮动 */
-  private createMachineSign(x: number, y: number, machine: MachineDef) {
-    const label = this.makeText(machine.title, 6.5, COLORS.text);
+  /** 机器与钢琴凳上方的悬浮铭牌：品牌色指示点 + 名称，轻微上下浮动 */
+  private createFloatingSign(x: number, y: number, title: string) {
+    const label = this.makeText(title, 6.5, COLORS.text);
     const w = Math.ceil(label.width) + 18;
     const h = 12;
     const g = this.add.graphics();

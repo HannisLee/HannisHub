@@ -68,6 +68,9 @@ export interface SeatDef {
   title: string;
   /** 坐下后顺带演奏的乐器（钢琴凳） */
   play?: "piano";
+  /** 悬浮铭牌位置；缺省时不显示（钢琴凳与机器一样有浮动标签） */
+  signX?: number;
+  signY?: number;
 }
 
 /** 工位：可认领；认领者坐到自己的工位上打开待办 */
