@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "../../lib/api";
+import { ADMIN_HOME, canVisitPage, isAdmin, REGULAR_HOME } from "../../lib/navigation";
 import { DocumentTitle } from "../../components/layout/document-title";
 
 interface AuthStatus {
@@ -17,9 +17,13 @@ interface AuthResponse {
   username: string;
 }
 
-function nextPath(): string {
+function nextPath(username: string | null | undefined): string {
+  const home = isAdmin(username) ? ADMIN_HOME : REGULAR_HOME;
   const value = new URLSearchParams(window.location.search).get("next");
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
+  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\")) return home;
+  const next = new URL(value, window.location.origin);
+  if (next.origin !== window.location.origin || next.pathname === "/" || next.pathname.replace(/\/$/, "") === "/login") return home;
+  return canVisitPage(username, next.pathname) ? next.pathname + next.search + next.hash : home;
 }
 
 export default function LoginPage() {
@@ -35,7 +39,7 @@ export default function LoginPage() {
     void apiFetch<AuthStatus>("/api/auth/status")
       .then(value => {
         setStatus(value);
-        if (value.authenticated) router.replace(nextPath());
+        if (value.authenticated) router.replace(nextPath(value.username));
       })
       .catch(reason => setError(reason instanceof Error ? reason.message : "无法读取登录状态"));
   }, [router]);
@@ -50,11 +54,11 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      await apiFetch<AuthResponse>(status.configured ? "/api/auth/login" : "/api/auth/setup", {
+      const result = await apiFetch<AuthResponse>(status.configured ? "/api/auth/login" : "/api/auth/setup", {
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
-      router.replace(nextPath());
+      router.replace(nextPath(result.username));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "操作失败，请稍后重试");
       setBusy(false);
@@ -66,7 +70,7 @@ export default function LoginPage() {
       <DocumentTitle title="登录" />
       <section className="login-panel" aria-labelledby="login-title">
         <div className="brand-lockup login-brand">
-          <Link href="/" className="brand-mark" aria-label="返回 HannisHub 首页">HH</Link>
+          <span className="brand-mark" aria-hidden="true">HH</span>
           <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
         </div>
         <p className="eyebrow">Private workspace</p>

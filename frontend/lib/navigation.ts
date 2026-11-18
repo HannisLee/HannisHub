@@ -17,8 +17,11 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/** 管理员与普通账号登录后的默认页面 */
+export const ADMIN_HOME = "/terminal";
+export const REGULAR_HOME = "/chat-lobby";
+
 export const navigation: NavGroup[] = [
-  { id: "overview", label: "总览", items: [{ href: "/", label: "Overview", title: "总览", icon: "overview" }] },
   {
     id: "chatworld",
     label: "聊天大厅",
@@ -54,6 +57,7 @@ export const navigation: NavGroup[] = [
     id: "settings",
     label: "设置",
     items: [
+      { href: "/settings/global", label: "全局设置", icon: "settings", adminOnly: true },
       { href: "/settings", label: "AI 能力", icon: "settings" },
       { href: "/settings/users", label: "用户管理", icon: "users" },
       { href: "/files", label: "文件游览", icon: "files" },
@@ -62,7 +66,7 @@ export const navigation: NavGroup[] = [
       { href: "/files/documents", label: "文档查看", icon: "documents" },
       // 点云预览暂时从侧栏隐藏，页面与组件代码保留，取消注释即可恢复
       // { href: "/files/point-clouds", label: "点云预览", icon: "pointcloud" },
-      { href: "/terminal", label: "终端", icon: "terminal", adminOnly: true },
+      { href: ADMIN_HOME, label: "终端", icon: "terminal", adminOnly: true },
     ],
   },
 ];
@@ -73,7 +77,6 @@ export function navTitle(item: NavItem): string {
 }
 
 export function isActivePath(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
   if (href === "/files") return pathname === "/files";
   if (href === "/settings") return pathname === "/settings" || pathname === "/settings/";
   if (href === "/files/point-clouds" && pathname === "/point-clouds") return true;
@@ -84,9 +87,6 @@ export function isActivePath(pathname: string, href: string): boolean {
 export function isAdmin(username: string | null | undefined): boolean {
   return username === "lihan";
 }
-
-/** 普通账号登录后的默认页面，也是访问受限页面时的跳转目标 */
-export const REGULAR_HOME = "/chat-lobby";
 
 /** 普通用户只能使用聊天大厅、聊天室、ASR、OCR 和工位待办页面。 */
 export function canVisitPage(username: string | null | undefined, pathname: string): boolean {

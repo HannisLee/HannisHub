@@ -106,7 +106,7 @@ HannisHub/
 - 统一前端的 HTML 与 Next.js 导航数据（`index.txt`、`__next.*.txt`）返回 `Cache-Control: no-store`，避免跨构建混用页面与脚本。普通账号仅可读取已授权页面（聊天大厅、聊天室、工位待办、ASR、OCR）直属的导航数据，管理页面与任意文本文件不因扩展名而开放。
 - 在 `frontend/` 执行 `npm run build` 时，通过 `scripts/build.mjs` 在构建前后把哈希静态资源保存到 `frontend/.static-cache/`（不入库），后续构建清理七天内未被当前版本使用的资源。`/_next/static/` 优先读取本次导出，缺失时从保留区读取，兼容更新前已打开的大厅按需加载聊天等面板，也覆盖构建期间的脚本请求；构建完成后仍只重启 Hub，不重启独立终端后台。
 
-- `/`：统一 Dashboard 总览，展示受管进程、GPU、服务器连接、远程任务与提示词资产
+- `/`：管理员进入网页终端 `/terminal`，普通账号进入聊天大厅 `/chat-lobby`；侧栏不提供总览入口。没有指定目标的登录同样进入各自默认页，登录后可返回有权访问的原目标。
 - `/login`：用户登录页；首次启动且没有任何用户时切换为管理员初始化表单
 - `/settings/users`：用户管理，列出全部用户，可添加用户、重置他人密码、删除他人账号并修改自己的密码；仅管理员 `lihan` 可管理用户
 - `/chat`：公共聊天室，单一共享消息窗口。顶部显示实时在线人数（点击展开在线列表）与个人设置入口；名字与头像以聊天大厅「我的房间」衣柜前的设置为准（设置面板只读展示并引导前往大厅修改，另含提示音开关）；中部为消息流，带头像，自己的消息在右侧；底部为输入框、表情按钮与发送按钮。每个浏览器在 `localStorage` 键 `hannishub_chat_client_id` 生成随机身份，首次进入或资料尚未绑定账号时登记资料，服务端把该浏览器绑定到当前登录账号。每 2 秒携带身份增量拉取消息，同时作为在线心跳，15 秒无心跳视为离线。表情面板使用 frimousse，中文 emojibase 数据（emojibase-data 17.0.0 的 `zh/data.json` 与 `zh/messages.json`）本地托管在 `frontend/public/emojibase/`，不依赖外部 CDN
@@ -143,6 +143,7 @@ HannisHub/
 - `/server/connections`、`/server/tasks`：远程服务器模块页面。该分组当前从侧栏隐藏，页面、组件与接口全部保留，直接访问 URL 仍可使用；“服务器文件”页仍依赖已保存的 SSH 连接
 - `/prompts`：提示词
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
+- `/settings/global`：仅管理员可访问的全局设置。点击「发送测试通知」时从当前浏览器申请或复用站点通知权限，并在页面聚焦时也尝试显示桌面通知；测试仅作用于当前浏览器，不发送聊天消息，也不改变顶栏的新消息提醒开关。HTTPS 或 localhost、安全上下文中的通知 API 和浏览器授权为必要条件，系统负责显示横幅与通知位置。
 - `/files`：文件游览页，浏览已开放目录；点击可预览的点云文件会打开点云预览页
 - `/files/point-clouds`：点云预览页，依次展示固定尺寸预览、目录收藏和当前目录；`/point-clouds` 为兼容入口。该板块当前从侧栏隐藏，页面、组件与接口全部保留，直接访问 URL 仍可使用
 
@@ -150,7 +151,7 @@ HannisHub/
 
 `frontend/next.config.ts` 使用 `output: "export"` 与 `trailingSlash: true`。执行 `cd frontend && npm run build` 后，Next.js 将页面导出到 `frontend/out/`。Hub 启动时如果该目录存在，会在全部 API 与子服务挂载之后通过 `StaticFiles` 挂载根路径，以提供 `/_next/` 资源和其他静态文件；已导出的业务页面则在 `/server`、`/prompt` 等旧子服务挂载之前显式注册，避免被子应用的根路径抢先匹配。
 
-未构建时，`/` 与 `/login` 继续回退到根目录旧页面；新的 Dashboard 子路径会返回构建提示。旧版子服务页面仍可通过 `/llama-manager/`、`/server/`、`/prompt/` 访问。
+未构建时，管理员访问 `/` 以及未登录访客访问 `/login` 时继续使用旧页面；注册的统一前端模块路径会返回构建提示。旧版子服务页面仍可通过 `/llama-manager/`、`/server/`、`/prompt/` 访问。
 
 `AuthMiddleware` 对 `/_next/` 静态资源以及 `/icon.svg` 图标开放读取，以便未登录用户加载登录页；业务页面和全部业务 API 仍需要有效会话。
 
@@ -173,8 +174,7 @@ HannisHub/
 | `frontend/components/chatworld/lobby/game/` | 聊天大厅 Phaser 3 游戏逻辑：`layout.ts` 布局数据类型与 React↔Phaser 桥接类型、`lobby-scene.ts` 按 `layout.json` 搭建房间/碰撞/门/传送门/机器交互与相机、`player.ts` 角色（可切换皮肤贴图）、`presence-client.ts` 多人同步连接（节流上报、退避重连）、`remote-player.ts` 其他人的角色（插值显示、名字标签、自动行走）、`pathfinding.ts` 房间寻路网格（A* + 视线拉直）、`avatar.ts` 角色生成器部件加载与叠层合成（React 与 Phaser 共用）、`create-game.ts` 游戏工厂，与普通 UI 组件解耦；`tunes.ts` 钢琴 / 吉他短旋律（Web Audio 合成）；场景统一处理机器、工位、座位与小互动四类交互对象（重叠时取面积最小者），绘制工位名牌与头顶表情气泡 |
 | `frontend/components/chatworld/linkup/` | 大厅街机连连看：`board.ts` 核心算法（棋盘、两折寻路、11 种关卡变化、重列、回溯求解器、正向编排关卡生成，纯函数）、`levels.ts` 模式与关卡参数（闯关 / 每日挑战 / 休闲、计分常量、道具）、`sprites.ts` 代码绘制的像素图标、方块与 3×5 像素字体、`sounds.ts` Web Audio 合成音效与背景音乐、`engine.ts` Canvas 渲染、动画、输入、计时与游戏流程、`linkup-panel.tsx` 菜单、排行榜、计分栏、道具按钮与结算浮层；`frontend/lib/lobby-linkup.ts` 为排行榜接口与关闭前确认 |
 | `frontend/components/terminal/` | 网页终端：顶部小高度命令条（已存状态、一键执行、白色新建按钮、管理浮动框与命令配置浮动框）、横向标签栏工作区与动态加载（`ssr: false`）的 xterm.js 终端视图（WebSocket 连接、重连、尺寸同步） |
-| `frontend/components/settings/` | AI 能力集中设置组件 |
-| `frontend/components/overview/` | 跨服务总览组件 |
+| `frontend/components/settings/` | 全局设置、AI 能力与用户管理组件 |
 | `frontend/components/file-manager/` | 文件浏览下载与 Three.js 点云交互预览组件；支持顶部常驻服务器连接切换条（本机与集群 SSH 连接快速切换、新建与管理连接）、常用目录（扫描目录）快速跳转与配置、内网集群跳板大文件分片并发上传与流式下载 |
 | `frontend/lib/` | 集中 API 客户端、路径常量、显式 TypeScript 类型、格式化、导航与剪贴板工具（`clipboard.ts`） |
 

@@ -7,7 +7,7 @@ import { apiFetch } from "../../lib/api";
 import { lobbySocketUrl } from "../../lib/chat-lobby";
 import { setAdminChatAlertHandler, setChatSoundEnabled, unlockChatAudio } from "../../lib/chat-notify";
 import {
-  ADMIN_OPEN_CHAT_EVENT, ADMIN_PRIVATE_VIEW_EVENT, adminRoomAlert, dismissAdminToast,
+  ADMIN_OPEN_CHAT_EVENT, ADMIN_PRIVATE_VIEW_EVENT, adminRoomAlert, canUseDesktopNotifications, dismissAdminToast,
   getAdminNotifyServerSnapshot, getAdminNotifySnapshot, openAdminAlert, openAdminPrivate,
   setAdminDesktop, setViewedPrivate, subscribeAdminNotify, updateAdminContacts, type AdminContact,
 } from "../../lib/admin-notify";
@@ -96,7 +96,7 @@ export function AdminMessageControls() {
   const { soundEnabled } = useChatNotify();
   const [settings, setSettings] = useState(false);
   const [status, setStatus] = useState("");
-  const available = typeof window !== "undefined" && window.isSecureContext && "Notification" in window;
+  const available = canUseDesktopNotifications();
   const requestDesktop = async () => {
     unlockChatAudio();
     if (!available) return;

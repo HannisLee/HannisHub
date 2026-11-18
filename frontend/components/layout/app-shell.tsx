@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
-import { canVisitPage, isActivePath, isAdmin, navigation, navTitle, REGULAR_HOME } from "../../lib/navigation";
+import { ADMIN_HOME, canVisitPage, isActivePath, isAdmin, navigation, navTitle, REGULAR_HOME } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
@@ -80,9 +80,9 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
       const item = group.items.find(candidate => isActivePath(pathname, candidate.href));
       if (item) return item;
     }
-    return navigation[0].items[0];
+    return null;
   }, [pathname]);
-  const pageTitle = navTitle(current);
+  const pageTitle = current ? navTitle(current) : "工作台";
 
   // 聊天室新消息提醒：聊天室页面与内嵌聊天面板由聊天组件自己处理，其他情况在后台检查
   const onChatPage = pathname === "/chat" || pathname === "/chat/";
@@ -171,7 +171,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
         <aside className={`sidebar${collapsed ? " is-collapsed" : ""}${mobileDrawerOpen ? " is-open" : ""}`} id="main-sidebar">
           <div className="sidebar-head">
             <div className="brand-lockup">
-              <Link href={admin ? "/" : REGULAR_HOME} className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
+              <Link href={admin ? ADMIN_HOME : REGULAR_HOME} className="brand-mark" aria-label="返回 HannisHub 首页" title="返回 HannisHub 首页">HH</Link>
               <div><strong>HannisHub</strong><span>本地管理工作台</span></div>
             </div>
             <button
@@ -201,7 +201,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
         <div className="shell-content">
           <header className="topbar">
             <button className="menu-toggle" type="button" onClick={toggleNavigation} aria-expanded={navigationOpen} aria-controls="main-sidebar" aria-label={navigationOpen ? "收起导航" : "展开导航"}>☰</button>
-            <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current.label}</strong></div>
+            <div className="topbar-context"><span>HANNISHUB</span><b>/</b><strong>{current?.label ?? pageTitle}</strong></div>
             <div className="topbar-user">
               {admin ? <AdminMessageControls /> : null}
               <span className="user-name">{auth.username || "管理员"}</span>

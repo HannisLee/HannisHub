@@ -42,6 +42,11 @@ export function setAdminDesktop(enabled: boolean) {
   try { localStorage.setItem(DESKTOP_KEY, enabled ? "on" : "off"); } catch { /* 本页仍然有效 */ }
   update({ desktop: enabled });
 }
+
+export function canUseDesktopNotifications(): boolean {
+  return typeof window !== "undefined" && window.isSecureContext && "Notification" in window;
+}
+
 export function setViewedPrivate(contact: string | null) { viewedContact = contact; }
 export function dismissAdminToast() { clearTimeout(toastTimer); update({ toast: null }); }
 export function openAdminPrivate(contact: string | null) { update({ contact, toast: null }); }

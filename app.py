@@ -8,7 +8,7 @@ from typing import Any, Optional
 from urllib.parse import unquote
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
@@ -168,10 +168,12 @@ def _frontend_page(route: str) -> FileResponse | None:
     return None
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 async def index():
-    """返回综合管理站服务列表页面。"""
-    return _frontend_page("") or FileResponse(ROOT_DIR / "legacy" / "index.html")
+    """管理员首页默认进入终端，未构建时保留旧版入口。"""
+    if (FRONTEND_OUT_DIR / "terminal" / "index.html").is_file():
+        return RedirectResponse("/terminal", status_code=303, headers={"Cache-Control": "no-store"})
+    return FileResponse(ROOT_DIR / "legacy" / "index.html")
 
 
 @app.get("/login", include_in_schema=False)
@@ -252,6 +254,12 @@ async def prompts_page():
 @app.get("/settings/", include_in_schema=False)
 async def ai_settings_page():
     return await _new_frontend_route("settings")
+
+
+@app.get("/settings/global", include_in_schema=False)
+@app.get("/settings/global/", include_in_schema=False)
+async def global_settings_page():
+    return await _new_frontend_route("settings/global")
 
 
 @app.get("/files", include_in_schema=False)

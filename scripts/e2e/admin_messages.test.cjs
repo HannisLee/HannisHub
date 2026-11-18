@@ -41,6 +41,7 @@ async function focus(page,value){
  await a.goto(origin+'/terminal');
  await a.getByRole('button',{name:'消息提醒设置',exact:true}).click();
  await a.getByRole('button',{name:'开启桌面通知',exact:true}).click();
+ await a.getByText('已开启。切到其他标签页或应用后，新消息会显示系统通知。',{exact:true}).waitFor();
  assert.equal(await a.getByRole('checkbox',{name:'桌面通知',exact:true}).isChecked(),true);
  await a.getByRole('button',{name:'收起',exact:true}).click();
  await a.waitForFunction(()=>window.__contacts>0);
