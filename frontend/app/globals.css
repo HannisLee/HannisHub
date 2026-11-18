@@ -1691,6 +1691,8 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 
 /* 私聊与工位电脑沿用暖黑界面变量：面板铺满对话框，只有联系人列表和消息区内部滚动，整体不出现页面级滚动条。 */
 .lobby-machine.is-compact { width: min(960px, 100%); height: min(88dvh, 760px); }
+.private-page { height: min(760px, calc(100dvh - 160px)); min-height: 400px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.private-page > .private-panel { height: 100%; }
 .private-desk { display: flex; flex-direction: column; min-height: 0; }
 .private-tabs { display: flex; flex: 0 0 auto; gap: var(--space-1); padding: var(--space-3) var(--space-6); border-bottom: 1px solid var(--color-divider); }
 .private-tabs .lobby-avatar-tab { display: inline-flex; align-items: center; gap: var(--space-2); }

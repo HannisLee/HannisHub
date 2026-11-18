@@ -28,7 +28,8 @@ export const navigation: NavGroup[] = [
     items: [
       { href: "/chat-lobby", label: "聊天大厅", icon: "lobby" },
       { href: "/chat", label: "聊天室", icon: "chat" },
-      { href: "/todo", label: "工位待办", icon: "tasks" },
+      { href: "/todo", label: "待办", icon: "tasks" },
+      { href: "/private-chat", label: "私聊", icon: "chat", adminOnly: true },
     ],
   },
   { id: "prompts", label: "提示词", items: [{ href: "/prompts", label: "提示词", icon: "prompts" }] },
