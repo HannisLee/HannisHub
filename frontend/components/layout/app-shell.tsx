@@ -87,9 +87,9 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
   // 聊天室新消息提醒：聊天室页面与内嵌聊天面板由聊天组件自己处理，其他情况在后台检查
   const onChatPage = pathname === "/chat" || pathname === "/chat/";
   const admin = isAdmin(auth?.username);
-  const adminMessages = useAdminMessages(!!auth?.authenticated && admin, pathname === "/chat-lobby" || pathname === "/chat-lobby/");
+  const adminMessages = useAdminMessages(!!auth?.authenticated, pathname === "/chat-lobby" || pathname === "/chat-lobby/", admin);
   const { unread, embedded } = useChatNotify();
-  const totalUnread = unread + (admin ? adminMessages.unread : 0);
+  const totalUnread = Number(unread > 0) + adminMessages.unread;
   useChatWatcher(!!auth?.authenticated && !onChatPage && !embedded);
   useChatNotifyEffects(totalUnread);
 

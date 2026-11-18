@@ -17,7 +17,7 @@ import { Button } from "../ui/primitives";
 const PrivatePanel = dynamic(() => import("../chatworld/lobby/private-panel").then(module => module.PrivatePanel), { ssr: false });
 const PRIVATE_EVENT = "lobby-private-chat";
 
-export function useAdminMessages(enabled: boolean, onLobby: boolean) {
+export function useAdminMessages(enabled: boolean, onLobby: boolean, admin: boolean) {
   const router = useRouter();
   const state = useSyncExternalStore(subscribeAdminNotify, getAdminNotifySnapshot, getAdminNotifyServerSnapshot);
   useEffect(() => {
@@ -33,7 +33,7 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean) {
       running = true;
       try {
         const contacts = await apiFetch<AdminContact[]>("/api/chat-lobby/private-chat/contacts");
-        if (alive) updateAdminContacts(contacts);
+        if (alive) updateAdminContacts(contacts, admin);
       } catch { /* 重连与下一轮轮询会补齐未读 */ }
       finally { running = false; if (queued && alive) { queued = false; void refresh(); } }
     }
@@ -62,7 +62,7 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean) {
         if (alive && ![4401, 4403].includes(event.code)) retry = setTimeout(connect, Math.min(10000, 1000 * 2 ** attempts++));
       };
     };
-    setAdminChatAlertHandler(adminRoomAlert);
+    if (admin) setAdminChatAlertHandler(adminRoomAlert);
     window.addEventListener(PRIVATE_EVENT, update);
     window.addEventListener(ADMIN_OPEN_CHAT_EVENT, openChat);
     window.addEventListener(ADMIN_PRIVATE_VIEW_EVENT, viewPrivate);
@@ -70,7 +70,7 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean) {
     window.addEventListener("blur", activity);
     window.addEventListener("storage", syncPreferences);
     document.addEventListener("visibilitychange", update);
-    const initial = setTimeout(() => { connect(); void refresh(); }, 0);
+    const initial = setTimeout(() => { if (admin) connect(); void refresh(); }, 0);
     const polling = setInterval(() => { void refresh(); }, 4000);
     const heartbeat = setInterval(activity, 8000);
     return () => {
@@ -87,7 +87,7 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean) {
       window.removeEventListener("storage", syncPreferences);
       document.removeEventListener("visibilitychange", update);
     };
-  }, [enabled, onLobby, router]);
+  }, [enabled, onLobby, router, admin]);
   return state;
 }
 

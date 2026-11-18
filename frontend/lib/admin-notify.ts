@@ -1,6 +1,8 @@
 /** 管理员跨页面私聊与桌面提醒；只在管理员外壳启用，未读数以服务端为准。 */
 import { getLastRead, messagePreview, playChatDing } from "./chat-notify";
 import type { ChatRoomMessage } from "./types";
+import { showDesktopNotification } from "./desktop-notify";
+export { canUseDesktopNotifications } from "./desktop-notify";
 
 const DESKTOP_KEY = "hannishub_admin_desktop_notify";
 const CLAIM_KEY = "hannishub_admin_message_alerts";
@@ -43,10 +45,6 @@ export function setAdminDesktop(enabled: boolean) {
   update({ desktop: enabled });
 }
 
-export function canUseDesktopNotifications(): boolean {
-  return typeof window !== "undefined" && window.isSecureContext && "Notification" in window;
-}
-
 export function setViewedPrivate(contact: string | null) { viewedContact = contact; }
 export function dismissAdminToast() { clearTimeout(toastTimer); update({ toast: null }); }
 export function openAdminPrivate(contact: string | null) { update({ contact, toast: null }); }
@@ -71,12 +69,8 @@ async function deliver(key: string, seq: number, alert: AdminAlert, room = false
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => update({ toast: null }), 8000);
     playChatDing();
-    if (!getAdminNotifySnapshot().desktop || (!document.hidden && document.hasFocus()) || !("Notification" in window) || Notification.permission !== "granted") return;
-    try {
-      const notification = new Notification(alert.title, { body: alert.body.slice(0, 240), tag: `hannishub-admin-${key}`, icon: "/icon.svg", silent: true });
-      notification.onclick = () => { window.focus(); openAdminAlert(alert); notification.close(); };
-      setTimeout(() => notification.close(), 20000);
-    } catch { /* 系统通知不可用时仍保留提示音、网页提示和标签页未读 */ }
+    if (!getAdminNotifySnapshot().desktop || (!document.hidden && document.hasFocus())) return;
+    showDesktopNotification(alert.title, { body: alert.body.slice(0, 240), tag: `hannishub-admin-${key}`, icon: "/icon.svg", silent: true }, () => openAdminAlert(alert));
   };
   if (navigator.locks) {
     try { await navigator.locks.request("hannishub-admin-message-alert", notify); } catch { notify(); }
@@ -88,13 +82,13 @@ export function adminRoomAlert(messages: readonly ChatRoomMessage[]) {
   if (message) void deliver("room", message.id, { title: `聊天室 · ${message.nickname}`, body: messagePreview(message) }, true);
 }
 
-export function updateAdminContacts(contacts: AdminContact[]) {
+export function updateAdminContacts(contacts: AdminContact[], alertsEnabled = true) {
   const latest = [...contacts].sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || b.last_incoming_seq - a.last_incoming_seq)[0]?.id ?? null;
   update({ unread: contacts.reduce((sum, contact) => sum + contact.unread, 0), latest });
   for (const contact of contacts) {
     const seen = seenPrivate.get(contact.id) || 0;
     seenPrivate.set(contact.id, Math.max(seen, contact.last_incoming_seq));
-    if (baseline && contact.unread > 0 && contact.last_incoming_seq > seen) {
+    if (alertsEnabled && baseline && contact.unread > 0 && contact.last_incoming_seq > seen) {
       void deliver(`private:${contact.id}`, contact.last_incoming_seq, { title: `私聊 · ${contact.name}`, body: contact.last_incoming, contact: contact.id });
     }
   }
