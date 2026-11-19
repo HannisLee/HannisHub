@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import { blockedFirst, buildProgressTimeline, mergeProgressEntries, sortTodoItems, type TimelineItem, type TodoSortMode } from "../../../lib/todo-timeline";
 import {
@@ -23,6 +23,11 @@ interface Group {
 }
 
 type ProgressDraftStatus = TodoStatus | "done";
+
+interface DropTarget {
+  id: string;
+  position: "before" | "after";
+}
 
 interface ProgressDraft {
   text: string;
@@ -386,7 +391,7 @@ export function TodoPanel() {
   }
 
   const [dragging, setDragging] = useState<{ id: string; groupKey: string } | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
   /** 手动顺序下拖动或键盘调整条目位置 */
   async function moveTo(items: Todo[], sourceId: string, targetId: string, position: "before" | "after") {
@@ -427,6 +432,118 @@ export function TodoPanel() {
     void moveTo(items, todoId, target.id, delta < 0 ? "before" : "after");
   }
 
+  /** 指针拖动排序（鼠标、触屏、触控笔通用）：按住卡片左侧把手拖动，卡片跟随指针，
+   *  松开后落到指示线位置；靠近滚动区上下边缘时自动滚动；Esc 或指针被取消则放弃。 */
+  function startPointerDrag(event: ReactPointerEvent<HTMLElement>, todo: Todo, groupKey: string, scope: Todo[]) {
+    if (event.button !== 0 || dragging) return;
+    const handle = event.currentTarget;
+    const card = handle.closest<HTMLElement>(".todo-item");
+    const list = card?.parentElement;
+    if (!card || !list) return;
+    event.preventDefault();
+    const pointerId = event.pointerId;
+    handle.setPointerCapture(pointerId);
+
+    const order = scope.filter(item => !item.done).map(item => item.id);
+    const fromIndex = order.indexOf(todo.id);
+    const others = new Set(order.filter(id => id !== todo.id));
+    const scroller = card.closest<HTMLElement>(".private-desk-scroll") ?? (document.scrollingElement as HTMLElement | null);
+    const startY = event.clientY;
+    const startScroll = scroller?.scrollTop ?? 0;
+    let lastY = startY;
+    let target: DropTarget | null = null;
+    let frame = 0;
+    let ended = false;
+
+    // 落点与当前位置相同则不显示指示线
+    const isNoop = (next: DropTarget) => {
+      const rest = order.filter(id => id !== todo.id);
+      const insertAt = rest.indexOf(next.id) + (next.position === "after" ? 1 : 0);
+      return insertAt === fromIndex;
+    };
+
+    const update = () => {
+      const scrolled = (scroller?.scrollTop ?? 0) - startScroll;
+      card.style.transform = `translateY(${lastY - startY + scrolled}px)`;
+      const candidates = [...list.children].filter(
+        (el): el is HTMLElement => el instanceof HTMLElement && others.has(el.dataset.todoId ?? ""),
+      );
+      if (!candidates.length) return;
+      const rects = candidates.map(el => el.getBoundingClientRect());
+      let next: DropTarget | null = target;
+      const last = rects.length - 1;
+      if (lastY < rects[0].top) next = { id: candidates[0].dataset.todoId!, position: "before" };
+      else if (lastY > rects[last].bottom) next = { id: candidates[last].dataset.todoId!, position: "after" };
+      else {
+        const index = rects.findIndex(rect => lastY >= rect.top && lastY <= rect.bottom);
+        if (index >= 0) {
+          next = { id: candidates[index].dataset.todoId!, position: lastY < rects[index].top + rects[index].height / 2 ? "before" : "after" };
+        }
+      }
+      if (next && isNoop(next)) next = null;
+      if (next?.id !== target?.id || next?.position !== target?.position) {
+        target = next;
+        setDropTarget(next);
+      }
+    };
+
+    const autoScroll = () => {
+      frame = 0;
+      if (!scroller || ended) return;
+      const isPage = scroller === document.scrollingElement;
+      const bounds = isPage ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+      const edge = 56;
+      let speed = 0;
+      if (lastY < bounds.top + edge) speed = -Math.min(18, Math.ceil((bounds.top + edge - lastY) / 3));
+      else if (lastY > bounds.bottom - edge) speed = Math.min(18, Math.ceil((lastY - bounds.bottom + edge) / 3));
+      if (!speed) return;
+      const before = scroller.scrollTop;
+      scroller.scrollTop += speed;
+      if (scroller.scrollTop === before) return;
+      update();
+      frame = requestAnimationFrame(autoScroll);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      lastY = e.clientY;
+      update();
+      if (!frame) frame = requestAnimationFrame(autoScroll);
+    };
+    const finish = (commit: boolean) => {
+      if (ended) return;
+      ended = true;
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onCancel);
+      handle.removeEventListener("lostpointercapture", onCancel);
+      window.removeEventListener("keydown", onKey, true);
+      if (frame) cancelAnimationFrame(frame);
+      card.style.transform = "";
+      document.documentElement.classList.remove("todo-is-dragging");
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      setDragging(null);
+      setDropTarget(null);
+      if (commit && target) void moveTo(scope, todo.id, target.id, target.position);
+    };
+    const onUp = (e: PointerEvent) => { if (e.pointerId === pointerId) finish(true); };
+    const onCancel = (e: PointerEvent) => { if (e.pointerId === pointerId) finish(false); };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onCancel);
+    handle.addEventListener("lostpointercapture", onCancel);
+    window.addEventListener("keydown", onKey, true);
+    document.documentElement.classList.add("todo-is-dragging");
+    setDragging({ id: todo.id, groupKey });
+  }
+
   const viewTitle = view.startsWith("list:") ? view.slice(5) || UNLISTED : VIEW_TITLES[view];
   const canManualReorder = sortMode === "manual" && view !== "planned" && view !== "done";
   const showSortSelect = view !== "planned" && view !== "done";
@@ -465,7 +582,7 @@ export function TodoPanel() {
         </nav>
 
         <section className="todo-main">
-          <p id={REORDER_HINT_ID} className="visually-hidden">可拖动标题行调整顺序，或聚焦标题后按上下方向键移动</p>
+          <p id={REORDER_HINT_ID} className="visually-hidden">按住左侧把手拖动调整顺序，或聚焦把手后按上下方向键移动</p>
           <header className="todo-main-head">
             <div className="todo-head-title-wrap">
               <h2 className="todo-view-title">{viewTitle}</h2>
@@ -604,7 +721,6 @@ export function TodoPanel() {
             const reorderScope = (todo: Todo) => (
               partitioned ? group.items.filter(item => (item.status === "blocked") === (todo.status === "blocked")) : group.items
             );
-            const dragSource = dragging && dragging.groupKey === group.key ? group.items.find(item => item.id === dragging.id) : undefined;
             const showGroupSort = showSortSelect && group.key === firstPendingGroupKey;
             return (
               <div className="todo-group" key={group.key}>
@@ -684,29 +800,7 @@ export function TodoPanel() {
                           canReorder={rowCanMove}
                           isDragging={isDragging}
                           dropPosition={rowDropPosition}
-                          onDragStart={() => {
-                            setDragging({ id: todo.id, groupKey: group.key });
-                            setDropTarget(null);
-                          }}
-                          onDragEnd={() => {
-                            setDragging(null);
-                            setDropTarget(null);
-                          }}
-                          onDragOver={position => {
-                            if (!rowCanMove || !dragSource || dragSource.id === todo.id) return;
-                            if (!reorderScope(dragSource).includes(todo)) return;
-                            setDropTarget(prev => (prev?.id === todo.id && prev.position === position ? prev : { id: todo.id, position }));
-                          }}
-                          onDragLeave={() => {
-                            setDropTarget(prev => (prev?.id === todo.id ? null : prev));
-                          }}
-                          onDrop={position => {
-                            if (rowCanMove && dragSource && dragSource.id !== todo.id && reorderScope(dragSource).includes(todo)) {
-                              void moveTo(reorderScope(dragSource), dragSource.id, todo.id, position);
-                            }
-                            setDragging(null);
-                            setDropTarget(null);
-                          }}
+                          onHandlePointerDown={event => startPointerDrag(event, todo, group.key, reorderScope(todo))}
                           onMoveStep={delta => moveBy(reorderScope(todo), todo.id, delta)}
                         />
                       );
@@ -742,11 +836,7 @@ interface TodoRowProps {
   canReorder: boolean;
   isDragging: boolean;
   dropPosition: "before" | "after" | null;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: (position: "before" | "after") => void;
-  onDragLeave: () => void;
-  onDrop: (position: "before" | "after") => void;
+  onHandlePointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   onMoveStep: (delta: number) => void;
 }
 
@@ -769,11 +859,7 @@ function TodoRow({
   canReorder,
   isDragging,
   dropPosition,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
+  onHandlePointerDown,
   onMoveStep,
 }: TodoRowProps) {
   const late = !todo.done && Boolean(todo.due_date) && todo.due_date < today;
@@ -785,7 +871,6 @@ function TodoRow({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [savingProgress, setSavingProgress] = useState(false);
   const [progressError, setProgressError] = useState("");
-  const itemRef = useRef<HTMLLIElement>(null);
   const statusWrapRef = useRef<HTMLDivElement>(null);
   const statusButtonRef = useRef<HTMLButtonElement>(null);
   const progressButtonRef = useRef<HTMLButtonElement>(null);
@@ -840,11 +925,6 @@ function TodoRow({
     el.style.height = "auto";
     el.style.height = `${Math.min(160, Math.max(58, el.scrollHeight))}px`;
   }, [writingProgress]);
-
-  function pointerDropPosition(clientY: number, element: HTMLElement): "before" | "after" {
-    const rect = element.getBoundingClientRect();
-    return clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
 
   function closeEditor(clearDraft: boolean) {
     setProgressError("");
@@ -935,41 +1015,34 @@ function TodoRow({
     </li>
   );
 
-  const dragProps = canReorder ? {
-    draggable: true,
-    onDragStart: (event: DragEvent<HTMLElement>) => {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", todo.id);
-      if (itemRef.current) {
-        event.dataTransfer.setDragImage(itemRef.current, 24, 24);
-      }
-      onDragStart();
-    },
-    onDragEnd,
-  } : {};
-
   return (
-    <li
-      ref={itemRef}
-      className={rowClassName}
-      onDragOver={event => {
-        if (!canReorder) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        onDragOver(pointerDropPosition(event.clientY, event.currentTarget));
-      }}
-      onDragLeave={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          onDragLeave();
-        }
-      }}
-      onDrop={event => {
-        if (!canReorder) return;
-        event.preventDefault();
-        onDrop(pointerDropPosition(event.clientY, event.currentTarget));
-      }}
-    >
-      <div className={`todo-row${canReorder ? " is-draggable" : ""}`} {...dragProps}>
+    <li className={rowClassName} data-todo-id={todo.id}>
+      {canReorder ? (
+        <button
+          type="button"
+          className="todo-drag-handle"
+          aria-label={`拖动排序「${todo.title}」`}
+          aria-describedby={REORDER_HINT_ID}
+          title="拖动调整顺序（也可按上下方向键）"
+          onPointerDown={onHandlePointerDown}
+          onKeyDown={event => {
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              onMoveStep(-1);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              onMoveStep(1);
+            }
+          }}
+        >
+          <svg viewBox="0 0 8 14" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.2" /><circle cx="6" cy="2" r="1.2" />
+            <circle cx="2" cy="7" r="1.2" /><circle cx="6" cy="7" r="1.2" />
+            <circle cx="2" cy="12" r="1.2" /><circle cx="6" cy="12" r="1.2" />
+          </svg>
+        </button>
+      ) : null}
+      <div className="todo-row">
         {compact ? null : (
           <span className={`todo-row-day${inMyDay ? " is-today" : ""}`} title={todo.my_day || undefined}>
             {todo.my_day ? assignedDayLabel(todo.my_day, today) : ""}
@@ -980,17 +1053,6 @@ function TodoRow({
           className="todo-row-main"
           onClick={onToggleExpand}
           aria-expanded={expanded}
-          aria-describedby={canReorder ? REORDER_HINT_ID : undefined}
-          onKeyDown={event => {
-            if (!canReorder) return;
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              onMoveStep(-1);
-            } else if (event.key === "ArrowDown") {
-              event.preventDefault();
-              onMoveStep(1);
-            }
-          }}
         >
           {showPriorityDot ? (
             <span

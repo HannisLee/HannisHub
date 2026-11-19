@@ -126,8 +126,9 @@ const path = require('node:path');
     assert.equal(createdData.status, 'not_started');
     assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 4');
 
-    // A. 无左侧复选框与拖动条；状态菜单包含三态与已完成
-    assert.equal(await createdRow.locator('.todo-rail, .todo-check, .todo-drag-handle').count(), 0);
+    // A. 无左侧复选框与旧版竖向拖动条（新版拖动把手位于卡片左侧留白内）；状态菜单包含三态与已完成
+    assert.equal(await createdRow.locator('.todo-rail, .todo-check').count(), 0);
+    assert.equal(await createdRow.locator('.todo-drag-handle').count(), 1);
     const statusBtn = createdRow.locator('.todo-status-btn');
     assert.equal((await statusBtn.textContent()).trim(), '待开始');
     await statusBtn.click();
@@ -259,13 +260,52 @@ const path = require('node:path');
     // 清理结语临时任务以免影响后续计数，或通过日期槽拖动测试排序
     await page.getByRole('button', { name: /^今天完成 · 1$/ }).click();
 
-    // 验证标题行可拖动，聚焦标题后可用方向键排序
+    // 拖动排序：卡片左侧把手支持方向键与指针拖动（鼠标 / 触屏通用），Esc 取消，结果持久化
+    const todayGroupList = page.locator('.todo-group', { has: page.getByRole('heading', { name: /^待完成/ }) }).locator('.todo-item');
+    const todayOrder = async () => (await todayGroupList.locator('.todo-title-text').allTextContents());
     const p0Card = page.locator('.todo-item', { hasText: p0Task.title });
-    assert.equal(await p0Card.locator('.todo-row').getAttribute('draggable'), 'true');
+    const p0Handle = p0Card.getByRole('button', { name: `拖动排序「${p0Task.title}」` });
+    assert.deepEqual(await todayOrder(), [p0Task.title, timelineTask.title, prefix + '新建']);
     const reorderResp = page.waitForResponse(r => r.url().endsWith('/api/todos/reorder'));
-    await p0Card.locator('.todo-row-main').focus();
-    await p0Card.locator('.todo-row-main').press('ArrowDown');
+    await p0Handle.focus();
+    await p0Handle.press('ArrowDown');
     await reorderResp;
+    assert.deepEqual(await todayOrder(), [timelineTask.title, p0Task.title, prefix + '新建']);
+    const dragHandleTo = async (title, targetTitle, position, cancel = false) => {
+      const handle = page.getByRole('button', { name: `拖动排序「${title}」` });
+      const target = page.locator('.todo-item', { hasText: targetTitle });
+      await page.locator('.todo-item', { hasText: title }).hover();
+      const hb = await handle.boundingBox();
+      const tb = await target.boundingBox();
+      const x = hb.x + hb.width / 2;
+      const endY = position === 'before' ? tb.y + 6 : tb.y + tb.height - 6;
+      await page.mouse.move(x, hb.y + hb.height / 2);
+      await page.mouse.down();
+      for (let i = 1; i <= 8; i++) await page.mouse.move(x, hb.y + hb.height / 2 + (endY - hb.y - hb.height / 2) * i / 8);
+      // 拖动中被拖卡片跟随指针，目标处显示指示线
+      assert.ok(await page.locator('.todo-item.is-dragging', { hasText: title }).count() === 1);
+      assert.equal(await target.evaluate((el, pos) => el.classList.contains(`is-drop-${pos}`), position), true);
+      if (cancel) await page.keyboard.press('Escape');
+      await page.mouse.up();
+    };
+    // Esc 取消：顺序不变、不发请求
+    let reorderCalls = 0;
+    const countReorder = r => { if (r.url().endsWith('/api/todos/reorder')) reorderCalls += 1; };
+    page.on('request', countReorder);
+    await dragHandleTo(prefix + '新建', timelineTask.title, 'before', true);
+    await page.waitForTimeout(300);
+    assert.equal(reorderCalls, 0);
+    assert.equal(await page.locator('.todo-item.is-dragging').count(), 0);
+    assert.deepEqual(await todayOrder(), [timelineTask.title, p0Task.title, prefix + '新建']);
+    page.off('request', countReorder);
+    // 指针拖到最前
+    const dragResp = page.waitForResponse(r => r.url().endsWith('/api/todos/reorder'));
+    await dragHandleTo(prefix + '新建', timelineTask.title, 'before');
+    await dragResp;
+    assert.deepEqual(await todayOrder(), [prefix + '新建', timelineTask.title, p0Task.title]);
+    await page.reload();
+    await todayGroupList.first().waitFor();
+    assert.deepEqual(await todayOrder(), [prefix + '新建', timelineTask.title, p0Task.title]);
 
     // 进度保存失败时保留输入内容
     await page.route(`**/api/todos/${createdData.id}/progress`, route =>

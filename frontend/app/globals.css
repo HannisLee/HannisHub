@@ -1309,21 +1309,29 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-group-empty { padding: var(--space-4); border-radius: 12px; background: var(--todo-card); color: var(--todo-text-meta); font-size: 14px; }
 
 /* 任务卡片：仅背景，无描边；阻塞中加 3px 红色左边线 */
-.todo-item { display: grid; gap: 6px; min-width: 0; padding: var(--space-4); border-radius: 12px; background: var(--todo-card); transition: background-color 160ms ease, opacity 160ms ease, box-shadow 120ms ease; }
+.todo-item { position: relative; display: grid; gap: 6px; min-width: 0; padding: var(--space-4); border-radius: 12px; background: var(--todo-card); transition: background-color 160ms ease, opacity 160ms ease, box-shadow 120ms ease; }
 .todo-item:hover, .todo-item:focus-within { background: var(--todo-card-hover); }
 .todo-item.is-blocked { box-shadow: inset 3px 0 0 var(--todo-danger); }
-.todo-item.has-menu-open { position: relative; z-index: 15; }
+.todo-item.has-menu-open { z-index: 15; }
 .todo-item.is-done { opacity: 0.72; }
-.todo-item.is-dragging { opacity: 0.45; }
-.todo-item.is-drop-before { box-shadow: inset 0 2px 0 var(--todo-accent); }
-.todo-item.is-drop-after { box-shadow: inset 0 -2px 0 var(--todo-accent); }
-.todo-item.is-blocked.is-drop-before { box-shadow: inset 3px 0 0 var(--todo-danger), inset 0 2px 0 var(--todo-accent); }
-.todo-item.is-blocked.is-drop-after { box-shadow: inset 3px 0 0 var(--todo-danger), inset 0 -2px 0 var(--todo-accent); }
+/* 拖动排序：被拖卡片跟随指针浮起，落点在卡片间隙显示强调色指示线 */
+.todo-item.is-dragging { z-index: 20; opacity: 0.88; background: var(--todo-card-hover); box-shadow: 0 10px 28px rgb(0 0 0 / 0.5); transition: none; }
+.todo-item.is-blocked.is-dragging { box-shadow: inset 3px 0 0 var(--todo-danger), 0 10px 28px rgb(0 0 0 / 0.5); }
+.todo-item.is-drop-before::before, .todo-item.is-drop-after::after { content: ""; position: absolute; right: var(--space-2); left: var(--space-2); height: 2px; border-radius: 1px; background: var(--todo-accent); pointer-events: none; }
+.todo-item.is-drop-before::before { top: -5px; }
+.todo-item.is-drop-after::after { bottom: -5px; }
+html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; user-select: none; }
+/* 拖动把手：位于卡片左侧留白内，悬停卡片时出现；触屏设备常显并加大触控区域 */
+.todo-drag-handle { position: absolute; top: var(--space-4); left: 3px; display: grid; width: 12px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--todo-text-meta); cursor: grab; opacity: 0; touch-action: none; transition: opacity 140ms ease, color 140ms ease; }
+.todo-drag-handle svg { width: 8px; height: 14px; fill: currentColor; }
+.todo-item:hover .todo-drag-handle, .todo-drag-handle:focus-visible, .todo-item.is-dragging .todo-drag-handle { opacity: 1; }
+.todo-drag-handle:hover, .todo-item.is-dragging .todo-drag-handle { color: var(--todo-text-title); }
+@media (hover: none) {
+  .todo-item:has(> .todo-drag-handle) { padding-left: 32px; }
+  .todo-drag-handle { top: 12px; left: 4px; width: 26px; height: 34px; opacity: 1; }
+}
 .todo-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
-.todo-row.is-draggable { cursor: grab; user-select: none; }
-.todo-row.is-draggable:active { cursor: grabbing; }
 .todo-row-main { display: flex; flex: 1 1 auto; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; background: transparent; color: var(--todo-text-title); font-size: 15px; font-weight: 600; line-height: 1.4; text-align: left; cursor: pointer; }
-.todo-row.is-draggable .todo-row-main { cursor: inherit; }
 .todo-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo-item.is-done .todo-row-main { color: var(--todo-text-meta); font-weight: 400; text-decoration: line-through; text-decoration-color: var(--todo-text-meta); }
 .todo-priority-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: var(--radius-pill); }
