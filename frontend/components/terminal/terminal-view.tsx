@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { API_PATHS } from "../../lib/api";
 import { clipboardShortcut } from "../../lib/terminal-clipboard";
+import { bindTerminalSelection } from "../../lib/terminal-selection";
 import { copyToClipboard } from "../../lib/clipboard";
 
 /** 终端结束原因：exit = shell 自己退出，released = 空闲回收，closed = 被关闭，missing = 已不存在 */
@@ -65,7 +66,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const rightClickSelection = useRef("");
-  const forwardingSelectionMouse = useRef(false);
+  const selectionRef = useRef<ReturnType<typeof bindTerminalSelection> | null>(null);
   const scheduleFitRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(active);
   // 回调放进 ref，避免父组件重渲染导致终端重建
@@ -147,6 +148,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
       ws.onopen = () => {
         retryDelay = 500;
         // 服务端会先回放输出缓冲，清屏后重新绘制，避免重连时内容重复
+        selectionRef.current?.cancel();
         term.reset();
         scheduleFit();
         callbacks.current.onStatus(sessionId, true);
@@ -164,6 +166,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
         term.write(new Uint8Array(event.data as ArrayBuffer));
       };
       ws.onclose = event => {
+        selectionRef.current?.cancel();
         if (socket === ws) socket = null;
         callbacks.current.onStatus(sessionId, false);
         if (disposed || ended) return;
@@ -213,12 +216,26 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
       document.fonts.removeEventListener("loadingdone", scheduleFit);
       dataListener.dispose();
       resizeListener.dispose();
+      selectionRef.current?.cancel();
       socket?.close();
       term.dispose();
       termRef.current = null;
       scheduleFitRef.current = null;
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const term = termRef.current;
+    const screen = host?.querySelector<HTMLElement>(".xterm-screen");
+    if (!active || !selectionMode || !host || !term || !screen) return;
+    const selection = bindTerminalSelection(host, screen, term);
+    selectionRef.current = selection;
+    return () => {
+      selectionRef.current = null;
+      selection.dispose();
+    };
+  }, [active, selectionMode, sessionId]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -239,23 +256,7 @@ export default function TerminalView({ sessionId, active, selectionMode, onEnded
     return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
   }, [menu]);
 
-  return <div className="terminal-view" ref={hostRef} hidden={!active} onMouseMoveCapture={event => {
-    // 程序开启全鼠标跟踪时，无按键的移动也会被当作输入并清除选区。
-    if (selectionMode && event.buttons === 0 && termRef.current?.modes.mouseTrackingMode !== "none") event.stopPropagation();
-  }} onMouseDownCapture={event => {
-    if (forwardingSelectionMouse.current) return;
-    if (selectionMode && event.button === 0 && termRef.current?.modes.mouseTrackingMode !== "none" && event.target instanceof Element && event.target.closest(".xterm-screen")) {
-      // 利用 xterm 的强制选择机制，不更改终端程序的鼠标协议状态。
-      event.preventDefault();
-      event.stopPropagation();
-      rightClickSelection.current = "";
-      const original = event.nativeEvent;
-      forwardingSelectionMouse.current = true;
-      try {
-        event.target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window, detail: original.detail, screenX: original.screenX, screenY: original.screenY, clientX: original.clientX, clientY: original.clientY, button: original.button, buttons: original.buttons, shiftKey: true, altKey: /^Mac/.test(navigator.platform) }));
-      } finally { forwardingSelectionMouse.current = false; }
-      return;
-    }
+  return <div className={`terminal-view${selectionMode ? " is-selecting" : ""}`} ref={hostRef} hidden={!active} onMouseDownCapture={event => {
     if (event.button !== 2) { rightClickSelection.current = ""; return; }
     const selection = window.getSelection();
     const nativeSelection = selection && hostRef.current?.contains(selection.anchorNode) && hostRef.current.contains(selection.focusNode) ? selection.toString() : "";

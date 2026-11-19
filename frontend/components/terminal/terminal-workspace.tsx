@@ -495,7 +495,7 @@ export function TerminalWorkspace() {
           <span>PID {active.pid}</span>
           <span>{connected[active.id] ? "已连接" : "连接中…"}</span>
           <span>约 {formatRemaining(remaining)}后因无操作释放</span>
-          <button type="button" className="terminal-selection-toggle" aria-pressed={!!selectionModes[active.id]} title="开启后可直接拖选终端文字；关闭后鼠标操作交给终端程序" onClick={() => setSelectionModes(current => ({ ...current, [active.id]: !current[active.id] }))}>文字选择 {selectionModes[active.id] ? "开" : "关"}</button>
+          <button type="button" className="terminal-selection-toggle" aria-pressed={!!selectionModes[active.id]} title="开启后可跨行拖选，拖到上下边缘或滚动滚轮可延长选区" onClick={() => setSelectionModes(current => ({ ...current, [active.id]: !current[active.id] }))}>文字选择 {selectionModes[active.id] ? "开" : "关"}</button>
         </div>
       ) : null}
 

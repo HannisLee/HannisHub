@@ -286,12 +286,81 @@ async function check(name, fn) {
     await page.mouse.move(box.x + 150, box.y + 5, { steps: 5 });
     await page.keyboard.press("Control+Shift+C");
     await waitFor(async () => (await page.evaluate(() => navigator.clipboard.readText())).includes("MODE_TEST_COPY"), 3000, "选择模式复制");
+  });
+
+  const visibleTerminal = ".terminal-view:not([hidden])";
+  async function selectionPoint(text, col) {
+    return page.evaluate(({ selector, text, col }) => {
+      const rows = Array.from(document.querySelectorAll(`${selector} .xterm-rows > div`));
+      const row = rows.find(r => r.textContent.startsWith(text));
+      const rect = row.getBoundingClientRect();
+      const style = getComputedStyle(row);
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = `${style.fontSize} ${style.fontFamily}`;
+      return { x: rect.left + ctx.measureText("M").width * col + 1, y: rect.top + rect.height / 2 };
+    }, { selector: visibleTerminal, text, col });
+  }
+  async function copiedText() {
+    await setClipboard(page, "待更新");
+    await page.keyboard.press("Control+Shift+C");
+    return waitFor(async () => {
+      const text = await page.evaluate(() => navigator.clipboard.readText());
+      return text !== "待更新" && text.replace(/\r\n/g, "\n");
+    }, 3000, "更新剪贴板");
+  }
+
+  await check("跨行正反向拖选合并软折行并保留硬换行、中文与 emoji", async () => {
+    await typeLine(page, "printf 'AAA中文🙂%0150dend\\n  MID中🙂\\nBBBtail\\n' 7");
+    await waitFor(async () => (await screen(page)).split("\n").some(row => row.startsWith("BBBtail")), 5000, "跨行测试输出");
+    const first = await selectionPoint("AAA中文", 3);
+    const last = await selectionPoint("BBBtail", 4);
+    const expected = `中文🙂${"7".padStart(150, "0")}end\n  MID中🙂\nBBBt`;
+    for (const [start, end] of [[first, last], [last, first]]) {
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(end.x, end.y, { steps: 5 });
+      await page.mouse.up();
+      assert.equal(await copiedText(), expected);
+    }
+  });
+
+  await check("按住拖到可见上边缘或使用滚轮会把屏幕外历史纳入选区", async () => {
+    await typeLine(page, "seq -f 'SELECT_HISTORY_%03g' 1 120");
+    const firstHistory = async () => Number((await screen(page)).match(/SELECT_HISTORY_(\d{3})/)?.[1]);
+    await waitFor(async () => (await screen(page)).includes("SELECT_HISTORY_120"), 5000, "长输出就绪");
+    const rect = await page.locator(`${visibleTerminal} .xterm-screen`).boundingBox();
+    for (const action of ["edge", "wheel"]) {
+      await page.mouse.move(rect.x + 12, rect.y + 30);
+      await page.mouse.wheel(0, 3000);
+      await waitFor(async () => (await screen(page)).includes("SELECT_HISTORY_120"), 5000, "回到底部");
+      const before = await firstHistory();
+      const { x, y } = await selectionPoint("SELECT_HISTORY_120", "SELECT_HISTORY_120".length);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      try {
+        const row = action === "edge" ? 1 : 24;
+        await page.mouse.move(rect.x + 1, rect.y + row);
+        if (action === "wheel") await page.mouse.wheel(0, -220);
+        await waitFor(async () => (await firstHistory()) < before - 3, 3000, "拖选期间滚动历史");
+      } finally {
+        await page.mouse.up();
+      }
+      const selected = await copiedText();
+      const start = Number(selected.match(/^SELECT_HISTORY_(\d{3})/)?.[1]);
+      assert.ok(start < before, `选区从屏幕外开始，实际起始行 ${start}，滚动前首行 ${before}`);
+      assert.equal(selected, Array.from({ length: 121 - start }, (_, i) =>
+        `SELECT_HISTORY_${String(start + i).padStart(3, "0")}`).join("\n"));
+    }
+  });
+
+  await check("关闭文字选择后鼠标事件回到终端", async () => {
     await page.evaluate(() => {
       window.mouseEventsObserved = 0;
       document.querySelector(".terminal-view:not([hidden]) .xterm").addEventListener("mousedown", e => { if (e.button === 0) window.mouseEventsObserved++; });
     });
     await page.getByRole("button", { name: "文字选择 开" }).click();
-    await page.mouse.click(box.x + 40, box.y);
+    const rect = await page.locator(`${visibleTerminal} .xterm-screen`).boundingBox();
+    await page.mouse.click(rect.x + 40, rect.y + 40);
     assert.equal(await page.evaluate(() => window.mouseEventsObserved), 1, "关闭后鼠标事件应到达终端");
   });
 
