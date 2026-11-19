@@ -48,6 +48,12 @@ export const TODO_SUBTASK_MAX = 50;
 export const TODO_PROGRESS_MAX = 1000;
 
 export const PRIORITY_OPTIONS: TodoPriority[] = [3, 2, 1];
+export const PRIORITY_TAGS: Record<TodoPriority, string> = {
+  3: "P0",
+  2: "P1",
+  1: "P2",
+  0: "P1",
+};
 export const PRIORITY_LABELS: Record<TodoPriority, string> = {
   3: "P0（高）",
   2: "P1（默认）",

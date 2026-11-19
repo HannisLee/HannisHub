@@ -1300,9 +1300,9 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-title { display: flex; flex: 1 1 auto; align-items: center; gap: var(--space-2); min-width: 0; font-size: 15px; line-height: 1.45; }
 .todo-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo-item.is-done .todo-title { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-control-border); }
-.todo-priority { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
-.todo-priority.is-p2 { background: var(--color-warning); }
-.todo-priority.is-p3 { background: var(--color-error); }
+.todo-priority { flex: 0 0 auto; padding: 0 5px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-muted); font: 600 11px/16px var(--font-ui); font-variant-numeric: tabular-nums; }
+.todo-priority.is-p2 { border-color: color-mix(in srgb, var(--color-warning) 55%, var(--color-border)); color: var(--color-warning); }
+.todo-priority.is-p3 { border-color: color-mix(in srgb, var(--color-error) 60%, var(--color-border)); color: var(--color-error); }
 .todo-summary { display: flex; align-items: center; min-width: 0; }
 .todo-meta { display: flex; flex: 1 1 auto; min-width: 0; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; }
 .todo-chip { flex: 0 0 auto; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; line-height: 18px; white-space: nowrap; }

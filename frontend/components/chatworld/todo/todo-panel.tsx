@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import {
-  addTodoProgress, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, PRIORITY_OPTIONS, reorderTodos,
+  addTodoProgress, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, reorderTodos,
   TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
   type Todo, type TodoInput, type TodoPriority, type TodoProgress,
 } from "../../../lib/todos";
@@ -596,7 +596,11 @@ function TodoRow({
               <span className="todo-title">
                 {(() => {
                   const effectivePriority: TodoPriority = todo.priority || 2;
-                  return <span className={`todo-priority is-p${effectivePriority}`} title={`优先级：${PRIORITY_LABELS[effectivePriority]}`} aria-label={`优先级${PRIORITY_LABELS[effectivePriority]}`} />;
+                  return (
+                    <span className={`todo-priority is-p${effectivePriority}`} title={`优先级：${PRIORITY_LABELS[effectivePriority]}`} aria-label={`优先级${PRIORITY_LABELS[effectivePriority]}`}>
+                      {PRIORITY_TAGS[effectivePriority]}
+                    </span>
+                  );
                 })()}
                 <span className="todo-title-text" title={todo.title}>{todo.title}</span>
               </span>
