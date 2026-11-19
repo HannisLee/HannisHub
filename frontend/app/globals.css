@@ -1325,7 +1325,8 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-chip.is-late { border-color: var(--color-error); color: var(--color-error); }
 .todo-row-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .todo-status-wrap { position: relative; flex: 0 0 auto; }
-.todo-status-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: transparent; color: var(--color-text-secondary); font-size: 12px; line-height: 1; white-space: nowrap; cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.todo-status-btn, .todo-done-badge, .todo-text-action { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 74px; height: 26px; padding: 0 var(--space-2); border-radius: var(--radius-sm); font-size: 12px; line-height: 1; white-space: nowrap; }
+.todo-status-btn { gap: 6px; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
 .todo-status-btn:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-control-border); }
 .todo-status-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: var(--radius-pill); background: var(--color-text-muted); }
 .todo-status-btn.is-not_started, .todo-status-option.is-not_started { color: var(--color-text-secondary); }
@@ -1338,13 +1339,13 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-status-option:hover, .todo-status-option:focus-visible { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .todo-status-option.is-selected { background: var(--color-surface-soft); color: var(--color-text-primary); }
 .todo-status-check { margin-left: auto; color: var(--color-text-primary); font-size: 11px; }
-.todo-done-badge { flex: 0 0 auto; padding: 0 var(--space-2); border: 1px solid var(--color-divider); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; line-height: 22px; white-space: nowrap; }
+.todo-done-badge { border: 1px solid var(--color-divider); color: var(--color-text-muted); }
 .todo-icon { display: inline-grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
 .todo-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .todo-icon:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .todo-icon.is-danger:hover:not(:disabled) { color: var(--color-error); }
 .todo-icon:disabled { opacity: 0.3; }
-.todo-text-action { flex: 0 0 auto; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--color-white); border-radius: var(--radius-sm); background: transparent; color: var(--color-white); font-size: 12px; white-space: nowrap; cursor: pointer; transition: background-color 160ms ease; }
+.todo-text-action { border: 1px solid var(--color-white); background: transparent; color: var(--color-white); cursor: pointer; transition: background-color 160ms ease; }
 .todo-text-action:hover { background: var(--color-surface-hover); }
 .todo-text-action.has-draft { border-color: var(--color-brand); color: var(--color-brand); }
 .todo-progress-thread { margin: 2px var(--space-3) var(--space-3) calc(var(--space-3) + 26px + var(--space-2)); padding-left: var(--space-3); border-left: 1px solid var(--color-control-border); }

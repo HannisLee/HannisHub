@@ -212,7 +212,7 @@ const path = require('node:path');
     await page.unroute(`**/api/todos/${createdData.id}/progress`);
     await createdRow.getByRole('button', { name: '取消', exact: true }).click();
 
-    // 长标题不会把右侧状态/记进度挤出卡片
+    // 长标题不会把右侧状态/记进度挤出卡片，且状态与记进度按钮高度和纵向对齐一致
     const [cardBox, statusBox, actionBox] = await Promise.all([
       tlRow.boundingBox(),
       tlRow.locator('.todo-status-btn').boundingBox(),
@@ -220,6 +220,14 @@ const path = require('node:path');
     ]);
     assert.ok(statusBox.x + statusBox.width <= cardBox.x + cardBox.width);
     assert.ok(actionBox.x + actionBox.width <= cardBox.x + cardBox.width);
+    assert.equal(Math.round(statusBox.height), Math.round(actionBox.height));
+    assert.ok(Math.abs(statusBox.y - actionBox.y) < 1);
+    const [p0StatusBox, p0ActionBox] = await Promise.all([
+      page.locator('.todo-item', { hasText: p0Task.title }).locator('.todo-status-btn').boundingBox(),
+      page.locator('.todo-item', { hasText: p0Task.title }).getByRole('button', { name: '记进度', exact: true }).boundingBox(),
+    ]);
+    assert.equal(Math.round(p0StatusBox.width), Math.round(p0ActionBox.width));
+    assert.equal(Math.round(p0StatusBox.height), Math.round(p0ActionBox.height));
 
     // 窄屏响应式检查：无横向溢出（等待侧栏响应式过渡结束）
     await page.setViewportSize({ width: 390, height: 844 });
