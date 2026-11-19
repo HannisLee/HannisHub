@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import {
-  addTodoProgress, clearCompletedTodos, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
+  addTodoProgress, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
   TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
   type Todo, type TodoInput, type TodoPriority, type TodoProgress,
 } from "../../../lib/todos";
@@ -11,7 +11,6 @@ import { Button, EmptyState, ErrorState, LoadingState, ProgressBar } from "../..
 
 /** 左侧视图：今天、逾期、计划中、重要、全部、已完成，以及按清单筛选（list:清单名） */
 type View = "today" | "planned" | "important" | "overdue" | "all" | "done" | `list:${string}`;
-type SortMode = "manual" | "due" | "priority" | "created";
 
 interface Group {
   key: string;
@@ -32,7 +31,6 @@ const VIEW_HINTS: Record<string, string> = {
   all: "全部未完成的待办",
   done: "按完成时间倒序",
 };
-const SORT_LABELS: Record<SortMode, string> = { manual: "手动顺序", due: "截止日期", priority: "优先级", created: "创建时间" };
 const UNLISTED = "未分类";
 
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -65,12 +63,10 @@ function sameLocalDay(timestamp: number | null, day: string): boolean {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === day;
 }
 
-function sortTodos(items: Todo[], mode: SortMode): Todo[] {
+function sortTodos(items: Todo[], mode: "manual" | "due" = "manual"): Todo[] {
   const copy = [...items];
   const byManual = (a: Todo, b: Todo) => a.sort - b.sort || a.created_at - b.created_at;
   if (mode === "due") copy.sort((a, b) => (a.due_date || "9999").localeCompare(b.due_date || "9999") || byManual(a, b));
-  else if (mode === "priority") copy.sort((a, b) => b.priority - a.priority || byManual(a, b));
-  else if (mode === "created") copy.sort((a, b) => b.created_at - a.created_at);
   else copy.sort(byManual);
   return copy;
 }
@@ -82,16 +78,12 @@ function mergeProgress(saved: TodoProgress[], current: TodoProgress[]): TodoProg
   return [...byId.values()].sort((a, b) => a.created_at - b.created_at);
 }
 
-/** 工位待办：上班用的个人待办清单（今天 / 计划 / 重要 / 清单分组，优先级、截止日期、子任务、备注、搜索与排序）。
+/** 工位待办：上班用的个人待办清单（今天 / 计划 / 重要 / 清单分组，优先级、截止日期、子任务、备注）。
  *  既是独立页面 /todo，也内嵌在聊天大厅「我的工位」的对话框中。数据按登录账号隔离。 */
 export function TodoPanel() {
   const [todos, setTodos] = useState<Todo[] | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("today");
-  const [sortMode, setSortMode] = useState<SortMode>("manual");
-  const [search, setSearch] = useState("");
-  const [searchAll, setSearchAll] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   // 快速添加
@@ -186,18 +178,9 @@ export function TodoPanel() {
   const todayTotal = counts.today + doneToday;
 
   const groups = useMemo<Group[]>(() => {
-    const query = search.trim().toLowerCase();
-    const matches = (todo: Todo) => !query || todo.title.toLowerCase().includes(query) || todo.note.toLowerCase().includes(query)
-      || todo.list.toLowerCase().includes(query) || todo.subtasks.some(sub => sub.title.toLowerCase().includes(query))
-      || todo.progress.some(entry => entry.text.toLowerCase().includes(query));
-    const pool = all.filter(matches);
-    if (query && searchAll) return [
-      { key: "search-open", title: "未完成", items: sortTodos(pool.filter(todo => !todo.done), sortMode) },
-      { key: "search-done", title: "已完成", items: pool.filter(todo => todo.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0)) },
-    ];
-    const pending = pool.filter(todo => !todo.done);
-    const finished = pool.filter(todo => todo.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0));
-    const sorted = (items: Todo[]) => sortTodos(items, sortMode);
+    const pending = all.filter(todo => !todo.done);
+    const finished = all.filter(todo => todo.done).sort((a, b) => (b.done_at ?? 0) - (a.done_at ?? 0));
+    const sorted = (items: Todo[]) => sortTodos(items);
     const doneGroup = (items: Todo[], title = "已完成"): Group[] => (items.length ? [{ key: "done", title, items, collapsible: true }] : []);
 
     if (view === "today") {
@@ -235,7 +218,7 @@ export function TodoPanel() {
       ];
     }
     return [{ key: "all", title: "未完成", items: sorted(pending) }, ...doneGroup(finished)];
-  }, [all, view, sortMode, search, searchAll, today, inToday]);
+  }, [all, view, today, inToday]);
 
   async function add(event: FormEvent) {
     event.preventDefault();
@@ -253,9 +236,8 @@ export function TodoPanel() {
     try {
       const saved = await createTodo(input);
       setTodos(current => [...(current ?? []), saved]);
-      if (view === "done" || view === "overdue" || search.trim()) {
+      if (view === "done" || view === "overdue") {
         setView("all");
-        setSearch("");
       }
       setTitle("");
       setDue("");
@@ -311,26 +293,9 @@ export function TodoPanel() {
     void moveTo(items, todoId, target.id, delta < 0 ? "before" : "after");
   }
 
-  const clearScope = view.startsWith("list:") ? view.slice(5) : undefined;
-  const clearCount = all.filter(todo => todo.done && (clearScope === undefined || todo.list === clearScope)).length;
-  const canClear = !search.trim() && (view === "all" || view === "done" || view.startsWith("list:"));
-
-  async function clearDone() {
-    if (!canClear) return;
-    const scope = view.startsWith("list:") ? view.slice(5) : undefined;
-    const count = all.filter(todo => todo.done && (scope === undefined || todo.list === scope)).length;
-    if (!count || !window.confirm(`永久删除${scope === undefined ? "全部清单" : `「${scope || UNLISTED}」清单`}中 ${count} 条已完成的待办？此操作无法撤销。`)) return;
-    try {
-      await clearCompletedTodos(scope);
-      await load();
-    } catch (value) {
-      setError(errorMessage(value));
-    }
-  }
-
   const viewTitle = view.startsWith("list:") ? view.slice(5) || UNLISTED : VIEW_TITLES[view];
   const viewHint = view.startsWith("list:") ? "这个清单里的待办" : VIEW_HINTS[view];
-  const canMove = sortMode === "manual" && !search.trim() && view !== "planned" && view !== "done";
+  const canMove = view !== "planned" && view !== "done";
 
   const navItem = (key: View, label: string, count: number) => (
     <button key={key} type="button" title={label} aria-label={`${label} ${count}`} aria-current={view === key ? "page" : undefined} className={`todo-nav-item${view === key ? " is-active" : ""}`} onClick={() => { setView(key); setExpanded(null); }}>
@@ -358,8 +323,8 @@ export function TodoPanel() {
         <section className="todo-main">
           <header className="todo-main-head">
             <div>
-              <h2 className="todo-view-title">{search.trim() && searchAll ? "搜索结果" : viewTitle}</h2>
-              <p className="todo-view-hint">{search.trim() && searchAll ? "搜索全部清单，包含已完成的待办" : viewHint}</p>
+              <h2 className="todo-view-title">{viewTitle}</h2>
+              <p className="todo-view-hint">{viewHint}</p>
               <p className="todo-view-hint">{dateLabel(today, "")} · 待完成 {counts.all}{overdue ? ` · 逾期 ${overdue}` : ""}</p>
             </div>
             {view === "today" && todayTotal ? (
@@ -399,20 +364,10 @@ export function TodoPanel() {
             </div>
           </form>
 
-          <div className="todo-toolbar">
-            <input className="todo-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索标题、备注、清单、子任务" aria-label="搜索待办" />
-            <label className="todo-search-scope"><input type="checkbox" checked={searchAll} onChange={event => setSearchAll(event.target.checked)} />搜索全部</label>
-            <select className="select-compact" value={sortMode} onChange={event => setSortMode(event.target.value as SortMode)} aria-label="排序">
-              {(Object.keys(SORT_LABELS) as SortMode[]).map(mode => <option key={mode} value={mode}>排序：{SORT_LABELS[mode]}</option>)}
-            </select>
-            {canClear && clearCount ? <Button size="sm" variant="quiet" onClick={() => void clearDone()}>清除已完成（{clearCount}）</Button> : null}
-            <Button size="sm" variant="quiet" disabled={refreshing} onClick={async () => { setRefreshing(true); setError(""); try { await load(); } finally { setRefreshing(false); } }}>{refreshing ? "刷新中…" : "刷新"}</Button>
-          </div>
-
           {groups.every(group => !group.items.length) ? (
             <EmptyState
-              title={search.trim() ? "没有匹配的待办" : view === "today" ? "今天还没有安排" : "这里还是空的"}
-              detail={search.trim() ? "换个关键词，或勾选「搜索全部」跨清单查找。" : view === "today" ? "在上方输入框写下今天要做的第一件事。" : "在上方输入框添加一条待办。"}
+              title={view === "today" ? "今天还没有安排" : "这里还是空的"}
+              detail={view === "today" ? "在上方输入框写下今天要做的第一件事。" : "在上方输入框添加一条待办。"}
             />
           ) : groups.map(group => {
             if (!group.items.length && group.key !== "today") return null;
