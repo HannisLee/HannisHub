@@ -140,6 +140,55 @@ class TodoTest(_TempData):
                 todos.create_todo("alice", {"title": "3"})
             todos.create_todo("bob", {"title": "别人不受影响"})
 
+    def test_status_migration_lifecycle_and_progress(self):
+        todo_id = "abcdef1234567890"
+        legacy = database._open(database.db_path())
+        try:
+            with patch.object(database, "_MIGRATIONS", database._MIGRATIONS[:8]):
+                database._migrate(legacy)
+            legacy.execute(
+                "INSERT INTO todos(id, owner, title, created_at, updated_at) VALUES (?, 'alice', '旧任务', 1, 1)",
+                (todo_id,),
+            )
+        finally:
+            legacy.close()
+
+        # 旧库升级后默认待开始
+        migrated = todos.list_todos("alice")[0]
+        self.assertEqual(migrated["status"], "not_started")
+
+        # 仅允许三个状态
+        for bad in ("waiting", "paused", "done", "", 123):
+            with self.subTest(bad=bad), self.assertRaises(HTTPException) as ctx:
+                todos.update_todo("alice", todo_id, {"status": bad})
+            self.assertEqual(ctx.exception.status_code, 400)
+
+        # 完成与执行状态独立：完成后恢复未完成应保留原有阻塞状态
+        blocked = todos.update_todo("alice", todo_id, {"status": "blocked"})
+        self.assertEqual(blocked["status"], "blocked")
+        finished = todos.update_todo("alice", todo_id, {"done": True})
+        self.assertTrue(finished["done"])
+        self.assertEqual(finished["status"], "blocked")
+        reopened = todos.update_todo("alice", todo_id, {"done": False})
+        self.assertFalse(reopened["done"])
+        self.assertEqual(reopened["status"], "blocked")
+
+        # 仅追加进度文字不自动改变状态；显式传入 status 则原子同步更新
+        res1 = todos.add_progress_with_status("alice", todo_id, "等待依赖修复")
+        self.assertEqual(res1["status"], "blocked")
+        self.assertEqual(todos.list_todos("alice")[0]["status"], "blocked")
+
+        with self.assertRaises(HTTPException) as ctx:
+            todos.add_progress_with_status("alice", todo_id, "非法状态", status="invalid")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(len(todos.list_todos("alice")[0]["progress"]), 1)
+
+        res2 = todos.add_progress_with_status("alice", todo_id, "依赖就绪，开始运行", status="in_progress")
+        self.assertEqual(res2["status"], "in_progress")
+        latest = todos.list_todos("alice")[0]
+        self.assertEqual(latest["status"], "in_progress")
+        self.assertEqual([p["text"] for p in latest["progress"]], ["等待依赖修复", "依赖就绪，开始运行"])
+
 
 class DeskTest(_TempData):
     def test_claim_switch_release(self):

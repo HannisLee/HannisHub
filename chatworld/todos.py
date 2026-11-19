@@ -4,7 +4,8 @@
 - title 标题（必填，最多 200 字）、note 备注（最多 4000 字）、list 所属清单（最多 24 字，空为「未分类」）
 - priority 优先级 0 无 / 1 低 / 2 中 / 3 高；due_date 截止日期 YYYY-MM-DD（空为不设）
 - my_day 加入「今天」的日期 YYYY-MM-DD（由浏览器按本地日期给出，过了这一天自动不再算「今天」）
-- done 是否完成、done_at 完成时间；subtasks 子任务 [{id, title, done}]（最多 50 个）
+- done 是否完成、done_at 完成时间；status 执行状态（not_started 待开始 / in_progress 进行中 / blocked 阻塞中，与 done 独立）
+- subtasks 子任务 [{id, title, done}]（最多 50 个）
 - progress 进度记录 [{id, text, created_at}]，按添加顺序从旧到新保存
 - sort 手动排序值（越小越靠前），新建的排在最后
 """
@@ -28,9 +29,11 @@ MAX_LIST = 24
 MAX_SUBTASKS = 50
 MAX_PROGRESS_TEXT = 1000
 MAX_TODOS = 2000
+DEFAULT_STATUS = "not_started"
+VALID_STATUSES = ("not_started", "in_progress", "blocked")
 SUBTASK_ID = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 TODO_ID = re.compile(r"^[a-f0-9]{16}$")
-FIELDS = ("title", "note", "list", "priority", "due_date", "my_day", "done", "subtasks", "sort")
+FIELDS = ("title", "note", "list", "priority", "due_date", "my_day", "done", "status", "subtasks", "sort")
 
 
 def _clean(value: object, limit: int, *, multiline: bool = False) -> str:
@@ -63,6 +66,12 @@ def _date(value: object, field: str) -> str:
 def _priority(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 3:
         raise HTTPException(status_code=400, detail="优先级应为 0–3")
+    return value
+
+
+def _status(value: object) -> str:
+    if not isinstance(value, str) or value not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail="执行状态应为待开始、进行中或阻塞中")
     return value
 
 
@@ -107,6 +116,8 @@ def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload["done"], bool):
             raise HTTPException(status_code=400, detail="完成状态应为布尔值")
         columns["done"] = int(payload["done"])
+    if "status" in payload:
+        columns["status"] = _status(payload["status"])
     if "subtasks" in payload:
         columns["subtasks"] = _subtasks(payload["subtasks"])
     if "sort" in payload:
@@ -115,6 +126,8 @@ def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _public(row: Any) -> dict[str, Any]:
+    raw_status = row["status"] if "status" in row.keys() else DEFAULT_STATUS
+    status = raw_status if raw_status in VALID_STATUSES else DEFAULT_STATUS
     return {
         "id": row["id"],
         "title": row["title"],
@@ -125,6 +138,7 @@ def _public(row: Any) -> dict[str, Any]:
         "my_day": row["my_day"],
         "done": bool(row["done"]),
         "done_at": row["done_at"],
+        "status": status,
         "subtasks": json.loads(row["subtasks"] or "[]"),
         "progress": json.loads(row["progress"]),
         "sort": row["sort"],
@@ -164,7 +178,8 @@ def create_todo(owner: str, payload: dict[str, Any]) -> dict[str, Any]:
             "id": todo_id, "owner": owner, "title": columns["title"], "note": columns.get("note", ""),
             "list": columns.get("list", ""), "priority": columns.get("priority", 0),
             "due_date": columns.get("due_date", ""), "my_day": columns.get("my_day", ""), "done": done,
-            "done_at": now if done else None, "subtasks": columns.get("subtasks", "[]"),
+            "done_at": now if done else None, "status": columns.get("status", DEFAULT_STATUS),
+            "subtasks": columns.get("subtasks", "[]"),
             "sort": columns.get("sort", float(last) + 1), "created_at": now, "updated_at": now,
         }
         conn.execute(
@@ -192,25 +207,33 @@ def update_todo(owner: str, todo_id: str, payload: dict[str, Any]) -> dict[str, 
     return _public(saved)
 
 
-def add_progress(owner: str, todo_id: str, text: object) -> dict[str, Any]:
-    """追加进度记录，由服务端记录时间。"""
+def add_progress_with_status(owner: str, todo_id: str, text: object, status: object = None) -> dict[str, Any]:
+    """追加进度记录（可选同时修改执行状态），由服务端记录时间并返回含当前状态的条目。"""
     _check_id(todo_id)
-    text = _clean(text, MAX_PROGRESS_TEXT, multiline=True) if isinstance(text, str) else ""
-    if not text:
+    next_status = _status(status) if status is not None else None
+    cleaned = _clean(text, MAX_PROGRESS_TEXT, multiline=True) if isinstance(text, str) else ""
+    if not cleaned:
         raise HTTPException(status_code=400, detail="请填写进度内容")
     with transaction() as conn:
-        row = conn.execute("SELECT progress FROM todos WHERE id = ? AND owner = ?", (todo_id, owner)).fetchone()
+        row = conn.execute("SELECT progress, status FROM todos WHERE id = ? AND owner = ?", (todo_id, owner)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="待办不存在")
         now = time.time()
-        entry = {"id": secrets.token_hex(8), "text": text, "created_at": now}
+        entry = {"id": secrets.token_hex(8), "text": cleaned, "created_at": now}
         progress = json.loads(row["progress"])
         progress.append(entry)
+        saved_status = next_status if next_status is not None else (row["status"] if row["status"] in VALID_STATUSES else DEFAULT_STATUS)
         conn.execute(
-            "UPDATE todos SET progress = ?, updated_at = ? WHERE id = ? AND owner = ?",
-            (json.dumps(progress, ensure_ascii=False), now, todo_id, owner),
+            "UPDATE todos SET progress = ?, status = ?, updated_at = ? WHERE id = ? AND owner = ?",
+            (json.dumps(progress, ensure_ascii=False), saved_status, now, todo_id, owner),
         )
-    return entry
+    return {**entry, "status": saved_status}
+
+
+def add_progress(owner: str, todo_id: str, text: object) -> dict[str, Any]:
+    """追加进度记录，由服务端记录时间。"""
+    result = add_progress_with_status(owner, todo_id, text)
+    return {"id": result["id"], "text": result["text"], "created_at": result["created_at"]}
 
 
 def delete_todo(owner: str, todo_id: str) -> None:

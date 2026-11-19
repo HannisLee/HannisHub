@@ -1014,16 +1014,22 @@ async def todo_clear_completed(request: Request, payload: dict[str, Any] = Body(
 
 @app.patch("/api/todos/{todo_id}")
 async def todo_update(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
-    """修改待办的部分字段（标题、备注、清单、优先级、截止日期、今天、完成、子任务、排序）。"""
+    """修改待办的部分字段（标题、备注、清单、优先级、截止日期、今天、完成、状态、子任务、排序）。"""
     username = _require_user(request)
     return JSONResponse(await run_in_threadpool(todos.update_todo, username, todo_id, payload))
 
 
 @app.post("/api/todos/{todo_id}/progress")
 async def todo_add_progress(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
-    """为自己的待办添加一条进度记录。"""
+    """为自己的待办添加一条进度记录，可选同时更新执行状态。"""
     username = _require_user(request)
-    return JSONResponse(await run_in_threadpool(todos.add_progress, username, todo_id, payload.get("text")))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求格式不正确")
+    return JSONResponse(
+        await run_in_threadpool(
+            todos.add_progress_with_status, username, todo_id, payload.get("text"), payload.get("status"),
+        ),
+    )
 
 
 @app.delete("/api/todos/{todo_id}")

@@ -17,6 +17,21 @@ export interface TodoProgress {
 /** 优先级：3 P0（高）、2 P1（默认，含兼容旧值 0）、1 P2（低） */
 export type TodoPriority = 0 | 1 | 2 | 3;
 
+/** 未完成任务的执行状态（严格只有这三个值，与 done 独立） */
+export type TodoStatus = "not_started" | "in_progress" | "blocked";
+
+export const TODO_STATUSES: TodoStatus[] = ["not_started", "in_progress", "blocked"];
+export const TODO_STATUS_LABELS: Record<TodoStatus, string> = {
+  not_started: "待开始",
+  in_progress: "进行中",
+  blocked: "阻塞中",
+};
+
+export function normalizeTodoStatus(value: unknown): TodoStatus {
+  if (value === "in_progress" || value === "blocked" || value === "not_started") return value;
+  return "not_started";
+}
+
 export interface Todo {
   id: string;
   title: string;
@@ -30,6 +45,7 @@ export interface Todo {
   my_day: string;
   done: boolean;
   done_at: number | null;
+  status: TodoStatus;
   subtasks: TodoSubtask[];
   progress: TodoProgress[];
   sort: number;
@@ -37,7 +53,7 @@ export interface Todo {
   updated_at: number;
 }
 
-export type TodoInput = Partial<Pick<Todo, "title" | "note" | "list" | "priority" | "due_date" | "my_day" | "done" | "subtasks" | "sort">>;
+export type TodoInput = Partial<Pick<Todo, "title" | "note" | "list" | "priority" | "due_date" | "my_day" | "done" | "status" | "subtasks" | "sort">>;
 
 const BASE = `${API_PATHS.hub}/todos`;
 
@@ -73,8 +89,13 @@ export function updateTodo(id: string, input: TodoInput): Promise<Todo> {
   return apiFetch<Todo>(`${BASE}/${encodePath(id)}`, { method: "PATCH", body: jsonBody(input) });
 }
 
-export function addTodoProgress(id: string, text: string): Promise<TodoProgress> {
-  return apiFetch<TodoProgress>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody({ text }) });
+export function addTodoProgress(id: string, text: string, status?: TodoStatus): Promise<TodoProgress & { status?: TodoStatus }> {
+  const payload = status ? { text, status } : { text };
+  return apiFetch<TodoProgress & { status?: TodoStatus }>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody(payload) });
+}
+
+export function deleteTodo(id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`${BASE}/${encodePath(id)}`, { method: "DELETE" });
 }
 
 export function reorderTodos(ids: string[]): Promise<{ todos: Todo[] }> {

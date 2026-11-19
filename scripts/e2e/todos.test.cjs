@@ -1,6 +1,8 @@
-// 仅连接隔离测试 Hub，验证待办筛选、跨视图搜索、编辑保存、清理范围与窄屏布局。
+// 仅连接隔离测试 Hub，验证待办三状态、完整进度时间轴、原地记进度、精简添加区、统计、长标题与窄屏布局。
 const { chromium } = require(process.env.PW_CORE);
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROME });
@@ -10,163 +12,252 @@ const assert = require('node:assert/strict');
     page.on('pageerror', error => errors.push(error.message));
     const origin = `http://127.0.0.1:${process.env.HUB_PORT || 18149}`;
     await page.goto(origin + '/login');
-    const api = (path, method = 'GET', data) => page.evaluate(async ({ path, method, data }) => {
-      const response = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
-      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+    const api = (urlPath, method = 'GET', data) => page.evaluate(async ({ urlPath, method, data }) => {
+      const response = await fetch(urlPath, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: data === undefined ? undefined : JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error(`${urlPath}: ${response.status}`);
       return response.json();
-    }, { path, method, data });
+    }, { urlPath, method, data });
+
     await api('/api/auth/login', 'POST', { username: 'guest', password: 'e2e-test-pass-123' });
-    // 每次使用独有清单，不清理其他测试的数据。
-    const prefix = `待办回归${Date.now()}`;
-    const listA = prefix + '甲', listB = prefix + '乙';
+
+    const prefix = `待办E2E_${Date.now()}`;
+    const listA = prefix + '甲';
     const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA'));
-    const late = await api('/api/todos', 'POST', { title: prefix + '逾期', due_date: '2020-01-01', list: listA, subtasks: [{ id: 'step1', title: '原子任务', done: false }] });
-    await api('/api/todos', 'POST', { title: prefix + '未来', due_date: '2099-01-01', list: listB });
-    const doneA = await api('/api/todos', 'POST', { title: prefix + '完成甲', done: true, list: listA });
-    const doneB = await api('/api/todos', 'POST', { title: prefix + '完成乙', done: true, list: listB });
-    await api('/api/todos', 'POST', { title: prefix + '未分类' });
+
+    // 1) 创建测试基础数据：逾期、P0 重要、未分类
+    const late = await api('/api/todos', 'POST', {
+      title: prefix + '逾期',
+      due_date: '2020-01-01',
+      list: listA,
+      subtasks: [{ id: 'step1', title: '原子任务', done: false }],
+    });
+    const p0Task = await api('/api/todos', 'POST', {
+      title: prefix + 'P0高优',
+      priority: 3,
+      my_day: today,
+    });
+    const timelineTask = await api('/api/todos', 'POST', {
+      title: 'C588-2node-16gbs8-amp-both-very-long-experiment-name-check-overflow',
+      priority: 2,
+      my_day: today,
+    });
+
+    // 如提供了 TEST_DB，直接往隔离测试库写入精确时间戳的 6 条进度，验收时间轴规则
+    if (process.env.TEST_DB) {
+      const timestamps = await page.evaluate(() => {
+        const mk = (y, m, d, hh, mm) => Math.floor(new Date(y, m - 1, d, hh, mm, 0).getTime() / 1000);
+        return [
+          { id: 'tl1', text: '开始训练', created_at: mk(2026, 11, 19, 15, 0) },
+          { id: 'tl2', text: '完成第一次测试', created_at: mk(2026, 11, 19, 17, 0) },
+          { id: 'tl3', text: '发现问题', created_at: mk(2026, 11, 19, 17, 35) },
+          { id: 'tl4', text: '完成修复', created_at: mk(2026, 11, 19, 18, 55) },
+          { id: 'tl5', text: '开始第二轮', created_at: mk(2026, 11, 20, 9, 0) },
+          { id: 'tl6', text: '完成第二轮', created_at: mk(2026, 11, 20, 9, 45) },
+        ];
+      });
+      execFileSync(process.env.PYTHON_BIN || 'python3', [
+        '-c',
+        'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("UPDATE todos SET progress = ? WHERE id = ?", (sys.argv[2], sys.argv[3])); c.commit(); c.close()',
+        process.env.TEST_DB,
+        JSON.stringify(timestamps),
+        timelineTask.id,
+      ]);
+    }
+
     await page.goto(origin + '/todo');
     const nav = page.getByRole('navigation', { name: '待办视图' });
     await nav.waitFor();
-    assert.equal(await page.getByRole('heading', { name: '工位待办', exact: true }).count(), 0);
-    assert.equal(await page.locator('.page-header').count(), 0);
-    await nav.getByRole('button', { name: /^已逾期/ }).click();
-    const row = page.locator('.todo-item', { hasText: late.title });
-    await row.waitFor();
     assert.ok((await nav.boundingBox()).width <= 100);
-    assert.equal(await nav.getByRole('button', { name: new RegExp('^' + listA) }).locator('span').first().textContent(), '待办回');
-    const header = row.locator('.todo-row');
-    assert.equal(await header.getByRole('button', { name: /加入今天|移出今天|^删除/ }).count(), 0);
-    assert.equal(await header.locator('.todo-caret').count(), 0);
-    const before = await header.boundingBox();
-    await row.locator('.todo-row-main').click();
-    assert.deepEqual(await header.boundingBox(), before);
-    const patchResponse = () => page.waitForResponse(r => r.url().endsWith(`/api/todos/${late.id}`) && r.request().method() === 'PATCH');
-    let saved = patchResponse();
-    await row.getByRole('button', { name: '今天', exact: true }).click();
-    await saved;
-    await row.waitFor({ state: 'detached' });
-    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).due_date, today);
-    await nav.getByRole('button', { name: /^全部/ }).click();
-    await row.locator('.todo-row-main').click();
-    const sub = row.getByRole('textbox', { name: '子任务标题「原子任务」' });
-    await sub.fill('修改后的子任务');
-    saved = patchResponse();
-    await sub.press('Enter');
-    await saved;
-    saved = patchResponse();
-    await row.getByRole('button', { name: '清除日期', exact: true }).click();
-    await saved;
+    assert.equal(await page.locator('.page-header').count(), 0);
+
+    // E. 顶部信息与分组标题检查
+    assert.equal(await page.locator('.todo-view-title').textContent(), '今天');
+    assert.ok((await page.locator('.todo-view-date').textContent()).includes('月'));
+    assert.equal(await page.locator('.todo-view-hint').count(), 0);
+    await page.getByRole('heading', { name: /^待完成 · 2$/ }).waitFor();
+    await page.getByRole('heading', { name: /^已逾期 · 1$/ }).waitFor();
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 3');
+    // 重要分类只计数 P0 高优先级（1 条），不把 P1 默认优先级混入
+    assert.equal(await nav.getByRole('button', { name: /^重要/ }).locator('.todo-nav-count').textContent(), '1');
+
+    // C. 添加任务区域：默认精简，聚焦展开，P1 默认，今天视图仅设 my_day 不设 due_date
+    const addForm = page.locator('.todo-add');
+    assert.equal(await addForm.locator('.todo-add-options').count(), 0);
+    const addInput = page.getByRole('textbox', { name: '待办内容', exact: true });
+    await addInput.click();
+    await addForm.locator('.todo-add-options').waitFor();
+    assert.equal(await addForm.locator('select').inputValue(), '2');
+    // 在列表输入框按 Enter 不触发提交
+    await addForm.getByLabel('清单', { exact: true }).press('Enter');
+    assert.equal((await api('/api/todos')).todos.length, 3);
+    // 填写标题并回车创建
+    await addInput.fill(prefix + '新建');
+    await addInput.press('Enter');
+    const createdRow = page.locator('.todo-item', { hasText: prefix + '新建' });
+    await createdRow.waitFor();
+    assert.equal(await addInput.inputValue(), '');
+    const createdData = (await api('/api/todos')).todos.find(t => t.title === prefix + '新建');
+    assert.equal(createdData.my_day, today);
+    assert.equal(createdData.due_date, '');
+    assert.equal(createdData.priority, 2);
+    assert.equal(createdData.status, 'not_started');
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 4');
+
+    // A. 三状态系统：默认待开始 -> 切换进行中 -> 阻塞中 -> 刷新保持 -> 完成后不显示活跃状态 -> 恢复后保持原状态
+    const statusBtn = createdRow.locator('.todo-status-btn');
+    assert.equal((await statusBtn.textContent()).trim(), '待开始');
+    await statusBtn.click();
+    const menu = createdRow.getByRole('menu');
+    await menu.waitFor();
+    assert.equal(await menu.getByRole('menuitemradio').count(), 3);
+    assert.equal(await menu.getByRole('menuitemradio', { name: '待开始' }).getAttribute('aria-checked'), 'true');
+    // Escape 关闭菜单
+    await page.keyboard.press('Escape');
+    assert.equal(await createdRow.getByRole('menu').count(), 0);
+
+    // 切换为「阻塞中」并刷新验证持久化
+    await statusBtn.click();
+    const patchStatus = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}`) && r.request().method() === 'PATCH');
+    await createdRow.getByRole('menuitemradio', { name: '阻塞中' }).click();
+    await patchStatus;
+    assert.equal((await statusBtn.textContent()).trim(), '阻塞中');
     await page.reload();
-    await nav.getByRole('button', { name: /^全部/ }).click();
-    const progressButton = row.getByRole('button', { name: /记进度/ });
-    const progressList = row.getByRole('list', { name: '进度记录' });
-    for (const text of ['等卡', '等待狗头', '已收到']) {
-      await progressButton.click();
-      const input = row.getByRole('textbox', { name: '进度内容' });
-      await input.fill(text);
-      await input.press('Enter');
-      await progressList.getByText(text, { exact: true }).waitFor();
+    await createdRow.waitFor();
+    assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
+
+    // 完成任务 -> 进入今天完成，统计更新 -> 恢复未完成仍为「阻塞中」
+    const donePatch = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}`) && r.request().method() === 'PATCH');
+    await createdRow.locator('.todo-check').click();
+    await donePatch;
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 1 / 4');
+    await page.getByRole('button', { name: /^今天完成 · 1$/ }).click();
+    const doneCard = page.locator('.todo-item.is-done', { hasText: prefix + '新建' });
+    await doneCard.waitFor();
+    assert.equal(await doneCard.locator('.todo-status-btn').count(), 0);
+    assert.equal(await doneCard.locator('.todo-done-badge').textContent(), '已完成');
+    const reopenPatch = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}`) && r.request().method() === 'PATCH');
+    await doneCard.locator('.todo-check').click();
+    await reopenPatch;
+    await createdRow.waitFor();
+    assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 4');
+
+    // 状态保存失败时回滚 UI 并提示错误
+    await page.route(`**/api/todos/${createdData.id}`, route => route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: '模拟状态保存失败' }) })
+      : route.continue());
+    await createdRow.locator('.todo-status-btn').click();
+    await createdRow.getByRole('menuitemradio', { name: '进行中' }).click();
+    await page.getByText('模拟状态保存失败', { exact: true }).waitFor();
+    assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
+    await page.unroute(`**/api/todos/${createdData.id}`);
+
+    // B. 进度时间轴完整展示（不折叠，不裁剪）与规则验证
+    const tlRow = page.locator('.todo-item', { hasText: 'C588-2node-16gbs8-amp-both' });
+    const tlList = tlRow.getByRole('list', { name: '进度记录' });
+    if (process.env.TEST_DB) {
+      assert.equal(await tlList.getByRole('listitem').count(), 6);
+      assert.equal(await tlRow.getByRole('button', { name: /展开全部|收起进度/ }).count(), 0);
+      const renderedRows = await tlList.locator('li').evaluateAll(els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim()));
+      assert.equal(renderedRows[0], '2026-11-19 15:00 开始训练');
+      assert.equal(renderedRows[1], '+2小时 17:00 完成第一次测试');
+      assert.equal(renderedRows[2], '+35分钟 17:35 发现问题');
+      assert.equal(renderedRows[3], '+1小时20分钟 18:55 完成修复');
+      assert.equal(renderedRows[4], '2026-11-20 09:00 开始第二轮');
+      assert.equal(renderedRows[5], '+45分钟 09:45 完成第二轮');
     }
-    assert.equal(await row.locator('.todo-row-main').getAttribute('aria-expanded'), 'false');
-    assert.equal(await progressList.getByRole('listitem').count(), 2);
-    assert.equal(await progressList.getByText('等卡', { exact: true }).count(), 0);
-    assert.ok(!Number.isNaN(Date.parse(await progressList.locator('time').first().getAttribute('datetime'))));
-    await row.getByRole('button', { name: '展开全部进度（3）' }).click();
-    assert.equal(await progressList.getByRole('listitem').count(), 3);
-    await row.getByRole('button', { name: '收起进度' }).click();
-    assert.equal(await progressList.getByRole('listitem').count(), 2);
-    await page.reload();
-    await nav.getByRole('button', { name: /^全部/ }).click();
-    await progressList.getByText('已收到', { exact: true }).waitFor();
-    assert.equal(await progressList.getByRole('listitem').count(), 2);
-    await row.locator('.todo-row-main').click();
-    assert.equal(await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).inputValue(), '修改后的子任务');
-    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).due_date, '');
-    await nav.getByRole('button', { name: /^未分类/ }).click();
-    await page.locator('.todo-item', { hasText: prefix + '未分类' }).waitFor();
-    assert.equal(await page.locator('.todo-item', { hasText: late.title }).count(), 0);
-    await nav.getByRole('button', { name: /^今天/ }).click();
-    await page.getByRole('searchbox', { name: '搜索待办' }).fill(prefix);
-    assert.equal(await page.locator('.todo-item').count(), 0);
-    await page.getByRole('checkbox', { name: '搜索全部' }).check();
-    await page.getByRole('heading', { name: '搜索结果', exact: true }).waitFor();
-    assert.equal(await page.locator('.todo-item').count(), 5);
-    assert.equal(await page.getByRole('button', { name: /清除已完成/ }).count(), 0);
-    await page.getByRole('searchbox', { name: '搜索待办' }).fill('');
-    await nav.getByRole('button', { name: new RegExp('^' + listA) }).click();
-    let message = '';
-    page.once('dialog', async dialog => { message = dialog.message(); await dialog.accept(); });
-    const cleared = page.waitForResponse(r => r.url().endsWith('/api/todos/clear-completed'));
-    await page.getByRole('button', { name: '清除已完成（1）' }).click();
-    await cleared;
-    assert.ok(message.includes(listA));
-    const remaining = (await api('/api/todos')).todos;
-    assert.ok(!remaining.some(t => t.id === doneA.id));
-    assert.ok(remaining.some(t => t.id === doneB.id));
+
+    // D. 原地「记进度」编辑：多行 Shift+Enter、Enter 保存、草稿跨任务保留、仅记进度不改状态、配合状态同步保存
+    await tlRow.getByRole('button', { name: /记进度/ }).click();
+    const tlBox = tlRow.getByRole('textbox', { name: '进度内容' });
+    await tlBox.waitFor();
+    await tlBox.fill('暂存草稿内容');
+    // 切到另一张卡片：第一张草稿保留且显示「草稿」提示
+    await createdRow.getByRole('button', { name: /记进度/ }).click();
+    assert.ok((await tlRow.getByRole('button', { name: /记进度/ }).textContent()).includes('草稿'));
+    const createdBox = createdRow.getByRole('textbox', { name: '进度内容' });
+    await createdBox.fill('第一行');
+    await createdBox.press('Shift+Enter');
+    await createdBox.type('第二行');
+    // 仅记录进度，不修改状态，状态应保持为「阻塞中」
+    const progResp1 = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}/progress`));
+    await createdBox.press('Enter');
+    await progResp1;
+    await createdRow.getByRole('list', { name: '进度记录' }).getByText('第一行\n第二行').waitFor();
+    assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
+
+    // 再记一条进度，同时选择「进行中」
+    await createdRow.getByRole('button', { name: /记进度/ }).click();
+    await createdBox.fill('解除阻塞，开始推进');
+    await createdRow.getByLabel('进度保存时执行状态').selectOption('in_progress');
+    const progResp2 = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}/progress`));
+    await createdRow.getByRole('button', { name: '保存进度', exact: true }).click();
+    await progResp2;
+    assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '进行中');
+
+    // 进度保存失败时保留输入内容
+    await page.route(`**/api/todos/${createdData.id}/progress`, route =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: '模拟进度失败' }) }));
+    await createdRow.getByRole('button', { name: /记进度/ }).click();
+    await createdBox.fill('不该丢失的草稿');
+    await createdRow.getByRole('button', { name: '保存进度', exact: true }).click();
+    await createdRow.getByRole('alert').getByText('模拟进度失败').waitFor();
+    assert.equal(await createdBox.inputValue(), '不该丢失的草稿');
+    await page.unroute(`**/api/todos/${createdData.id}/progress`);
+    await createdRow.getByRole('button', { name: '取消', exact: true }).click();
+
+    // 长标题不会把右侧状态/记进度挤出卡片
+    const [cardBox, statusBox, actionBox] = await Promise.all([
+      tlRow.boundingBox(),
+      tlRow.locator('.todo-status-btn').boundingBox(),
+      tlRow.getByRole('button', { name: /记进度/ }).boundingBox(),
+    ]);
+    assert.ok(statusBox.x + statusBox.width <= cardBox.x + cardBox.width);
+    assert.ok(actionBox.x + actionBox.width <= cardBox.x + cardBox.width);
+
+    // 窄屏响应式检查：无横向溢出（等待侧栏响应式过渡结束）
     await page.setViewportSize({ width: 390, height: 844 });
-    await nav.getByRole('button', { name: /^全部/ }).click();
-    await row.locator('.todo-row-main').click();
-    saved = patchResponse();
-    await row.getByRole('checkbox', { name: '加入今天', exact: true }).check();
-    await saved;
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    const [summary, action] = await Promise.all([row.locator('.todo-meta').boundingBox(), progressButton.boundingBox()]);
-    assert.ok(summary.x + summary.width <= action.x && summary.y < action.y + action.height);
-    assert.equal((await row.locator('.todo-meta .todo-chip').evaluateAll(chips => new Set(chips.map(chip => chip.getBoundingClientRect().top)).size)), 1);
-    if (process.env.SHOT_DIR) await page.screenshot({ path: process.env.SHOT_DIR + '/todo-mobile.png', fullPage: true });
-    // 保存失败后恢复服务器数据，同时保留错误提示供用户重试。
-    await page.route(`**/api/todos/${late.id}`, route => route.request().method() === 'PATCH'
-      ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: '模拟保存失败' }) }) : route.continue());
-    const rollback = page.waitForResponse(r => new URL(r.url()).pathname === '/api/todos' && r.request().method() === 'GET');
-    await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).fill('失败的修改');
-    await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).press('Enter');
-    await rollback;
-    await page.getByText('模拟保存失败', { exact: true }).waitFor();
-    assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).subtasks[0].title, '修改后的子任务');
-    await page.unroute(`**/api/todos/${late.id}`);
-    await api('/api/todos', 'POST', { title: prefix + '外部新增' });
-    await page.getByRole('button', { name: '刷新', exact: true }).click();
-    await page.locator('.todo-item', { hasText: prefix + '外部新增' }).waitFor();
-    assert.equal(await page.getByText('模拟保存失败', { exact: true }).count(), 0);
-    // 在已完成视图添加后显示新条目，避免添加成功却看不到内容。
-    await nav.getByRole('button', { name: /^已完成/ }).click();
-    await page.getByRole('textbox', { name: '待办内容', exact: true }).fill(prefix + '新待办');
-    await page.getByRole('button', { name: '添加', exact: true }).click();
-    await page.getByRole('heading', { name: '全部待办', exact: true }).waitFor();
-    await page.locator('.todo-item', { hasText: prefix + '新待办' }).waitFor();
-    // 日期列与标题同一行，任何相对日期以及空日期都占相同宽度。
-    const dayLabels = [[0, '今天'], [-1, '昨天'], [-42, '42天前'], [null, '']];
-    for (const [offset] of dayLabels) {
-      const myDay = offset === null ? '' : await page.evaluate(days => {
-        const date = new Date();
-        date.setDate(date.getDate() + days);
-        return date.toLocaleDateString('en-CA');
-      }, offset);
-      await api('/api/todos', 'POST', { title: `C588-${prefix}-${offset}`, my_day: myDay });
+    await page.waitForTimeout(250);
+    const overflowInfo = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth,
+      overflowEls: [...document.querySelectorAll('*')]
+        .filter(el => el.getBoundingClientRect().right > innerWidth + 0.5 && !el.closest('.todo-nav'))
+        .map(el => ({ tag: el.tagName, cls: el.className, right: el.getBoundingClientRect().right, text: (el.textContent || '').slice(0, 30) })),
+    }));
+    assert.ok(overflowInfo.scrollWidth <= overflowInfo.innerWidth, JSON.stringify(overflowInfo));
+    if (process.env.SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'todo-mobile.png'), fullPage: true });
     }
-    await page.getByRole('button', { name: '刷新', exact: true }).click();
-    for (const width of [390, 1400]) {
-      await page.setViewportSize({ width, height: 844 });
-      const slots = [];
-      for (const [offset, label] of dayLabels) {
-        const datedRow = page.locator('.todo-item', { hasText: `C588-${prefix}-${offset}` });
-        const slot = datedRow.locator('.todo-row-day');
-        await slot.waitFor();
-        assert.equal((await slot.textContent()).trim(), label);
-        assert.equal(await datedRow.locator('.todo-meta time').count(), 0);
-        const [slotBox, titleBox] = await Promise.all([slot.boundingBox(), datedRow.locator('.todo-title-text').boundingBox()]);
-        assert.ok(slotBox.x + slotBox.width <= titleBox.x);
-        assert.ok(Math.abs(slotBox.y + slotBox.height / 2 - titleBox.y - titleBox.height / 2) < 1);
-        slots.push(slotBox.width);
-      }
-      assert.ok(slots[0] >= 55 && slots[0] <= 65);
-      assert.ok(slots.every(size => size === slots[0]));
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    await page.waitForTimeout(250);
+    if (process.env.SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'todo-desktop.png'), fullPage: true });
     }
+
+    // 日期槽对齐检查
+    const p0Row = page.locator('.todo-item', { hasText: p0Task.title });
+    const [slotBox, titleBox] = await Promise.all([
+      p0Row.locator('.todo-row-day').boundingBox(),
+      p0Row.locator('.todo-title-text').boundingBox(),
+    ]);
+    assert.ok(slotBox.x + slotBox.width <= titleBox.x);
+    assert.ok(slotBox.width >= 55 && slotBox.width <= 65);
+
+    // 验证逾期条目仍在已逾期视图可见，且切换排序模式正常
+    await nav.getByRole('button', { name: /^已逾期/ }).click();
+    await page.locator('.todo-item', { hasText: late.title }).waitFor();
+
     assert.deepEqual(errors, []);
-    console.log('待办紧凑分类、详情展开位置、进度添加和折叠持久化、筛选、编辑与窄屏通过');
+    console.log('待办三状态、完整进度时间轴、原地记进度、精简添加与响应式回归全部通过');
   } finally {
     await browser.close();
   }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

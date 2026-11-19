@@ -173,6 +173,10 @@ _MIGRATIONS: list[str] = [
     """
     ALTER TABLE todos ADD COLUMN progress TEXT NOT NULL DEFAULT '[]';
     """,
+    # v9：待办执行状态（not_started / in_progress / blocked），完成状态仍由 done / done_at 独立管理
+    """
+    ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'not_started';
+    """,
 ]
 
 _init_lock = threading.Lock()
