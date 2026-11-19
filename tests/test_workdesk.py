@@ -4,6 +4,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,39 @@ class TodoTest(_TempData):
         todos.list_todos("alice")
         with database.connect() as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], len(database._MIGRATIONS))
+
+    def test_progress_migration_and_append(self):
+        todo_id = "1234567890abcdef"
+        legacy = database._open(database.db_path())
+        try:
+            with patch.object(database, "_MIGRATIONS", database._MIGRATIONS[:7]):
+                database._migrate(legacy)
+            legacy.execute(
+                "INSERT INTO todos(id, owner, title, created_at, updated_at) VALUES (?, 'alice', '发版', 1, 1)",
+                (todo_id,),
+            )
+        finally:
+            legacy.close()
+
+        self.assertEqual(todos.list_todos("alice")[0]["progress"], [])
+        for owner, text, status in (("bob", "等卡", 404), ("alice", " \n ", 400), ("alice", [], 400)):
+            with self.subTest(owner=owner, text=text), self.assertRaises(HTTPException) as ctx:
+                todos.add_progress(owner, todo_id, text)
+            self.assertEqual(ctx.exception.status_code, status)
+
+        first = todos.add_progress("alice", todo_id, "  等卡\x00 ")
+        updates = ["等待狗头", "已到货"]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            entries = list(pool.map(lambda text: todos.add_progress("alice", todo_id, text), updates))
+        saved = todos.update_todo("alice", todo_id, {"note": "发布步骤", "done": True})
+        self.assertEqual(first["text"], "等卡")
+        self.assertEqual(saved["progress"][0], first)
+        self.assertCountEqual(saved["progress"][1:], entries)
+        self.assertEqual(todos.list_todos("alice")[0]["progress"], saved["progress"])
+        self.assertLessEqual(first["created_at"], entries[0]["created_at"])
+        self.assertEqual(todos.list_todos("bob"), [])
+        self.assertEqual(todos.clear_completed("alice"), 1)
+        self.assertEqual(todos.list_todos("alice"), [])
 
     def test_create_and_isolation(self):
         a = todos.create_todo("alice", {"title": "  写周报\n", "priority": 3, "due_date": "2026-11-20", "list": "工作"})

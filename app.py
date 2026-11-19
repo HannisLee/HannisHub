@@ -1019,6 +1019,13 @@ async def todo_update(todo_id: str, request: Request, payload: dict[str, Any] = 
     return JSONResponse(await run_in_threadpool(todos.update_todo, username, todo_id, payload))
 
 
+@app.post("/api/todos/{todo_id}/progress")
+async def todo_add_progress(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """为自己的待办添加一条进度记录。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.add_progress, username, todo_id, payload.get("text")))
+
+
 @app.delete("/api/todos/{todo_id}")
 async def todo_delete(todo_id: str, request: Request):
     """删除待办。"""

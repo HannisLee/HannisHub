@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import {
-  clearCompletedTodos, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
-  TODO_LIST_MAX, TODO_NOTE_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo, type Todo, type TodoInput, type TodoPriority,
+  addTodoProgress, clearCompletedTodos, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
+  TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
+  type Todo, type TodoInput, type TodoPriority, type TodoProgress,
 } from "../../../lib/todos";
 import { Button, EmptyState, ErrorState, LoadingState, ProgressBar } from "../../ui/primitives";
 
@@ -35,6 +36,9 @@ const SORT_LABELS: Record<SortMode, string> = { manual: "手动顺序", due: "�
 const UNLISTED = "未分类";
 
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const PROGRESS_TIME = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+});
 
 function dateLabel(value: string, today: string): string {
   if (!value) return "";
@@ -61,6 +65,13 @@ function sortTodos(items: Todo[], mode: SortMode): Todo[] {
   else if (mode === "created") copy.sort((a, b) => b.created_at - a.created_at);
   else copy.sort(byManual);
   return copy;
+}
+
+function mergeProgress(saved: TodoProgress[], current: TodoProgress[]): TodoProgress[] {
+  // 请求可能交错返回，已保存的进度不能被较旧的响应覆盖。
+  const byId = new Map(saved.map(entry => [entry.id, entry]));
+  for (const entry of current) byId.set(entry.id, entry);
+  return [...byId.values()].sort((a, b) => a.created_at - b.created_at);
 }
 
 /** 工位待办：上班用的个人待办清单（今天 / 计划 / 重要 / 清单分组，优先级、截止日期、子任务、备注、搜索与排序）。
@@ -90,15 +101,22 @@ export function TodoPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const replaceTodos = useCallback((items: Todo[]) => {
+    setTodos(current => {
+      const byId = new Map(current?.map(todo => [todo.id, todo.progress]));
+      return items.map(todo => ({ ...todo, progress: mergeProgress(todo.progress, byId.get(todo.id) ?? []) }));
+    });
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const data = await fetchTodos();
-      setTodos(data.todos);
+      replaceTodos(data.todos);
     } catch (value) {
       setError(errorMessage(value));
       setTodos(current => current ?? []);
     }
-  }, []);
+  }, [replaceTodos]);
 
   useEffect(() => {
     let alive = true;
@@ -121,12 +139,20 @@ export function TodoPanel() {
     setTodos(current => current?.map(todo => (todo.id === id ? { ...todo, ...input } as Todo : todo)) ?? current);
     try {
       const saved = await updateTodo(id, input);
-      setTodos(current => current?.map(todo => (todo.id === id ? saved : todo)) ?? current);
+      setTodos(current => current?.map(todo => (todo.id === id ? { ...saved, progress: mergeProgress(saved.progress, todo.progress) } : todo)) ?? current);
     } catch (value) {
       setError(errorMessage(value));
       void load();
     }
   }, [load]);
+
+  const addProgress = useCallback(async (id: string, text: string) => {
+    const entry = await addTodoProgress(id, text);
+    setTodos(current => current?.map(todo => {
+      if (todo.id !== id) return todo;
+      return { ...todo, progress: mergeProgress(todo.progress, [entry]) };
+    }) ?? current);
+  }, []);
 
   const remove = useCallback(async (todo: Todo) => {
     if (!window.confirm(`删除待办「${todo.title}」？`)) return;
@@ -165,7 +191,8 @@ export function TodoPanel() {
   const groups = useMemo<Group[]>(() => {
     const query = search.trim().toLowerCase();
     const matches = (todo: Todo) => !query || todo.title.toLowerCase().includes(query) || todo.note.toLowerCase().includes(query)
-      || todo.list.toLowerCase().includes(query) || todo.subtasks.some(sub => sub.title.toLowerCase().includes(query));
+      || todo.list.toLowerCase().includes(query) || todo.subtasks.some(sub => sub.title.toLowerCase().includes(query))
+      || todo.progress.some(entry => entry.text.toLowerCase().includes(query));
     const pool = all.filter(matches);
     if (query && searchAll) return [
       { key: "search-open", title: "未完成", items: sortTodos(pool.filter(todo => !todo.done), sortMode) },
@@ -258,7 +285,7 @@ export function TodoPanel() {
     }) ?? current);
     try {
       const data = await reorderTodos(ordered);
-      setTodos(data.todos);
+      replaceTodos(data.todos);
     } catch (value) {
       setError(errorMessage(value));
       void load();
@@ -287,9 +314,9 @@ export function TodoPanel() {
   const canMove = sortMode === "manual" && !search.trim() && view !== "planned" && view !== "done";
 
   const navItem = (key: View, label: string, count: number) => (
-    <button key={key} type="button" aria-current={view === key ? "page" : undefined} className={`todo-nav-item${view === key ? " is-active" : ""}`} onClick={() => { setView(key); setExpanded(null); }}>
-      <span>{label}</span>
-      {count ? <span className="todo-nav-count">{count}</span> : null}
+    <button key={key} type="button" title={label} aria-label={`${label} ${count}`} aria-current={view === key ? "page" : undefined} className={`todo-nav-item${view === key ? " is-active" : ""}`} onClick={() => { setView(key); setExpanded(null); }}>
+      <span>{Array.from(label).slice(0, 3).join("")}</span>
+      <span className="todo-nav-count">{count}</span>
     </button>
   );
 
@@ -392,6 +419,7 @@ export function TodoPanel() {
                         lists={lists.map(([name]) => name)}
                         onToggleExpand={() => setExpanded(current => (current === todo.id ? null : todo.id))}
                         onPatch={input => void patch(todo.id, input)}
+                        onAddProgress={text => addProgress(todo.id, text)}
                         onRemove={() => void remove(todo)}
                         onMove={canMove && !todo.done ? delta => void move(group.items, index, delta) : undefined}
                         isFirst={index === 0}
@@ -416,20 +444,51 @@ interface TodoRowProps {
   lists: string[];
   onToggleExpand: () => void;
   onPatch: (input: TodoInput) => void;
+  onAddProgress: (text: string) => Promise<void>;
   onRemove: () => void;
   onMove?: (delta: number) => void;
   isFirst: boolean;
   isLast: boolean;
 }
 
-function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onRemove, onMove, isFirst, isLast }: TodoRowProps) {
+function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onAddProgress, onRemove, onMove, isFirst, isLast }: TodoRowProps) {
   const late = !todo.done && Boolean(todo.due_date) && todo.due_date < today;
   const dueToday = !todo.done && todo.due_date === today;
   const subDone = todo.subtasks.filter(sub => sub.done).length;
   const inMyDay = todo.my_day === today;
+  const [writingProgress, setWritingProgress] = useState(false);
+  const [showAllProgress, setShowAllProgress] = useState(false);
+  const [progressText, setProgressText] = useState("");
+  const [savingProgress, setSavingProgress] = useState(false);
+  const [progressError, setProgressError] = useState("");
+  const progressButton = useRef<HTMLButtonElement>(null);
+  const progressFormId = `todo-progress-form-${todo.id}`;
+  const progressListId = `todo-progress-list-${todo.id}`;
+  const visibleProgress = showAllProgress ? todo.progress : todo.progress.slice(-2);
+
+  function closeProgress() {
+    setWritingProgress(false);
+    progressButton.current?.focus();
+  }
+
+  async function submitProgress(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!progressText.trim() || savingProgress) return;
+    setSavingProgress(true);
+    setProgressError("");
+    try {
+      await onAddProgress(progressText.trim());
+      setProgressText("");
+      closeProgress();
+    } catch (value) {
+      setProgressError(errorMessage(value));
+    } finally {
+      setSavingProgress(false);
+    }
+  }
 
   return (
-    <li className={`todo-item${todo.done ? " is-done" : ""}${expanded ? " is-expanded" : ""}`}>
+    <li className={`todo-item${todo.done ? " is-done" : ""}`}>
       <div className="todo-row">
         <input
           type="checkbox"
@@ -443,13 +502,7 @@ function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onRemo
             {todo.priority ? <span className={`todo-priority is-p${todo.priority}`} title={`优先级：${PRIORITY_LABELS[todo.priority]}`} aria-label={`优先级${PRIORITY_LABELS[todo.priority]}`} /> : null}
             {todo.title}
           </span>
-          <span className="todo-meta">
-            {inMyDay ? <span className="todo-chip is-brand">今天</span> : null}
-            {todo.due_date ? <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>{late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}</span> : null}
-            {todo.list ? <span className="todo-chip">{todo.list}</span> : null}
-            {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}
-            {todo.note ? <span className="todo-chip">有备注</span> : null}
-          </span>
+          <span className={`todo-caret${expanded ? " is-open" : ""}`} aria-hidden="true">›</span>
         </button>
         <div className="todo-row-actions">
           {!todo.done ? (
@@ -470,6 +523,52 @@ function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onRemo
           </button>
         </div>
       </div>
+      <div className="todo-summary">
+        <div className="todo-meta">
+          {inMyDay ? <span className="todo-chip is-brand">今天</span> : null}
+          {todo.due_date ? <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>{late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}</span> : null}
+          {todo.list ? <span className="todo-chip todo-chip-list" title={todo.list}>{todo.list}</span> : null}
+          {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}
+          {todo.note ? <span className="todo-chip">有备注</span> : null}
+        </div>
+        <button type="button" className="todo-text-action" ref={progressButton} aria-expanded={writingProgress}
+          aria-controls={writingProgress ? progressFormId : undefined} aria-disabled={savingProgress}
+          onClick={() => {
+            if (savingProgress) return;
+            if (writingProgress) closeProgress();
+            else setWritingProgress(true);
+          }}>＋ 记进度</button>
+      </div>
+      {visibleProgress.length || writingProgress ? (
+        <div className="todo-progress-thread">
+          {visibleProgress.length ? (
+            <ul className="todo-progress-list" id={progressListId} aria-label="进度记录">
+              {visibleProgress.map(entry => {
+                const time = new Date(entry.created_at * 1000);
+                return (
+                  <li key={entry.id}>
+                    <time dateTime={time.toISOString()}>{PROGRESS_TIME.format(time)}</time>
+                    <span>{entry.text}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {todo.progress.length > 2 ? (
+            <button type="button" className="todo-text-action" aria-expanded={showAllProgress} aria-controls={progressListId}
+              onClick={() => setShowAllProgress(value => !value)}>{showAllProgress ? "收起进度" : `展开全部进度（${todo.progress.length}）`}</button>
+          ) : null}
+          {writingProgress ? (
+            <form className="todo-progress-form" id={progressFormId} onSubmit={submitProgress}>
+              <input autoFocus value={progressText} maxLength={TODO_PROGRESS_MAX} disabled={savingProgress}
+                placeholder="例如：等卡，或等同事确认" aria-label="进度内容" onChange={event => setProgressText(event.target.value)}
+                onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />
+              <Button type="submit" size="sm" disabled={!progressText.trim() || savingProgress}>{savingProgress ? "保存中…" : "保存"}</Button>
+              {progressError ? <p role="alert">{progressError}</p> : null}
+            </form>
+          ) : null}
+        </div>
+      ) : null}
       {expanded ? <TodoDetail todo={todo} today={today} lists={lists} onPatch={onPatch} /> : null}
     </li>
   );

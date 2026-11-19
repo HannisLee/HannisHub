@@ -33,7 +33,12 @@ const assert = require('node:assert/strict');
     await nav.getByRole('button', { name: /^已逾期/ }).click();
     const row = page.locator('.todo-item', { hasText: late.title });
     await row.waitFor();
+    assert.ok((await nav.boundingBox()).width <= 100);
+    assert.equal(await nav.getByRole('button', { name: new RegExp('^' + listA) }).locator('span').first().textContent(), '待办回');
+    const header = row.locator('.todo-row');
+    const before = await header.boundingBox();
     await row.locator('.todo-row-main').click();
+    assert.deepEqual(await header.boundingBox(), before);
     const patchResponse = () => page.waitForResponse(r => r.url().endsWith(`/api/todos/${late.id}`) && r.request().method() === 'PATCH');
     let saved = patchResponse();
     await row.getByRole('button', { name: '今天', exact: true }).click();
@@ -52,6 +57,27 @@ const assert = require('node:assert/strict');
     await saved;
     await page.reload();
     await nav.getByRole('button', { name: /^全部/ }).click();
+    const progressButton = row.getByRole('button', { name: /记进度/ });
+    const progressList = row.getByRole('list', { name: '进度记录' });
+    for (const text of ['等卡', '等待狗头', '已收到']) {
+      await progressButton.click();
+      const input = row.getByRole('textbox', { name: '进度内容' });
+      await input.fill(text);
+      await input.press('Enter');
+      await progressList.getByText(text, { exact: true }).waitFor();
+    }
+    assert.equal(await row.locator('.todo-row-main').getAttribute('aria-expanded'), 'false');
+    assert.equal(await progressList.getByRole('listitem').count(), 2);
+    assert.equal(await progressList.getByText('等卡', { exact: true }).count(), 0);
+    assert.ok(!Number.isNaN(Date.parse(await progressList.locator('time').first().getAttribute('datetime'))));
+    await row.getByRole('button', { name: '展开全部进度（3）' }).click();
+    assert.equal(await progressList.getByRole('listitem').count(), 3);
+    await row.getByRole('button', { name: '收起进度' }).click();
+    assert.equal(await progressList.getByRole('listitem').count(), 2);
+    await page.reload();
+    await nav.getByRole('button', { name: /^全部/ }).click();
+    await progressList.getByText('已收到', { exact: true }).waitFor();
+    assert.equal(await progressList.getByRole('listitem').count(), 2);
     await row.locator('.todo-row-main').click();
     assert.equal(await row.getByRole('textbox', { name: '子任务标题「修改后的子任务」' }).inputValue(), '修改后的子任务');
     assert.equal((await api('/api/todos')).todos.find(t => t.id === late.id).due_date, '');
@@ -78,8 +104,14 @@ const assert = require('node:assert/strict');
     assert.ok(remaining.some(t => t.id === doneB.id));
     await page.setViewportSize({ width: 390, height: 844 });
     await nav.getByRole('button', { name: /^全部/ }).click();
+    saved = patchResponse();
+    await row.getByRole('button', { name: '加入今天', exact: true }).click();
+    await saved;
     await row.locator('.todo-row-main').click();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    const [summary, action] = await Promise.all([row.locator('.todo-meta').boundingBox(), progressButton.boundingBox()]);
+    assert.ok(summary.x + summary.width <= action.x && summary.y < action.y + action.height);
+    assert.equal((await row.locator('.todo-meta .todo-chip').evaluateAll(chips => new Set(chips.map(chip => chip.getBoundingClientRect().top)).size)), 1);
     if (process.env.SHOT_DIR) await page.screenshot({ path: process.env.SHOT_DIR + '/todo-mobile.png', fullPage: true });
     // 保存失败后恢复服务器数据，同时保留错误提示供用户重试。
     await page.route(`**/api/todos/${late.id}`, route => route.request().method() === 'PATCH'
@@ -102,7 +134,7 @@ const assert = require('node:assert/strict');
     await page.getByRole('heading', { name: '全部待办', exact: true }).waitFor();
     await page.locator('.todo-item', { hasText: prefix + '新待办' }).waitFor();
     assert.deepEqual(errors, []);
-    console.log('待办标题精简、逾期改期、子任务改名持久化、未分类、全局搜索、清理范围、窄屏通过');
+    console.log('待办紧凑分类、详情展开位置、进度添加和折叠持久化、筛选、编辑与窄屏通过');
   } finally {
     await browser.close();
   }

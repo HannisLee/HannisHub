@@ -5,6 +5,7 @@
 - priority 优先级 0 无 / 1 低 / 2 中 / 3 高；due_date 截止日期 YYYY-MM-DD（空为不设）
 - my_day 加入「今天」的日期 YYYY-MM-DD（由浏览器按本地日期给出，过了这一天自动不再算「今天」）
 - done 是否完成、done_at 完成时间；subtasks 子任务 [{id, title, done}]（最多 50 个）
+- progress 进度记录 [{id, text, created_at}]，按添加顺序从旧到新保存
 - sort 手动排序值（越小越靠前），新建的排在最后
 """
 
@@ -25,6 +26,7 @@ MAX_TITLE = 200
 MAX_NOTE = 4000
 MAX_LIST = 24
 MAX_SUBTASKS = 50
+MAX_PROGRESS_TEXT = 1000
 MAX_TODOS = 2000
 SUBTASK_ID = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 TODO_ID = re.compile(r"^[a-f0-9]{16}$")
@@ -124,6 +126,7 @@ def _public(row: Any) -> dict[str, Any]:
         "done": bool(row["done"]),
         "done_at": row["done_at"],
         "subtasks": json.loads(row["subtasks"] or "[]"),
+        "progress": json.loads(row["progress"]),
         "sort": row["sort"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -187,6 +190,27 @@ def update_todo(owner: str, todo_id: str, payload: dict[str, Any]) -> dict[str, 
             conn.execute(f"UPDATE todos SET {assignments} WHERE id = ? AND owner = ?", (*columns.values(), todo_id, owner))
         saved = conn.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
     return _public(saved)
+
+
+def add_progress(owner: str, todo_id: str, text: object) -> dict[str, Any]:
+    """追加进度记录，由服务端记录时间。"""
+    _check_id(todo_id)
+    text = _clean(text, MAX_PROGRESS_TEXT, multiline=True) if isinstance(text, str) else ""
+    if not text:
+        raise HTTPException(status_code=400, detail="请填写进度内容")
+    with transaction() as conn:
+        row = conn.execute("SELECT progress FROM todos WHERE id = ? AND owner = ?", (todo_id, owner)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="待办不存在")
+        now = time.time()
+        entry = {"id": secrets.token_hex(8), "text": text, "created_at": now}
+        progress = json.loads(row["progress"])
+        progress.append(entry)
+        conn.execute(
+            "UPDATE todos SET progress = ?, updated_at = ? WHERE id = ? AND owner = ?",
+            (json.dumps(progress, ensure_ascii=False), now, todo_id, owner),
+        )
+    return entry
 
 
 def delete_todo(owner: str, todo_id: str) -> None:

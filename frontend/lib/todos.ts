@@ -8,6 +8,12 @@ export interface TodoSubtask {
   done: boolean;
 }
 
+export interface TodoProgress {
+  id: string;
+  text: string;
+  created_at: number;
+}
+
 /** 优先级：0 无、1 低、2 中、3 高 */
 export type TodoPriority = 0 | 1 | 2 | 3;
 
@@ -25,6 +31,7 @@ export interface Todo {
   done: boolean;
   done_at: number | null;
   subtasks: TodoSubtask[];
+  progress: TodoProgress[];
   sort: number;
   created_at: number;
   updated_at: number;
@@ -38,6 +45,7 @@ export const TODO_TITLE_MAX = 200;
 export const TODO_NOTE_MAX = 4000;
 export const TODO_LIST_MAX = 24;
 export const TODO_SUBTASK_MAX = 50;
+export const TODO_PROGRESS_MAX = 1000;
 
 export const PRIORITY_LABELS: Record<TodoPriority, string> = { 0: "无", 1: "低", 2: "中", 3: "高" };
 
@@ -51,6 +59,10 @@ export function createTodo(input: TodoInput): Promise<Todo> {
 
 export function updateTodo(id: string, input: TodoInput): Promise<Todo> {
   return apiFetch<Todo>(`${BASE}/${encodePath(id)}`, { method: "PATCH", body: jsonBody(input) });
+}
+
+export function addTodoProgress(id: string, text: string): Promise<TodoProgress> {
+  return apiFetch<TodoProgress>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody({ text }) });
 }
 
 export function deleteTodo(id: string): Promise<{ ok: boolean }> {

@@ -1242,14 +1242,15 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .note-remove:hover { background: var(--color-surface-hover); color: var(--color-error); }
 
 /* 工位待办 */
-.todo-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-8); align-items: start; }
+html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutter: stable; }
+.todo-layout { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .todo-nav { position: sticky; top: var(--space-4); display: flex; flex-direction: column; gap: 2px; }
-.todo-nav-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 38px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); font-size: 15px; text-align: left; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
+.todo-nav-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); min-height: 34px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); font-size: 14px; text-align: left; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
 .todo-nav-item span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo-nav-item:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .todo-nav-item.is-active { background: var(--color-surface); color: var(--color-text-primary); box-shadow: inset 2px 0 0 var(--color-brand); }
 .todo-nav-count { flex: 0 0 auto; color: var(--color-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.todo-nav-label { margin: var(--space-5) 0 var(--space-1); padding: 0 var(--space-3); color: var(--color-text-muted); font-size: 12px; letter-spacing: 0.02em; }
+.todo-nav-label { margin: var(--space-3) 0 var(--space-1); padding: 0 var(--space-2); color: var(--color-text-muted); font-size: 12px; letter-spacing: 0.02em; }
 .todo-main { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
 .todo-main-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }
 .todo-view-title { margin: 0; color: var(--color-text-primary); font: 400 32px/1.2 var(--font-display); letter-spacing: -0.3px; }
@@ -1279,20 +1280,21 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .todo-caret.is-open { transform: rotate(90deg); }
 .todo-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .todo-group-empty { padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); color: var(--color-text-muted); font-size: 14px; }
-.todo-item { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); transition: border-color 160ms ease, background-color 160ms ease; }
+.todo-item { --todo-indent: calc(var(--space-4) + 18px + var(--space-3)); min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); transition: border-color 160ms ease; }
 .todo-item:hover { border-color: var(--color-card-hover-border); }
-.todo-item.is-expanded { border-color: var(--color-control-border); }
-.todo-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); }
+.todo-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) 0 var(--space-4); }
 .todo-check { flex: 0 0 auto; width: 18px; min-height: 18px; margin: 0; cursor: pointer; }
-.todo-row-main { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; padding: 6px 0; border: 0; background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; }
+.todo-row-main { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; min-height: 30px; padding: 4px 0; border: 0; background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; }
+.todo-row-main > .todo-caret { color: var(--color-text-muted); }
 .todo-title { display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
 .todo-item.is-done .todo-title { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-control-border); }
 .todo-priority { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
 .todo-priority.is-p2 { background: var(--color-warning); }
 .todo-priority.is-p3 { background: var(--color-error); }
-.todo-meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.todo-meta:empty { display: none; }
-.todo-chip { display: inline-flex; align-items: center; min-height: 20px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; line-height: 1; white-space: nowrap; }
+.todo-summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-2) var(--space-1) var(--todo-indent); }
+.todo-meta { display: flex; flex: 1 1 auto; min-width: 0; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; }
+.todo-chip { flex: 0 0 auto; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; line-height: 18px; white-space: nowrap; }
+.todo-chip-list { max-width: 9ic; overflow: hidden; text-overflow: ellipsis; }
 .todo-chip.is-brand { border-color: color-mix(in srgb, var(--color-brand) 60%, var(--color-border)); color: var(--color-brand); }
 .todo-chip.is-due { border-color: var(--color-warning); color: var(--color-warning); }
 .todo-chip.is-late { border-color: var(--color-error); color: var(--color-error); }
@@ -1304,8 +1306,18 @@ button.lobby-machine-link { border: 0; background: transparent; cursor: pointer;
 .todo-icon.is-danger:hover:not(:disabled) { color: var(--color-error); }
 .todo-icon:disabled { opacity: 0.3; }
 .todo-row-actions .todo-icon:not(.is-on) { opacity: 0; }
-.todo-item:hover .todo-row-actions .todo-icon:not(:disabled), .todo-item.is-expanded .todo-row-actions .todo-icon:not(:disabled), .todo-row-actions .todo-icon:focus-visible { opacity: 1; }
-.todo-detail { display: grid; gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4) calc(var(--space-4) + 30px); border-top: 1px solid var(--color-divider); }
+.todo-item:hover .todo-row-actions .todo-icon:not(:disabled), .todo-row-actions .todo-icon:focus-visible { opacity: 1; }
+.todo-text-action { flex: 0 0 auto; min-height: 30px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-brand); font-size: 13px; white-space: nowrap; cursor: pointer; }
+.todo-text-action:hover { background: var(--color-surface-hover); }
+.todo-progress-thread { margin: 0 var(--space-4) var(--space-3) var(--todo-indent); padding-left: var(--space-3); border-left: 1px solid var(--color-control-border); }
+.todo-progress-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.todo-progress-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); font-size: 13px; }
+.todo-progress-list time { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.todo-progress-list li > span { flex: 1 1 14em; min-width: 0; color: var(--color-text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.todo-progress-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); margin-top: var(--space-1); }
+.todo-progress-form input { min-height: 36px; font-size: 14px; }
+.todo-progress-form p { grid-column: 1 / -1; margin: 0; color: var(--color-error); font-size: 13px; }
+.todo-detail { display: grid; gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4) var(--todo-indent); border-top: 1px solid var(--color-divider); }
 .todo-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); align-items: start; }
 .todo-field { display: grid; gap: 6px; min-width: 0; }
 .todo-field > span, .todo-field-label { color: var(--color-text-muted); font-size: 12px; }

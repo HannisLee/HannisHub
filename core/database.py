@@ -169,7 +169,10 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX linkup_scores_rank ON linkup_scores(mode, day, score DESC);
     """,
-
+    # v8：每条待办的进度记录，随原待办按账号隔离
+    """
+    ALTER TABLE todos ADD COLUMN progress TEXT NOT NULL DEFAULT '[]';
+    """,
 ]
 
 _init_lock = threading.Lock()
