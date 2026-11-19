@@ -30,6 +30,14 @@ export function copyToClipboard(value: string): Promise<boolean> {
   return Promise.resolve(legacyCopyText(value));
 }
 
+/**
+ * 将多行提示词合并为单行文本，避免粘贴到终端 CLI 时换行符提前触发提交。
+ * 仅把换行及其紧邻空白压缩为单个空格，保留行内原有的空格排版。
+ */
+export function singleLinePromptText(value: string): string {
+  return value.replace(/[ \t\r\n\u2028\u2029]*[\r\n\u2028\u2029]+[ \t\r\n\u2028\u2029]*/g, " ").trim();
+}
+
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",

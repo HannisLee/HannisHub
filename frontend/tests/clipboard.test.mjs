@@ -12,7 +12,7 @@ function load(path) {
 }
 
 const { clipboardShortcut } = load("../lib/terminal-clipboard.ts");
-const { clipboardFiles } = load("../lib/clipboard.ts");
+const { clipboardFiles, singleLinePromptText } = load("../lib/clipboard.ts");
 
 function key(key, modifiers = {}) {
   const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
@@ -54,4 +54,12 @@ test("剪贴板截图改名为「粘贴图片-时间」，原有文件名保留�
   assert.equal(fromItems[0].name, "粘贴图片-20261114-090507.jpg");
   assert.deepEqual(clipboardFiles({ files: [], items: [{ kind: "string", getAsFile: () => null }] }, now), []);
   assert.deepEqual(clipboardFiles(null, now), []);
+});
+
+test("提示词单行复制合并换行并保留行内空格", () => {
+  assert.equal(singleLinePromptText("第一行\n第二行"), "第一行 第二行");
+  assert.equal(singleLinePromptText("hello\r\n\r\n  world\t\n"), "hello world");
+  assert.equal(singleLinePromptText("line 1  \u2028  line 2\u2029line 3"), "line 1 line 2 line 3");
+  assert.equal(singleLinePromptText("echo  foo  bar"), "echo  foo  bar");
+  assert.equal(singleLinePromptText(" \n\t\r\n "), "");
 });

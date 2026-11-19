@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { API_PATHS, apiFetch, jsonBody } from "../../lib/api";
-import { copyToClipboard } from "../../lib/clipboard";
+import { copyToClipboard, singleLinePromptText } from "../../lib/clipboard";
 import { errorMessage } from "../../lib/format";
 import { Icon } from "../ui/icon";
 import { Button } from "../ui/primitives";
@@ -143,11 +143,13 @@ export function PromptFloat() {
   }
 
   function copy() {
-    if (!text.trim()) {
+    const content = singleLinePromptText(text);
+    if (!content) {
       showMessage("当前提示词为空");
       return;
     }
-    void copyToClipboard(text).then(copied => showMessage(copied ? "已复制" : "复制失败，请手动选择文本", !copied));
+    const label = content !== text.trim() ? "已复制（单行）" : "已复制";
+    void copyToClipboard(content).then(copied => showMessage(copied ? label : "复制失败，请手动选择文本", !copied));
   }
 
   async function archive() {

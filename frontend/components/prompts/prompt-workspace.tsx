@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_PATHS, apiFetch, encodePath, jsonBody } from "../../lib/api";
-import { copyToClipboard } from "../../lib/clipboard";
+import { copyToClipboard, singleLinePromptText } from "../../lib/clipboard";
 import { errorMessage, formatDate, truncate } from "../../lib/format";
 import type { VoiceInsertMode } from "../../lib/prompt-audio";
 import type {
@@ -161,13 +161,14 @@ export function PromptWorkspace() {
   }
 
   function copyText(value: string, success: string) {
-    if (!value.trim()) {
+    const content = singleLinePromptText(value);
+    if (!content) {
       setMessage("当前提示词为空");
       return;
     }
     const showMessage = claimMessage();
-    showMessage(success);
-    void copyToClipboard(value).then(copied => {
+    showMessage(content !== value.trim() ? `${success}（单行）` : success);
+    void copyToClipboard(content).then(copied => {
       if (!copied) showMessage("复制失败，请手动选择文本");
     });
   }
