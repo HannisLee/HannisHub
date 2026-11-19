@@ -65,10 +65,6 @@ export function addTodoProgress(id: string, text: string): Promise<TodoProgress>
   return apiFetch<TodoProgress>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody({ text }) });
 }
 
-export function deleteTodo(id: string): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>(`${BASE}/${encodePath(id)}`, { method: "DELETE" });
-}
-
 export function reorderTodos(ids: string[]): Promise<{ todos: Todo[] }> {
   return apiFetch<{ todos: Todo[] }>(`${BASE}/reorder`, { method: "POST", body: jsonBody({ ids }) });
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import {
-  addTodoProgress, clearCompletedTodos, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
+  addTodoProgress, clearCompletedTodos, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
   TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
   type Todo, type TodoInput, type TodoPriority, type TodoProgress,
 } from "../../../lib/todos";
@@ -162,17 +162,6 @@ export function TodoPanel() {
     }) ?? current);
   }, []);
 
-  const remove = useCallback(async (todo: Todo) => {
-    if (!window.confirm(`删除待办「${todo.title}」？`)) return;
-    setTodos(current => current?.filter(item => item.id !== todo.id) ?? current);
-    try {
-      await deleteTodo(todo.id);
-    } catch (value) {
-      setError(errorMessage(value));
-      void load();
-    }
-  }, [load]);
-
   const all = useMemo(() => todos ?? [], [todos]);
   const lists = useMemo(() => {
     const counts = new Map<string, number>();
@@ -280,24 +269,46 @@ export function TodoPanel() {
     }
   }
 
-  /** 手动顺序下与相邻项交换位置 */
-  async function move(items: Todo[], index: number, delta: number) {
-    const other = items[index + delta];
-    const todo = items[index];
-    if (!other || !todo) return;
-    const ordered = delta < 0 ? [todo.id, other.id] : [other.id, todo.id];
-    setTodos(current => current?.map(item => {
-      if (item.id === todo.id) return { ...item, sort: other.sort };
-      if (item.id === other.id) return { ...item, sort: todo.sort };
-      return item;
-    }) ?? current);
+  const [dragging, setDragging] = useState<{ id: string; groupKey: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
+
+  /** 手动顺序下拖动或键盘调整条目位置 */
+  async function moveTo(items: Todo[], sourceId: string, targetId: string, position: "before" | "after") {
+    if (sourceId === targetId) return;
+    const movable = items.filter(item => !item.done);
+    const fromIndex = movable.findIndex(item => item.id === sourceId);
+    const targetIndex = movable.findIndex(item => item.id === targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+
+    const reordered = [...movable];
+    const [moved] = reordered.splice(fromIndex, 1);
+    let insertAt = reordered.findIndex(item => item.id === targetId);
+    if (position === "after") insertAt += 1;
+    if (insertAt === fromIndex) return;
+    reordered.splice(insertAt, 0, moved);
+
+    const orderedIds = reordered.map(item => item.id);
+    const slots = movable.map(item => item.sort).sort((a, b) => a - b);
+    const nextSort = new Map(orderedIds.map((id, idx) => [id, slots[idx]]));
+
+    setTodos(current => current?.map(item => (
+      nextSort.has(item.id) ? { ...item, sort: nextSort.get(item.id)! } : item
+    )) ?? current);
     try {
-      const data = await reorderTodos(ordered);
+      const data = await reorderTodos(orderedIds);
       replaceTodos(data.todos);
     } catch (value) {
       setError(errorMessage(value));
       void load();
     }
+  }
+
+  function moveBy(items: Todo[], todoId: string, delta: number) {
+    const movable = items.filter(item => !item.done);
+    const index = movable.findIndex(item => item.id === todoId);
+    const target = movable[index + delta];
+    if (index < 0 || !target) return;
+    void moveTo(items, todoId, target.id, delta < 0 ? "before" : "after");
   }
 
   const clearScope = view.startsWith("list:") ? view.slice(5) : undefined;
@@ -418,22 +429,49 @@ export function TodoPanel() {
                 )}
                 {folded ? null : (
                   <ul className="todo-list">
-                    {group.items.length ? group.items.map((todo, index) => (
-                      <TodoRow
-                        key={todo.id}
-                        todo={todo}
-                        today={today}
-                        expanded={expanded === todo.id}
-                        lists={lists.map(([name]) => name)}
-                        onToggleExpand={() => setExpanded(current => (current === todo.id ? null : todo.id))}
-                        onPatch={input => void patch(todo.id, input)}
-                        onAddProgress={text => addProgress(todo.id, text)}
-                        onRemove={() => void remove(todo)}
-                        onMove={canMove && !todo.done ? delta => void move(group.items, index, delta) : undefined}
-                        isFirst={index === 0}
-                        isLast={index === group.items.length - 1}
-                      />
-                    )) : <li className="todo-group-empty">今天的事都安排好了？在上方添加，或把其他待办「加入今天」。</li>}
+                    {group.items.length ? group.items.map(todo => {
+                      const rowCanMove = canMove && !todo.done;
+                      const isDragging = dragging?.id === todo.id && dragging.groupKey === group.key;
+                      const rowDropPosition = dropTarget?.id === todo.id && dragging?.groupKey === group.key ? dropTarget.position : null;
+                      return (
+                        <TodoRow
+                          key={todo.id}
+                          todo={todo}
+                          today={today}
+                          expanded={expanded === todo.id}
+                          lists={lists.map(([name]) => name)}
+                          onToggleExpand={() => setExpanded(current => (current === todo.id ? null : todo.id))}
+                          onPatch={input => void patch(todo.id, input)}
+                          onAddProgress={text => addProgress(todo.id, text)}
+                          canReorder={rowCanMove}
+                          isDragging={isDragging}
+                          dropPosition={rowDropPosition}
+                          onDragStart={() => {
+                            setDragging({ id: todo.id, groupKey: group.key });
+                            setDropTarget(null);
+                          }}
+                          onDragEnd={() => {
+                            setDragging(null);
+                            setDropTarget(null);
+                          }}
+                          onDragOver={position => {
+                            if (!rowCanMove || !dragging || dragging.groupKey !== group.key || dragging.id === todo.id) return;
+                            setDropTarget(prev => (prev?.id === todo.id && prev.position === position ? prev : { id: todo.id, position }));
+                          }}
+                          onDragLeave={() => {
+                            setDropTarget(prev => (prev?.id === todo.id ? null : prev));
+                          }}
+                          onDrop={position => {
+                            if (rowCanMove && dragging && dragging.groupKey === group.key && dragging.id !== todo.id) {
+                              void moveTo(group.items, dragging.id, todo.id, position);
+                            }
+                            setDragging(null);
+                            setDropTarget(null);
+                          }}
+                          onMoveStep={delta => moveBy(group.items, todo.id, delta)}
+                        />
+                      );
+                    }) : <li className="todo-group-empty">今天的事都安排好了？在上方添加，或把其他待办「加入今天」。</li>}
                   </ul>
                 )}
               </div>
@@ -453,26 +491,55 @@ interface TodoRowProps {
   onToggleExpand: () => void;
   onPatch: (input: TodoInput) => void;
   onAddProgress: (text: string) => Promise<void>;
-  onRemove: () => void;
-  onMove?: (delta: number) => void;
-  isFirst: boolean;
-  isLast: boolean;
+  canReorder: boolean;
+  isDragging: boolean;
+  dropPosition: "before" | "after" | null;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (position: "before" | "after") => void;
+  onDragLeave: () => void;
+  onDrop: (position: "before" | "after") => void;
+  onMoveStep: (delta: number) => void;
 }
 
-function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onAddProgress, onRemove, onMove, isFirst, isLast }: TodoRowProps) {
+function TodoRow({
+  todo,
+  today,
+  expanded,
+  lists,
+  onToggleExpand,
+  onPatch,
+  onAddProgress,
+  canReorder,
+  isDragging,
+  dropPosition,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onMoveStep,
+}: TodoRowProps) {
   const late = !todo.done && Boolean(todo.due_date) && todo.due_date < today;
   const dueToday = !todo.done && todo.due_date === today;
   const subDone = todo.subtasks.filter(sub => sub.done).length;
   const inMyDay = todo.my_day === today;
+  const hasMeta = Boolean(todo.due_date || todo.list || todo.subtasks.length || todo.note);
   const [writingProgress, setWritingProgress] = useState(false);
   const [showAllProgress, setShowAllProgress] = useState(false);
   const [progressText, setProgressText] = useState("");
   const [savingProgress, setSavingProgress] = useState(false);
   const [progressError, setProgressError] = useState("");
+  const itemRef = useRef<HTMLLIElement>(null);
   const progressButton = useRef<HTMLButtonElement>(null);
   const progressFormId = `todo-progress-form-${todo.id}`;
   const progressListId = `todo-progress-list-${todo.id}`;
   const visibleProgress = showAllProgress ? todo.progress : todo.progress.slice(-2);
+
+  function pointerDropPosition(clientY: number, element: HTMLElement): "before" | "after" {
+    const rect = element.getBoundingClientRect();
+    return clientY < rect.top + rect.height / 2 ? "before" : "after";
+  }
 
   function closeProgress() {
     setWritingProgress(false);
@@ -495,61 +562,108 @@ function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onAddP
     }
   }
 
+  const rowClassName = [
+    "todo-item",
+    todo.done ? "is-done" : "",
+    isDragging ? "is-dragging" : "",
+    dropPosition === "before" ? "is-drop-before" : "",
+    dropPosition === "after" ? "is-drop-after" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <li className={`todo-item${todo.done ? " is-done" : ""}`}>
-      <div className="todo-row">
-        <input
-          type="checkbox"
-          className="todo-check"
-          checked={todo.done}
-          onChange={event => onPatch({ done: event.target.checked })}
-          aria-label={todo.done ? `标记「${todo.title}」为未完成` : `完成「${todo.title}」`}
-        />
-        <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
-          {todo.my_day ? (
-            <time className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
-              {assignedDayLabel(todo.my_day, today)}
-            </time>
-          ) : <span className="todo-row-day" aria-hidden="true" />}
-          <span className="todo-title">
-            {todo.priority ? <span className={`todo-priority is-p${todo.priority}`} title={`优先级：${PRIORITY_LABELS[todo.priority]}`} aria-label={`优先级${PRIORITY_LABELS[todo.priority]}`} /> : null}
-            <span className="todo-title-text" title={todo.title}>{todo.title}</span>
-          </span>
-          <span className={`todo-caret${expanded ? " is-open" : ""}`} aria-hidden="true">›</span>
-        </button>
-        <div className="todo-row-actions">
-          {!todo.done ? (
-            <button type="button" className={`todo-icon${inMyDay ? " is-on" : ""}`} onClick={() => onPatch({ my_day: inMyDay ? "" : today })} title={inMyDay ? "移出今天" : "加入今天"} aria-label={inMyDay ? "移出今天" : "加入今天"}>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg>
+    <li
+      ref={itemRef}
+      className={rowClassName}
+      onDragOver={event => {
+        if (!canReorder) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        onDragOver(pointerDropPosition(event.clientY, event.currentTarget));
+      }}
+      onDragLeave={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onDragLeave();
+        }
+      }}
+      onDrop={event => {
+        if (!canReorder) return;
+        event.preventDefault();
+        onDrop(pointerDropPosition(event.clientY, event.currentTarget));
+      }}
+    >
+      <div className="todo-item-head">
+        <div className="todo-rail">
+          <input
+            type="checkbox"
+            className="todo-check"
+            checked={todo.done}
+            onChange={event => onPatch({ done: event.target.checked })}
+            aria-label={todo.done ? `标记「${todo.title}」为未完成` : `完成「${todo.title}」`}
+          />
+          {canReorder ? (
+            <button
+              type="button"
+              className="todo-drag-handle"
+              draggable
+              onDragStart={event => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", todo.id);
+                if (itemRef.current) {
+                  event.dataTransfer.setDragImage(itemRef.current, 24, 24);
+                }
+                onDragStart();
+              }}
+              onDragEnd={onDragEnd}
+              onKeyDown={event => {
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  onMoveStep(-1);
+                } else if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  onMoveStep(1);
+                }
+              }}
+              title="拖动调整顺序（也可按上下方向键）"
+              aria-label={`拖动排序「${todo.title}」`}
+            >
+              <svg viewBox="0 0 16 10" aria-hidden="true">
+                <path d="M2 3h12M2 7h12" />
+              </svg>
             </button>
           ) : null}
-          {onMove ? <>
-            <button type="button" className="todo-icon" onClick={() => onMove(-1)} disabled={isFirst} title="上移" aria-label="上移">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4" /></svg>
-            </button>
-            <button type="button" className="todo-icon" onClick={() => onMove(1)} disabled={isLast} title="下移" aria-label="下移">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
-            </button>
-          </> : null}
-          <button type="button" className="todo-icon is-danger" onClick={onRemove} title="删除" aria-label={`删除「${todo.title}」`}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" /></svg>
-          </button>
         </div>
-      </div>
-      <div className="todo-summary">
-        <div className="todo-meta">
-          {todo.due_date ? <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>{late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}</span> : null}
-          {todo.list ? <span className="todo-chip todo-chip-list" title={todo.list}>{todo.list}</span> : null}
-          {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}
-          {todo.note ? <span className="todo-chip">有备注</span> : null}
+        <div className="todo-head-body">
+          <div className="todo-row">
+            <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
+              {todo.my_day ? (
+                <time className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
+                  {assignedDayLabel(todo.my_day, today)}
+                </time>
+              ) : <span className="todo-row-day" aria-hidden="true" />}
+              <span className="todo-title">
+                {todo.priority ? <span className={`todo-priority is-p${todo.priority}`} title={`优先级：${PRIORITY_LABELS[todo.priority]}`} aria-label={`优先级${PRIORITY_LABELS[todo.priority]}`} /> : null}
+                <span className="todo-title-text" title={todo.title}>{todo.title}</span>
+              </span>
+            </button>
+            <button type="button" className="todo-text-action" ref={progressButton} aria-expanded={writingProgress}
+              aria-controls={writingProgress ? progressFormId : undefined} aria-disabled={savingProgress}
+              onClick={() => {
+                if (savingProgress) return;
+                if (writingProgress) closeProgress();
+                else setWritingProgress(true);
+              }}>＋ 记进度</button>
+          </div>
+          {hasMeta ? (
+            <div className="todo-summary">
+              <div className="todo-meta">
+                {todo.due_date ? <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>{late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}</span> : null}
+                {todo.list ? <span className="todo-chip todo-chip-list" title={todo.list}>{todo.list}</span> : null}
+                {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}
+                {todo.note ? <span className="todo-chip">有备注</span> : null}
+              </div>
+            </div>
+          ) : null}
         </div>
-        <button type="button" className="todo-text-action" ref={progressButton} aria-expanded={writingProgress}
-          aria-controls={writingProgress ? progressFormId : undefined} aria-disabled={savingProgress}
-          onClick={() => {
-            if (savingProgress) return;
-            if (writingProgress) closeProgress();
-            else setWritingProgress(true);
-          }}>＋ 记进度</button>
       </div>
       {visibleProgress.length || writingProgress ? (
         <div className="todo-progress-thread">

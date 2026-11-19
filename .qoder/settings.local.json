@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(ls scripts/ | head -30 && wc -l scripts/build_chat_lobby_assets.py)",
+      "Bash(grep -n \"zone\\\\|seat\\\\|piano\\\\|signX\\\\|signY\\\\|machine\\\\|action\" scripts/build_chat_lobby_assets.py | head -100)"
+    ]
+  }
+}
