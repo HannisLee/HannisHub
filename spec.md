@@ -352,7 +352,7 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 浏览接口只返回某个受限顶层目录的直接子项，单目录最多返回 1,000 条；文件夹与文件按稳定顺序排列，文件提供独立下载 URL。
 - 文件游览在浏览器 `localStorage.hannishub_file_browser_location` 保存最后成功访问的顶层目录真实路径和相对路径；刷新及再次打开时恢复，顶层目录配置重排时按路径匹配。记录损坏、目录被删除或链接失效时回退到当前开放的顶层目录，不影响点云页的独立默认位置。
 - 拖拽文件夹使用同一个目录读取器逐批读取，并在准备阶段显示“正在读取文件夹”。文件选择、文件夹选择和拖拽共用上传队列，保留相对结构；显示总体传输进度、逐文件进度、等待服务器写入、成功及失败原因，完成后汇总数量并刷新目录。扫描阶段即锁定目标目录与覆盖选项，切换浏览目录不会改变上传目标或清空未完成的队列。
-- 文件游览上传时，大于 8 MB 的文件自动走分片上传：每片 8 MB、单文件 4 片并发，单片超时 5 分钟，网络错误/超时/5xx/408/429 自动重试最多 3 次，任一片最终失败即调用取消接口清理；小文件仍使用单请求上传。分片可绕开 Cloudflare 等反向代理约 100 MB 的请求体限制。上传开始、完成、拒绝、中断、分片失败、合并失败与取消均通过 `uvicorn.error` 记录到服务日志，可用 `journalctl --user -u llamamanager.service | grep 上传` 查看。
+- 文件游览上传时，大于 8 MB 的文件自动走分片上传：每片 8 MB、单文件 4 片并发，单片超时 5 分钟，网络错误/超时/5xx/408/429 自动重试最多 3 次，任一片最终失败即调用取消接口清理；小文件仍使用单请求上传。分片可绕开 Cloudflare 等反向代理约 100 MB 的请求体限制。上传开始、完成、拒绝、中断、分片失败、合并失败与取消均通过 `uvicorn.error` 记录到服务日志，可用 `journalctl --user -u hannishub.service | grep 上传` 查看。
 - 文件游览上传明细限制为可见 5 行的内部滚动区域，成功上传的文件立即从明细隐藏，待上传、上传中与失败项继续显示；完成项仍计入总体字节进度与成功数量，全部上传成功后仅保留汇总。长路径与错误提示在行内截断，悬停可查看完整内容。
 - 服务端对目录列表维护 1 小时线程安全缓存。目录缓存同时记录目录 mtime；手动同步会清除所选项目旧缓存并递归预读目录树。浏览器端复用有效缓存，手动同步后清除浏览器缓存并刷新当前目录。
 - 下载、上传与浏览都只接收顶层目录索引与相对路径；后端按字面逐段解析路径，拒绝 `..`、空段等越界写法。顶层目录内出现的符号链接由管理员在服务器上手动创建，等同于显式开放链接指向的位置：浏览、下载、上传与递归扫描都会跟随，条目上以“软链接”标记区分；链接目标内部再次出现的符号链接同样跟随，但每次递归扫描都按真实路径去重，避免环形链接导致死循环。失效链接仍以“不支持的链接或特殊文件”展示且不可进入。上传支持点击、多文件和拖入文件夹，前端按文件显示上传进度，可选覆盖同名文件。
@@ -574,7 +574,7 @@ _download_lock   # 下载任务状态读写锁
   2. 否则查找端口监听进程，若其自身或祖先命令行包含注册命令中的绝对路径（模型目录/启动脚本），视为非网页按钮启动（终端、systemd 等），自动纳入受管进程，网页可见、可停止
   3. 否则若端口空闲 → 复用 `/api/start` 自动拉起；端口被其他进程占用则跳过，避免与同端口的其他服务冲突
 - 在网页点击「停止」的常驻服务，在本次后端运行期间不再自动拉起，网页点击启动/重启会解除；后端重启（含每日 05:00 系统重启）后恢复自动拉起
-- `llamamanager.service` 设置 `KillMode=process`，后端重启只终止自身，不再带走 ASR/OCR 等子进程；重启后由受管进程记录（PID + 创建时间）恢复
+- `hannishub.service` 设置 `KillMode=process`，后端重启只终止自身，不再带走 ASR/OCR 等子进程；重启后由受管进程记录（PID + 创建时间）恢复
 - ASR 命令使用 `--gpu-memory-utilization 0.3 --max-model-len 16384`：16384 需覆盖单段最长 600 秒音频（约 7.5k 提示 + 最多 7.2k 补全）
 
 - 每次启动、停止、状态同步时，后端将受管进程元数据写入 `settings.json.managed_processes`
@@ -1013,7 +1013,7 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 | POST | `/internal/run` | Hub 读取账号命令组后传入 `owner`、`title`、`commands` 创建并执行 |
 | WS | `/internal/sessions/{id}/ws` | 复用现有终端消息协议；断连不释放 PTY，缺失会话关闭码 4404 |
 
-部署：先初始化现有 Hub 登录配置，再用 `conda activate llama-manager && bash scripts/run_terminal.sh` 启动后台；Hub 继续用原有 `bash run.sh`。常驻部署将 `scripts/systemd/hannishub-terminal.service` 复制到 `~/.config/systemd/user/`，按实际安装目录调整模板，执行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now hannishub-terminal.service`。后台和 `llamamanager.service` 无停止/重启绑定；可分别维护，不能用同一个自动重载进程运行。可在 Hub 的 systemd 单元中添加 `Wants=hannishub-terminal.service` 与 `After=hannishub-terminal.service`，这两个依赖不会传递停止操作。`run.sh` 的绑定地址和 8081 端口保持不变。
+部署：先初始化现有 Hub 登录配置，再用 `conda activate llama-manager && bash scripts/run_terminal.sh` 启动后台；Hub 继续用原有 `bash run.sh`。常驻部署将 `scripts/systemd/hannishub-terminal.service` 复制到 `~/.config/systemd/user/`，按实际安装目录调整模板，执行 `systemctl --user daemon-reload` 和 `systemctl --user enable --now hannishub-terminal.service`。后台和 `hannishub.service` 无停止/重启绑定；可分别维护，不能用同一个自动重载进程运行。可在 Hub 的 systemd 单元中添加 `Wants=hannishub-terminal.service` 与 `After=hannishub-terminal.service`，这两个依赖不会传递停止操作。`run.sh` 的绑定地址和 8081 端口保持不变。
 
 首次迁移前需结束或妥善保存旧 Hub 中的终端任务，旧内存会话不能直接迁移；启动独立后台后再安排一次 Hub 重启完成切换。之后普通 Hub 重启无需重启后台。
 
