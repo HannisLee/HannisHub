@@ -164,11 +164,13 @@ const path = require('node:path');
       assert.equal(await tlRow.getByRole('button', { name: /展开全部|收起进度/ }).count(), 0);
       const renderedRows = await tlList.locator('li').evaluateAll(els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim()));
       assert.equal(renderedRows[0], '2026-11-19 15:00 开始训练');
-      assert.equal(renderedRows[1], '+2小时 17:00 完成第一次测试');
-      assert.equal(renderedRows[2], '+35分钟 17:35 发现问题');
-      assert.equal(renderedRows[3], '+1小时20分钟 18:55 完成修复');
+      assert.equal(renderedRows[1], '+2h 17:00 完成第一次测试');
+      assert.equal(renderedRows[2], '+35m 17:35 发现问题');
+      assert.equal(renderedRows[3], '+1h20m 18:55 完成修复');
       assert.equal(renderedRows[4], '2026-11-20 09:00 开始第二轮');
-      assert.equal(renderedRows[5], '+45分钟 09:45 完成第二轮');
+      assert.equal(renderedRows[5], '+45m 09:45 完成第二轮');
+      const clockXs = await tlList.locator('.todo-progress-clock').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().x)));
+      assert.equal(new Set(clockXs).size, 1, `时刻列应垂直对齐: ${JSON.stringify(clockXs)}`);
     }
 
     // D. 原地「记进度」编辑：多行 Shift+Enter、Enter 保存、草稿跨任务保留、仅记进度不改状态、配合状态同步保存

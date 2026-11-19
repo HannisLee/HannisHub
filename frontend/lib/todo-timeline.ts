@@ -12,6 +12,7 @@ export interface TimelineItem {
   createdAt: number | null;
   isoTime: string | null;
   kind: "anchor" | "same-day" | "unknown";
+  dateText: string;
   dateTimeText: string;
   timeText: string;
   deltaText: string;
@@ -50,19 +51,19 @@ export function mergeProgressEntries<T extends ProgressRecord>(saved: readonly T
   return sortProgressEntries([...byId.values()]);
 }
 
-/** 将秒数间隔格式化为自然中文短格式（如 +5分钟、+1小时30分钟、+<1分钟）。 */
-export function formatDurationZh(diffSeconds: number): string {
+/** 将秒数间隔格式化为紧凑短格式（如 +5m、+1h30m、+<1m）。 */
+export function formatDurationShort(diffSeconds: number): string {
   if (!Number.isFinite(diffSeconds) || diffSeconds < 0) return "";
-  if (diffSeconds < 60) return "+<1分钟";
+  if (diffSeconds < 60) return "+<1m";
   const totalMinutes = Math.floor(diffSeconds / 60);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  if (hours === 0) return `+${minutes}分钟`;
-  if (minutes === 0) return `+${hours}小时`;
-  return `+${hours}小时${minutes}分钟`;
+  if (hours === 0) return `+${minutes}m`;
+  if (minutes === 0) return `+${hours}h`;
+  return `+${hours}h${minutes}m`;
 }
 
-/** 构建完整进度时间轴：首条与跨日显示 YYYY-MM-DD HH:mm，同日后续显示 +时长 与 HH:mm。 */
+/** 构建完整进度时间轴：首条与跨日显示 YYYY-MM-DD 与 HH:mm，同日后续显示 +时长 与 HH:mm。 */
 export function buildProgressTimeline(entries: readonly ProgressRecord[]): TimelineItem[] {
   const sorted = sortProgressEntries(entries);
   let prevValid: { createdAt: number; dayKey: string } | null = null;
@@ -76,6 +77,7 @@ export function buildProgressTimeline(entries: readonly ProgressRecord[]): Timel
         createdAt: null,
         isoTime: null,
         kind: "unknown",
+        dateText: "时间未知",
         dateTimeText: "时间未知",
         timeText: "—",
         deltaText: "",
@@ -90,7 +92,7 @@ export function buildProgressTimeline(entries: readonly ProgressRecord[]): Timel
 
     if (prevValid !== null && prevValid.dayKey === dayKey) {
       const diffSeconds = Math.max(0, entry.created_at - prevValid.createdAt);
-      const deltaText = formatDurationZh(diffSeconds);
+      const deltaText = formatDurationShort(diffSeconds);
       prevValid = { createdAt: entry.created_at, dayKey };
       return {
         id: entry.id,
@@ -98,6 +100,7 @@ export function buildProgressTimeline(entries: readonly ProgressRecord[]): Timel
         createdAt: entry.created_at,
         isoTime,
         kind: "same-day",
+        dateText: "",
         dateTimeText,
         timeText,
         deltaText,
@@ -111,6 +114,7 @@ export function buildProgressTimeline(entries: readonly ProgressRecord[]): Timel
       createdAt: entry.created_at,
       isoTime,
       kind: "anchor",
+      dateText: dayKey,
       dateTimeText,
       timeText,
       deltaText: "",

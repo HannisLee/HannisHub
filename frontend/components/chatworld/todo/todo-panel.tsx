@@ -925,7 +925,7 @@ function TodoRow({
           <div className="todo-row">
             <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
               {todo.my_day ? (
-                <time className={`todo-chip todo-row-day${inMyDay ? " is-today-slot" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
+                <time className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
                   {assignedDayLabel(todo.my_day, today)}
                 </time>
               ) : <span className="todo-row-day" aria-hidden="true" />}
@@ -1032,18 +1032,16 @@ function TodoRow({
             <ul className="todo-progress-list" id={progressListId} aria-label="进度记录">
               {timeline.map(item => (
                 <li key={item.id} className={`todo-progress-item is-${item.kind}`}>
-                  <div className="todo-progress-time-col">
-                    {item.kind === "same-day" ? (
-                      <>
-                        <span className="todo-progress-delta">{item.deltaText}</span>
-                        <time className="todo-progress-clock" dateTime={item.isoTime ?? undefined}>{item.timeText}</time>
-                      </>
-                    ) : item.kind === "anchor" ? (
-                      <time className="todo-progress-anchor" dateTime={item.isoTime ?? undefined}>{item.dateTimeText}</time>
-                    ) : (
-                      <span className="todo-progress-anchor">{item.dateTimeText}</span>
-                    )}
-                  </div>
+                  {item.kind === "unknown" ? (
+                    <span className="todo-progress-lead todo-progress-unknown">{item.dateText}</span>
+                  ) : (
+                    <>
+                      <span className={`todo-progress-lead${item.kind === "anchor" ? " is-date" : " is-delta"}`}>
+                        {item.kind === "anchor" ? item.dateText : item.deltaText}
+                      </span>
+                      <time className="todo-progress-clock" dateTime={item.isoTime ?? undefined}>{item.timeText}</time>
+                    </>
+                  )}
                   <span className="todo-progress-text">{item.text}</span>
                 </li>
               ))}

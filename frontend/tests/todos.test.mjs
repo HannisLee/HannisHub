@@ -11,7 +11,7 @@ function load(path) {
   return loaded.exports;
 }
 
-const { buildProgressTimeline, formatDurationZh, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
+const { buildProgressTimeline, formatDurationShort, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
 
 function tsLocal(y, m, d, hh, mm, ss = 0) {
   return Math.floor(new Date(y, m - 1, d, hh, mm, ss).getTime() / 1000);
@@ -32,28 +32,28 @@ test("进度时间轴按规则展示首条完整日期、同日增量+时刻、�
     timeline.map(item => ({
       id: item.id,
       kind: item.kind,
-      dateTimeText: item.dateTimeText,
+      dateText: item.dateText,
       deltaText: item.deltaText,
       timeText: item.timeText,
       text: item.text,
     })),
     [
-      { id: "p1", kind: "anchor", dateTimeText: "2026-11-19 15:00", deltaText: "", timeText: "15:00", text: "开始训练" },
-      { id: "p2", kind: "same-day", dateTimeText: "2026-11-19 17:00", deltaText: "+2小时", timeText: "17:00", text: "完成第一次测试" },
-      { id: "p3", kind: "same-day", dateTimeText: "2026-11-19 17:35", deltaText: "+35分钟", timeText: "17:35", text: "发现问题" },
-      { id: "p4", kind: "same-day", dateTimeText: "2026-11-19 18:55", deltaText: "+1小时20分钟", timeText: "18:55", text: "完成修复" },
-      { id: "p5", kind: "anchor", dateTimeText: "2026-11-20 09:00", deltaText: "", timeText: "09:00", text: "开始第二轮" },
-      { id: "p6", kind: "same-day", dateTimeText: "2026-11-20 09:45", deltaText: "+45分钟", timeText: "09:45", text: "完成第二轮" },
+      { id: "p1", kind: "anchor", dateText: "2026-11-19", deltaText: "", timeText: "15:00", text: "开始训练" },
+      { id: "p2", kind: "same-day", dateText: "", deltaText: "+2h", timeText: "17:00", text: "完成第一次测试" },
+      { id: "p3", kind: "same-day", dateText: "", deltaText: "+35m", timeText: "17:35", text: "发现问题" },
+      { id: "p4", kind: "same-day", dateText: "", deltaText: "+1h20m", timeText: "18:55", text: "完成修复" },
+      { id: "p5", kind: "anchor", dateText: "2026-11-20", deltaText: "", timeText: "09:00", text: "开始第二轮" },
+      { id: "p6", kind: "same-day", dateText: "", deltaText: "+45m", timeText: "09:45", text: "完成第二轮" },
     ],
   );
 });
 
 test("时间差格式化与跨月跨年、同时间戳及异常时间戳兼容", () => {
-  assert.equal(formatDurationZh(30), "+<1分钟");
-  assert.equal(formatDurationZh(5 * 60), "+5分钟");
-  assert.equal(formatDurationZh(60 * 60), "+1小时");
-  assert.equal(formatDurationZh(90 * 60), "+1小时30分钟");
-  assert.equal(formatDurationZh(185 * 60), "+3小时5分钟");
+  assert.equal(formatDurationShort(30), "+<1m");
+  assert.equal(formatDurationShort(5 * 60), "+5m");
+  assert.equal(formatDurationShort(60 * 60), "+1h");
+  assert.equal(formatDurationShort(90 * 60), "+1h30m");
+  assert.equal(formatDurationShort(185 * 60), "+3h5m");
 
   const crossYear = buildProgressTimeline([
     { id: "a", text: "跨年前", created_at: tsLocal(2026, 12, 31, 23, 50) },
@@ -72,7 +72,7 @@ test("时间差格式化与跨月跨年、同时间戳及异常时间戳兼容",
     { id: "second", text: "第二条", created_at: sameTime },
   ]);
   assert.deepEqual(tied.map(i => i.id), ["first", "second"]);
-  assert.equal(buildProgressTimeline(tied)[1].deltaText, "+<1分钟");
+  assert.equal(buildProgressTimeline(tied)[1].deltaText, "+<1m");
 
   // 异常时间戳不输出 NaN / Invalid Date 且保留日志内容
   const bad = buildProgressTimeline([
