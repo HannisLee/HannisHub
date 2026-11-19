@@ -14,7 +14,7 @@ export interface TodoProgress {
   created_at: number;
 }
 
-/** 优先级：0 无、1 低、2 中、3 高 */
+/** 优先级：3 P0（高）、2 P1（默认，含兼容旧值 0）、1 P2（低） */
 export type TodoPriority = 0 | 1 | 2 | 3;
 
 export interface Todo {
@@ -47,7 +47,13 @@ export const TODO_LIST_MAX = 24;
 export const TODO_SUBTASK_MAX = 50;
 export const TODO_PROGRESS_MAX = 1000;
 
-export const PRIORITY_LABELS: Record<TodoPriority, string> = { 0: "无", 1: "低", 2: "中", 3: "高" };
+export const PRIORITY_OPTIONS: TodoPriority[] = [3, 2, 1];
+export const PRIORITY_LABELS: Record<TodoPriority, string> = {
+  3: "P0（高）",
+  2: "P1（默认）",
+  1: "P2（低）",
+  0: "P1（默认）",
+};
 
 export function fetchTodos(): Promise<{ todos: Todo[] }> {
   return apiFetch<{ todos: Todo[] }>(BASE);

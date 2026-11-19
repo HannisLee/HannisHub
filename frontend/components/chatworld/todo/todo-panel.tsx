@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import {
-  addTodoProgress, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, reorderTodos,
+  addTodoProgress, createTodo, fetchTodos, localDate, newSubtaskId, PRIORITY_LABELS, PRIORITY_OPTIONS, reorderTodos,
   TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
   type Todo, type TodoInput, type TodoPriority, type TodoProgress,
 } from "../../../lib/todos";
@@ -88,7 +88,7 @@ export function TodoPanel() {
   const [showDone, setShowDone] = useState(false);
   // 快速添加
   const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState<TodoPriority>(0);
+  const [priority, setPriority] = useState<TodoPriority>(2);
   const [due, setDue] = useState("");
   const [listName, setListName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -228,7 +228,7 @@ export function TodoPanel() {
     // 在哪个视图添加，就带上对应属性：今天视图加入今天、重要视图设为高优先级、清单视图归入该清单
     const input: TodoInput = {
       title: text,
-      priority: view === "important" && priority === 0 ? 3 : priority,
+      priority: view === "important" && priority === 2 ? 3 : priority,
       due_date: due || (view === "planned" ? today : ""),
       list: listName.trim() || (view.startsWith("list:") ? view.slice(5) : ""),
       my_day: view === "today" ? today : "",
@@ -241,7 +241,7 @@ export function TodoPanel() {
       }
       setTitle("");
       setDue("");
-      setPriority(0);
+      setPriority(2);
       setError("");
       inputRef.current?.focus();
     } catch (value) {
@@ -347,7 +347,7 @@ export function TodoPanel() {
             />
             <div className="todo-add-options">
               <select className="select-compact" value={priority} onChange={event => setPriority(Number(event.target.value) as TodoPriority)} aria-label="优先级">
-                {([0, 1, 2, 3] as TodoPriority[]).map(p => <option key={p} value={p}>优先级：{PRIORITY_LABELS[p]}</option>)}
+                {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>优先级：{PRIORITY_LABELS[p]}</option>)}
               </select>
               <input className="todo-date" type="date" value={due} onChange={event => setDue(event.target.value)} aria-label="截止日期" title="截止日期" />
               <input
@@ -594,7 +594,10 @@ function TodoRow({
                 </time>
               ) : <span className="todo-row-day" aria-hidden="true" />}
               <span className="todo-title">
-                {todo.priority ? <span className={`todo-priority is-p${todo.priority}`} title={`优先级：${PRIORITY_LABELS[todo.priority]}`} aria-label={`优先级${PRIORITY_LABELS[todo.priority]}`} /> : null}
+                {(() => {
+                  const effectivePriority: TodoPriority = todo.priority || 2;
+                  return <span className={`todo-priority is-p${effectivePriority}`} title={`优先级：${PRIORITY_LABELS[effectivePriority]}`} aria-label={`优先级${PRIORITY_LABELS[effectivePriority]}`} />;
+                })()}
                 <span className="todo-title-text" title={todo.title}>{todo.title}</span>
               </span>
             </button>
@@ -680,8 +683,8 @@ function TodoDetail({ todo, today, lists, onPatch }: { todo: Todo; today: string
       <div className="todo-detail-grid">
         <label className="todo-field">
           <span>优先级</span>
-          <select value={todo.priority} onChange={event => onPatch({ priority: Number(event.target.value) as TodoPriority })}>
-            {([0, 1, 2, 3] as TodoPriority[]).map(p => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+          <select value={todo.priority || 2} onChange={event => onPatch({ priority: Number(event.target.value) as TodoPriority })}>
+            {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
           </select>
         </label>
         <div className="todo-field">
