@@ -11,7 +11,7 @@ function load(path) {
   return loaded.exports;
 }
 
-const { buildProgressTimeline, formatDurationShort, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
+const { blockedFirst, buildProgressTimeline, formatDurationShort, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
 
 function tsLocal(y, m, d, hh, mm, ss = 0) {
   return Math.floor(new Date(y, m - 1, d, hh, mm, ss).getTime() / 1000);
@@ -95,4 +95,15 @@ test("任务排序支持手动、优先级（兼容旧 0 值）与最近更新",
   assert.deepEqual(sortTodoItems(items, "manual").map(i => i.id), ["low", "legacy", "high"]);
   assert.deepEqual(sortTodoItems(items, "priority").map(i => i.id), ["high", "legacy", "low"]);
   assert.deepEqual(sortTodoItems(items, "updated").map(i => i.id), ["legacy", "high", "low"]);
+});
+
+test("阻塞中任务稳定置顶，其余保持原顺序", () => {
+  const items = [
+    { id: "a", status: "not_started" },
+    { id: "b", status: "blocked" },
+    { id: "c", status: "in_progress" },
+    { id: "d", status: "blocked" },
+  ];
+  assert.deepEqual(blockedFirst(items).map(i => i.id), ["b", "d", "a", "c"]);
+  assert.deepEqual(blockedFirst([]), []);
 });

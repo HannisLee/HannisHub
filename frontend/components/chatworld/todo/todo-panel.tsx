@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { errorMessage } from "../../../lib/format";
-import { buildProgressTimeline, mergeProgressEntries, sortTodoItems, type TodoSortMode } from "../../../lib/todo-timeline";
+import { blockedFirst, buildProgressTimeline, mergeProgressEntries, sortTodoItems, type TimelineItem, type TodoSortMode } from "../../../lib/todo-timeline";
 import {
   addTodoProgress, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, normalizeTodoStatus,
   PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, reorderTodos, TODO_LIST_MAX, TODO_NOTE_MAX,
@@ -33,6 +33,8 @@ const VIEW_TITLES: Record<string, string> = {
   today: "今天", planned: "计划中", important: "重要", overdue: "已逾期", all: "全部待办", done: "已完成",
 };
 const UNLISTED = "未分类";
+/** 屏幕阅读器用的排序提示，所有可排序标题按钮共用 */
+const REORDER_HINT_ID = "todo-reorder-hint";
 const SORT_STORAGE_KEY = "hannishub:todo-sort";
 const SORT_LABELS: Record<Exclude<TodoSortMode, "due">, string> = {
   manual: "手动排序",
@@ -65,6 +67,15 @@ function assignedDayLabel(day: string, today: string): string {
   if (days === 0) return "今天";
   if (days === 1) return "昨天";
   return days > 0 ? `${days}天前` : `${-days}天后`;
+}
+
+/** 进度时间：今天视图只显示 HH:MM；其他视图显示 MM-DD HH:MM（非今年加年份） */
+function progressTimeLabel(item: TimelineItem, compact: boolean): string {
+  if (item.kind === "unknown") return "时间未知";
+  if (compact) return item.timeText;
+  const [year, month, day] = item.dateTimeText.slice(0, 10).split("-");
+  const prefix = year === String(new Date().getFullYear()) ? "" : `${year}-`;
+  return `${prefix}${month}-${day} ${item.timeText}`;
 }
 
 function sameLocalDay(timestamp: number | null, day: string): boolean {
@@ -297,7 +308,8 @@ export function TodoPanel() {
       const now = pending.filter(todo => inToday(todo) && !(todo.due_date && todo.due_date < today));
       return [
         ...(late.length ? [{ key: "late", title: "已逾期", items: sorted(late) }] : []),
-        { key: "today", title: "待完成", items: sorted(now) },
+        // 阻塞中的任务置顶，其余保持当前排序（默认手动顺序）
+        { key: "today", title: "待完成", items: blockedFirst(sorted(now)) },
         ...doneGroup(finished.filter(todo => sameLocalDay(todo.done_at, today)), "今天完成"),
       ];
     }
@@ -428,11 +440,11 @@ export function TodoPanel() {
       title={fullTitle ?? label}
       aria-label={`${fullTitle ?? label} ${count}`}
       aria-current={view === key ? "page" : undefined}
-      className={`todo-nav-item${view === key ? " is-active" : ""}`}
+      className={`todo-nav-item${view === key ? " is-active" : ""}${count === 0 ? " is-empty" : ""}`}
       onClick={() => { setView(key); setExpanded(null); }}
     >
       <span>{Array.from(label).slice(0, 3).join("")}</span>
-      <span className="todo-nav-count">{count}</span>
+      {count > 0 ? <span className="todo-nav-count">{count}</span> : null}
     </button>
   );
 
@@ -453,6 +465,7 @@ export function TodoPanel() {
         </nav>
 
         <section className="todo-main">
+          <p id={REORDER_HINT_ID} className="visually-hidden">可拖动标题行调整顺序，或聚焦标题后按上下方向键移动</p>
           <header className="todo-main-head">
             <div className="todo-head-title-wrap">
               <h2 className="todo-view-title">{viewTitle}</h2>
@@ -461,8 +474,8 @@ export function TodoPanel() {
             </div>
             {view === "today" ? (
               <div className="todo-progress" aria-label="今天的进度">
-                <span>已完成 {doneToday} / {todayTotal}</span>
                 <ProgressBar value={todayTotal ? (doneToday / todayTotal) * 100 : 0} tone="success" />
+                <span>已完成 {doneToday} / {todayTotal}</span>
               </div>
             ) : null}
           </header>
@@ -508,7 +521,7 @@ export function TodoPanel() {
                 aria-label="待办内容"
               />
               {!isAddOpen ? (
-                <Button type="submit" size="sm" disabled={!title.trim() || adding}>
+                <Button type="submit" size="sm" className="todo-add-submit" disabled={!title.trim() || adding}>
                   {adding ? "添加中…" : "添加"}
                 </Button>
               ) : null}
@@ -564,7 +577,7 @@ export function TodoPanel() {
                   <Button type="button" variant="quiet" size="sm" onClick={() => resetAddForm(true)} disabled={adding}>
                     取消
                   </Button>
-                  <Button type="submit" size="sm" disabled={!title.trim() || adding}>
+                  <Button type="submit" size="sm" className="todo-add-submit" disabled={!title.trim() || adding}>
                     {adding ? "添加中…" : "添加"}
                   </Button>
                 </div>
@@ -586,6 +599,12 @@ export function TodoPanel() {
           ) : groups.map(group => {
             if (!group.items.length && group.key !== "today") return null;
             const folded = group.collapsible && !showDone;
+            // 今天「待完成」中阻塞任务固定置顶，手动排序只在同一分区内调整
+            const partitioned = view === "today" && group.key === "today";
+            const reorderScope = (todo: Todo) => (
+              partitioned ? group.items.filter(item => (item.status === "blocked") === (todo.status === "blocked")) : group.items
+            );
+            const dragSource = dragging && dragging.groupKey === group.key ? group.items.find(item => item.id === dragging.id) : undefined;
             const showGroupSort = showSortSelect && group.key === firstPendingGroupKey;
             return (
               <div className="todo-group" key={group.key}>
@@ -632,6 +651,7 @@ export function TodoPanel() {
                           key={todo.id}
                           todo={todo}
                           today={today}
+                          compact={view === "today"}
                           expanded={expanded === todo.id}
                           lists={lists.map(([name]) => name)}
                           writingProgress={writingProgress}
@@ -673,20 +693,21 @@ export function TodoPanel() {
                             setDropTarget(null);
                           }}
                           onDragOver={position => {
-                            if (!rowCanMove || !dragging || dragging.groupKey !== group.key || dragging.id === todo.id) return;
+                            if (!rowCanMove || !dragSource || dragSource.id === todo.id) return;
+                            if (!reorderScope(dragSource).includes(todo)) return;
                             setDropTarget(prev => (prev?.id === todo.id && prev.position === position ? prev : { id: todo.id, position }));
                           }}
                           onDragLeave={() => {
                             setDropTarget(prev => (prev?.id === todo.id ? null : prev));
                           }}
                           onDrop={position => {
-                            if (rowCanMove && dragging && dragging.groupKey === group.key && dragging.id !== todo.id) {
-                              void moveTo(group.items, dragging.id, todo.id, position);
+                            if (rowCanMove && dragSource && dragSource.id !== todo.id && reorderScope(dragSource).includes(todo)) {
+                              void moveTo(reorderScope(dragSource), dragSource.id, todo.id, position);
                             }
                             setDragging(null);
                             setDropTarget(null);
                           }}
-                          onMoveStep={delta => moveBy(group.items, todo.id, delta)}
+                          onMoveStep={delta => moveBy(reorderScope(todo), todo.id, delta)}
                         />
                       );
                     }) : <li className="todo-group-empty">今天的事都安排好了？在上方添加，或把其他待办「加入今天」。</li>}
@@ -704,6 +725,8 @@ export function TodoPanel() {
 interface TodoRowProps {
   todo: Todo;
   today: string;
+  /** 今天视图：不显示「今天」日期标签，进度时间只显示 HH:MM */
+  compact: boolean;
   expanded: boolean;
   lists: string[];
   writingProgress: boolean;
@@ -730,6 +753,7 @@ interface TodoRowProps {
 function TodoRow({
   todo,
   today,
+  compact,
   expanded,
   lists,
   writingProgress,
@@ -756,7 +780,6 @@ function TodoRow({
   const dueToday = !todo.done && todo.due_date === today;
   const subDone = todo.subtasks.filter(sub => sub.done).length;
   const inMyDay = todo.my_day === today;
-  const hasMeta = Boolean(todo.due_date || todo.list || todo.subtasks.length || todo.note);
   const currentStatus = normalizeTodoStatus(todo.status);
 
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -768,13 +791,20 @@ function TodoRow({
   const progressButtonRef = useRef<HTMLButtonElement>(null);
   const progressTextareaRef = useRef<HTMLTextAreaElement>(null);
   const progressFormId = `todo-progress-form-${todo.id}`;
-  const progressListId = `todo-progress-list-${todo.id}`;
+  const olderListId = `todo-progress-older-${todo.id}`;
+  const [showOlder, setShowOlder] = useState(false);
 
   const draftText = progressDraft?.text ?? "";
   const draftStatus: ProgressDraftStatus = progressDraft?.status ?? (todo.done ? "done" : currentStatus);
   const hasUnsavedDraft = Boolean(draftText.trim()) && !writingProgress;
 
-  const timeline = useMemo(() => buildProgressTimeline(todo.progress), [todo.progress]);
+  // 进度按时间倒序：最新一条单独展示，更早的折叠；时间未知的记录排在最后
+  const newestFirst = useMemo(() => {
+    const timeline = buildProgressTimeline(todo.progress);
+    return [...timeline.filter(item => item.kind !== "unknown").reverse(), ...timeline.filter(item => item.kind === "unknown")];
+  }, [todo.progress]);
+  const latestEntry = newestFirst[0];
+  const olderEntries = newestFirst.slice(1);
 
   // 状态菜单：点击外部或按 Escape 关闭
   useEffect(() => {
@@ -868,6 +898,7 @@ function TodoRow({
   const rowClassName = [
     "todo-item",
     todo.done ? "is-done" : "",
+    !todo.done && currentStatus === "blocked" ? "is-blocked" : "",
     statusMenuOpen ? "has-menu-open" : "",
     isDragging ? "is-dragging" : "",
     dropPosition === "before" ? "is-drop-before" : "",
@@ -875,6 +906,47 @@ function TodoRow({
   ].filter(Boolean).join(" ");
 
   const effectivePriority: TodoPriority = todo.priority || 2;
+  // 默认优先级（P1）不显示，其余以 6px 圆点放在标题前
+  const showPriorityDot = effectivePriority !== 2;
+
+  // 元信息改为一行纯文字，不再使用描边标签
+  const metaParts: { key: string; text: string; className?: string }[] = [];
+  if (todo.due_date) {
+    metaParts.push({
+      key: "due",
+      text: `${late ? "逾期 · " : "截止 "}${dateLabel(todo.due_date, today)}`,
+      className: late || dueToday ? "is-emphasis" : undefined,
+    });
+  }
+  if (todo.list) metaParts.push({ key: "list", text: todo.list });
+  if (todo.subtasks.length) metaParts.push({ key: "sub", text: `子任务 ${subDone}/${todo.subtasks.length}` });
+  if (todo.note) metaParts.push({ key: "note", text: "有备注" });
+
+  const renderEntry = (item: TimelineItem) => (
+    <li key={item.id} className="todo-progress-item">
+      <span className="todo-progress-text">{item.text}</span>
+      <time
+        className="todo-progress-time"
+        dateTime={item.isoTime ?? undefined}
+        title={item.kind === "unknown" ? undefined : item.dateTimeText}
+      >
+        {progressTimeLabel(item, compact)}
+      </time>
+    </li>
+  );
+
+  const dragProps = canReorder ? {
+    draggable: true,
+    onDragStart: (event: DragEvent<HTMLElement>) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", todo.id);
+      if (itemRef.current) {
+        event.dataTransfer.setDragImage(itemRef.current, 24, 24);
+      }
+      onDragStart();
+    },
+    onDragEnd,
+  } : {};
 
   return (
     <li
@@ -897,194 +969,159 @@ function TodoRow({
         onDrop(pointerDropPosition(event.clientY, event.currentTarget));
       }}
     >
-      <div className="todo-item-head">
-        <div className="todo-head-body">
-          <div className="todo-row">
-            {(() => {
-              const dragProps = canReorder ? {
-                draggable: true,
-                tabIndex: 0,
-                onDragStart: (event: DragEvent<HTMLElement>) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", todo.id);
-                  if (itemRef.current) {
-                    event.dataTransfer.setDragImage(itemRef.current, 24, 24);
-                  }
-                  onDragStart();
-                },
-                onDragEnd,
-                onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    onMoveStep(-1);
-                  } else if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    onMoveStep(1);
-                  } else if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onToggleExpand();
-                  }
-                },
-              } : {};
-              const dayTitle = canReorder
-                ? `${todo.my_day ? `${todo.my_day} · ` : ""}拖动调整顺序（也可按上下方向键）`
-                : todo.my_day || undefined;
-              return todo.my_day ? (
-                <time
-                  className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}${canReorder ? " is-draggable" : ""}`}
-                  dateTime={todo.my_day}
-                  title={dayTitle}
-                  aria-label={canReorder ? `拖动排序「${todo.title}」，日期 ${assignedDayLabel(todo.my_day, today)}` : undefined}
-                  onClick={onToggleExpand}
-                  {...dragProps}
-                >
-                  {assignedDayLabel(todo.my_day, today)}
-                </time>
-              ) : (
-                <span
-                  className={`todo-row-day${canReorder ? " is-draggable" : ""}`}
-                  title={dayTitle}
-                  aria-hidden={canReorder ? undefined : true}
-                  aria-label={canReorder ? `拖动排序「${todo.title}」` : undefined}
-                  onClick={canReorder ? onToggleExpand : undefined}
-                  {...dragProps}
-                />
-              );
-            })()}
-            <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
-              <span className="todo-title">
-                <span
-                  className={`todo-priority is-p${effectivePriority}`}
-                  title={`优先级：${PRIORITY_LABELS[effectivePriority]}`}
-                  aria-label={`优先级${PRIORITY_LABELS[effectivePriority]}`}
-                >
-                  {PRIORITY_TAGS[effectivePriority]}
-                </span>
-                <span className="todo-title-text" title={todo.title}>{todo.title}</span>
-              </span>
-            </button>
+      <div className={`todo-row${canReorder ? " is-draggable" : ""}`} {...dragProps}>
+        {compact ? null : (
+          <span className={`todo-row-day${inMyDay ? " is-today" : ""}`} title={todo.my_day || undefined}>
+            {todo.my_day ? assignedDayLabel(todo.my_day, today) : ""}
+          </span>
+        )}
+        <button
+          type="button"
+          className="todo-row-main"
+          onClick={onToggleExpand}
+          aria-expanded={expanded}
+          aria-describedby={canReorder ? REORDER_HINT_ID : undefined}
+          onKeyDown={event => {
+            if (!canReorder) return;
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              onMoveStep(-1);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              onMoveStep(1);
+            }
+          }}
+        >
+          {showPriorityDot ? (
+            <span
+              className={`todo-priority-dot is-p${effectivePriority}`}
+              role="img"
+              title={`优先级：${PRIORITY_LABELS[effectivePriority]}`}
+              aria-label={`优先级${PRIORITY_TAGS[effectivePriority]}`}
+            />
+          ) : null}
+          <span className="todo-title-text" title={todo.title}>{todo.title}</span>
+        </button>
 
-            <div className="todo-row-actions">
-              <div className="todo-status-wrap" ref={statusWrapRef}>
-                <button
-                  ref={statusButtonRef}
-                  type="button"
-                  className={`todo-status-btn ${todo.done ? "is-done" : `is-${currentStatus}`}`}
-                  aria-haspopup="menu"
-                  aria-expanded={statusMenuOpen}
-                  aria-busy={savingStatus}
-                  disabled={savingStatus}
-                  aria-label={todo.done ? "任务已完成，点击可恢复未完成" : `执行状态：${TODO_STATUS_LABELS[currentStatus]}，点击切换`}
-                  onClick={event => {
-                    event.stopPropagation();
-                    setStatusMenuOpen(open => !open);
-                  }}
-                >
-                  <span className="todo-status-dot" aria-hidden="true" />
-                  <span>{todo.done ? "已完成" : TODO_STATUS_LABELS[currentStatus]}</span>
-                </button>
-                {statusMenuOpen ? (
-                  <div className="todo-status-menu" role="menu" aria-label={`切换「${todo.title}」状态`}>
-                    {TODO_STATUSES.map(statusOption => {
-                      const selected = !todo.done && statusOption === currentStatus;
-                      const wasStatus = todo.done && statusOption === currentStatus;
-                      return (
-                        <button
-                          key={statusOption}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={selected}
-                          className={`todo-status-option is-${statusOption}${selected ? " is-selected" : ""}`}
-                          onClick={event => {
-                            event.stopPropagation();
-                            selectStatus(statusOption);
-                          }}
-                        >
-                          <span className="todo-status-dot" aria-hidden="true" />
-                          <span>{TODO_STATUS_LABELS[statusOption]}</span>
-                          <span className="todo-status-check" aria-hidden="true">{selected ? "✓" : wasStatus ? "原" : ""}</span>
-                        </button>
-                      );
-                    })}
-                    {!todo.done ? (
-                      <>
-                        <div className="todo-status-divider" role="separator" />
-                        <button
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={false}
-                          className="todo-status-option is-done"
-                          onClick={event => {
-                            event.stopPropagation();
-                            selectStatus("done");
-                          }}
-                        >
-                          <span className="todo-status-dot" aria-hidden="true" />
-                          <span>已完成</span>
-                          <span className="todo-status-check" aria-hidden="true" />
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
+        <div className="todo-row-actions">
+          <div className="todo-status-wrap" ref={statusWrapRef}>
+            <button
+              ref={statusButtonRef}
+              type="button"
+              className={`todo-status-btn ${todo.done ? "is-done" : `is-${currentStatus}`}`}
+              aria-haspopup="menu"
+              aria-expanded={statusMenuOpen}
+              aria-busy={savingStatus}
+              disabled={savingStatus}
+              aria-label={todo.done ? "任务已完成，点击可恢复未完成" : `执行状态：${TODO_STATUS_LABELS[currentStatus]}，点击切换`}
+              onClick={event => {
+                event.stopPropagation();
+                setStatusMenuOpen(open => !open);
+              }}
+            >
+              <span className="todo-status-dot" aria-hidden="true" />
+              <span>{todo.done ? "已完成" : TODO_STATUS_LABELS[currentStatus]}</span>
+            </button>
+            {statusMenuOpen ? (
+              <div className="todo-status-menu" role="menu" aria-label={`切换「${todo.title}」状态`}>
+                {TODO_STATUSES.map(statusOption => {
+                  const selected = !todo.done && statusOption === currentStatus;
+                  const wasStatus = todo.done && statusOption === currentStatus;
+                  return (
+                    <button
+                      key={statusOption}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      className={`todo-status-option is-${statusOption}${selected ? " is-selected" : ""}`}
+                      onClick={event => {
+                        event.stopPropagation();
+                        selectStatus(statusOption);
+                      }}
+                    >
+                      <span className="todo-status-dot" aria-hidden="true" />
+                      <span>{TODO_STATUS_LABELS[statusOption]}</span>
+                      <span className="todo-status-check" aria-hidden="true">{selected ? "✓" : wasStatus ? "原" : ""}</span>
+                    </button>
+                  );
+                })}
+                {!todo.done ? (
+                  <>
+                    <div className="todo-status-divider" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={false}
+                      className="todo-status-option is-done"
+                      onClick={event => {
+                        event.stopPropagation();
+                        selectStatus("done");
+                      }}
+                    >
+                      <span className="todo-status-dot" aria-hidden="true" />
+                      <span>已完成</span>
+                      <span className="todo-status-check" aria-hidden="true" />
+                    </button>
+                  </>
                 ) : null}
               </div>
-
-              <button
-                type="button"
-                className={`todo-text-action${hasUnsavedDraft ? " has-draft" : ""}`}
-                ref={progressButtonRef}
-                aria-expanded={writingProgress}
-                aria-controls={writingProgress ? progressFormId : undefined}
-                aria-disabled={savingProgress}
-                onClick={event => {
-                  event.stopPropagation();
-                  if (savingProgress) return;
-                  if (writingProgress) closeEditor(!draftText.trim());
-                  else onOpenProgress();
-                }}
-              >
-                {hasUnsavedDraft ? "记进度 · 草稿" : "记进度"}
-              </button>
-            </div>
+            ) : null}
           </div>
 
-          {hasMeta ? (
-            <div className="todo-summary">
-              <div className="todo-meta">
-                {todo.due_date ? (
-                  <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>
-                    {late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}
-                  </span>
-                ) : null}
-                {todo.list ? <span className="todo-chip todo-chip-list" title={todo.list}>{todo.list}</span> : null}
-                {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}
-                {todo.note ? <span className="todo-chip">有备注</span> : null}
-              </div>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className={`todo-add-progress${hasUnsavedDraft ? " has-draft" : ""}${writingProgress ? " is-active" : ""}`}
+            ref={progressButtonRef}
+            aria-label="记进度"
+            title={hasUnsavedDraft ? "记进度（有未保存的草稿）" : "记进度"}
+            aria-expanded={writingProgress}
+            aria-controls={writingProgress ? progressFormId : undefined}
+            aria-disabled={savingProgress}
+            onClick={event => {
+              event.stopPropagation();
+              if (savingProgress) return;
+              if (writingProgress) closeEditor(!draftText.trim());
+              else onOpenProgress();
+            }}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" /></svg>
+          </button>
         </div>
       </div>
 
-      {timeline.length || writingProgress ? (
+      {metaParts.length ? (
+        <p className="todo-meta">
+          {metaParts.map(part => (
+            <span key={part.key} className={part.className} title={part.key === "list" ? part.text : undefined}>{part.text}</span>
+          ))}
+        </p>
+      ) : null}
+
+      {latestEntry || writingProgress ? (
         <div className="todo-progress-thread">
-          {timeline.length ? (
-            <ul className="todo-progress-list" id={progressListId} aria-label="进度记录">
-              {timeline.map(item => (
-                <li key={item.id} className={`todo-progress-item is-${item.kind}`}>
-                  {item.kind === "unknown" ? (
-                    <span className="todo-progress-lead todo-progress-unknown">{item.dateText}</span>
-                  ) : (
-                    <>
-                      <span className={`todo-progress-lead${item.kind === "anchor" ? " is-date" : " is-delta"}`}>
-                        {item.kind === "anchor" ? item.dateText : item.deltaText}
-                      </span>
-                      <time className="todo-progress-clock" dateTime={item.isoTime ?? undefined}>{item.timeText}</time>
-                    </>
-                  )}
-                  <span className="todo-progress-text">{item.text}</span>
-                </li>
-              ))}
+          {latestEntry ? (
+            <ul className="todo-progress-list" aria-label="进度记录">
+              {renderEntry(latestEntry)}
             </ul>
+          ) : null}
+          {olderEntries.length ? (
+            <>
+              <button
+                type="button"
+                className="todo-progress-more"
+                aria-expanded={showOlder}
+                aria-controls={olderListId}
+                onClick={() => setShowOlder(value => !value)}
+              >
+                <span className={`todo-caret${showOlder ? " is-open" : ""}`} aria-hidden="true">▸</span>
+                {olderEntries.length} 条更早记录
+              </button>
+              {showOlder ? (
+                <ul className="todo-progress-list is-older" id={olderListId} aria-label="更早的进度记录">
+                  {olderEntries.map(renderEntry)}
+                </ul>
+              ) : null}
+            </>
           ) : null}
 
           {writingProgress ? (

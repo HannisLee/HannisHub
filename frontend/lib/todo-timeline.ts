@@ -145,3 +145,8 @@ export function sortTodoItems<T extends SortableTodo>(items: readonly T[], mode:
   }
   return copy;
 }
+
+/** 阻塞中的任务稳定置顶：组内其余条目保持传入顺序（通常为手动顺序）。 */
+export function blockedFirst<T extends { status?: string }>(items: readonly T[]): T[] {
+  return [...items.filter(item => item.status === "blocked"), ...items.filter(item => item.status !== "blocked")];
+}
