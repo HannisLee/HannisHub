@@ -526,7 +526,6 @@ function TodoRow({
   const inMyDay = todo.my_day === today;
   const hasMeta = Boolean(todo.due_date || todo.list || todo.subtasks.length || todo.note);
   const [writingProgress, setWritingProgress] = useState(false);
-  const [showAllProgress, setShowAllProgress] = useState(false);
   const [progressText, setProgressText] = useState("");
   const [savingProgress, setSavingProgress] = useState(false);
   const [progressError, setProgressError] = useState("");
@@ -534,7 +533,6 @@ function TodoRow({
   const progressButton = useRef<HTMLButtonElement>(null);
   const progressFormId = `todo-progress-form-${todo.id}`;
   const progressListId = `todo-progress-list-${todo.id}`;
-  const visibleProgress = showAllProgress ? todo.progress : todo.progress.slice(-2);
 
   function pointerDropPosition(clientY: number, element: HTMLElement): "before" | "after" {
     const rect = element.getBoundingClientRect();
@@ -665,11 +663,11 @@ function TodoRow({
           ) : null}
         </div>
       </div>
-      {visibleProgress.length || writingProgress ? (
+      {todo.progress.length || writingProgress ? (
         <div className="todo-progress-thread">
-          {visibleProgress.length ? (
+          {todo.progress.length ? (
             <ul className="todo-progress-list" id={progressListId} aria-label="进度记录">
-              {visibleProgress.map(entry => {
+              {todo.progress.map(entry => {
                 const time = new Date(entry.created_at * 1000);
                 return (
                   <li key={entry.id}>
@@ -679,10 +677,6 @@ function TodoRow({
                 );
               })}
             </ul>
-          ) : null}
-          {todo.progress.length > 2 ? (
-            <button type="button" className="todo-text-action" aria-expanded={showAllProgress} aria-controls={progressListId}
-              onClick={() => setShowAllProgress(value => !value)}>{showAllProgress ? "收起进度" : `展开全部进度（${todo.progress.length}）`}</button>
           ) : null}
           {writingProgress ? (
             <form className="todo-progress-form" id={progressFormId} onSubmit={submitProgress}>
