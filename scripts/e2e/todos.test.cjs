@@ -133,6 +133,35 @@ const assert = require('node:assert/strict');
     await page.getByRole('button', { name: '添加', exact: true }).click();
     await page.getByRole('heading', { name: '全部待办', exact: true }).waitFor();
     await page.locator('.todo-item', { hasText: prefix + '新待办' }).waitFor();
+    // 日期列与标题同一行，任何相对日期以及空日期都占相同宽度。
+    const dayLabels = [[0, '今天'], [-1, '昨天'], [-42, '42天前'], [null, '']];
+    for (const [offset] of dayLabels) {
+      const myDay = offset === null ? '' : await page.evaluate(days => {
+        const date = new Date();
+        date.setDate(date.getDate() + days);
+        return date.toLocaleDateString('en-CA');
+      }, offset);
+      await api('/api/todos', 'POST', { title: `C588-${prefix}-${offset}`, my_day: myDay });
+    }
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    for (const width of [390, 1400]) {
+      await page.setViewportSize({ width, height: 844 });
+      const slots = [];
+      for (const [offset, label] of dayLabels) {
+        const datedRow = page.locator('.todo-item', { hasText: `C588-${prefix}-${offset}` });
+        const slot = datedRow.locator('.todo-row-day');
+        await slot.waitFor();
+        assert.equal((await slot.textContent()).trim(), label);
+        assert.equal(await datedRow.locator('.todo-meta time').count(), 0);
+        const [slotBox, titleBox] = await Promise.all([slot.boundingBox(), datedRow.locator('.todo-title-text').boundingBox()]);
+        assert.ok(slotBox.x + slotBox.width <= titleBox.x);
+        assert.ok(Math.abs(slotBox.y + slotBox.height / 2 - titleBox.y - titleBox.height / 2) < 1);
+        slots.push(slotBox.width);
+      }
+      assert.ok(slots[0] >= 55 && slots[0] <= 65);
+      assert.ok(slots.every(size => size === slots[0]));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    }
     assert.deepEqual(errors, []);
     console.log('待办紧凑分类、详情展开位置、进度添加和折叠持久化、筛选、编辑与窄屏通过');
   } finally {

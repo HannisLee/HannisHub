@@ -50,6 +50,14 @@ function dateLabel(value: string, today: string): string {
   return `${y === new Date().getFullYear() ? "" : `${y}年`}${m}月${d}日 ${weekday}`;
 }
 
+function assignedDayLabel(day: string, today: string): string {
+  // 只比较日历日期，避免夏令时使相邻两天不满 24 小时。
+  const days = (Date.parse(today) - Date.parse(day)) / 86_400_000;
+  if (days === 0) return "今天";
+  if (days === 1) return "昨天";
+  return days > 0 ? `${days}天前` : `${-days}天后`;
+}
+
 function sameLocalDay(timestamp: number | null, day: string): boolean {
   if (!timestamp) return false;
   const d = new Date(timestamp * 1000);
@@ -498,9 +506,14 @@ function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onAddP
           aria-label={todo.done ? `标记「${todo.title}」为未完成` : `完成「${todo.title}」`}
         />
         <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
+          {todo.my_day ? (
+            <time className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
+              {assignedDayLabel(todo.my_day, today)}
+            </time>
+          ) : <span className="todo-row-day" aria-hidden="true" />}
           <span className="todo-title">
             {todo.priority ? <span className={`todo-priority is-p${todo.priority}`} title={`优先级：${PRIORITY_LABELS[todo.priority]}`} aria-label={`优先级${PRIORITY_LABELS[todo.priority]}`} /> : null}
-            {todo.title}
+            <span className="todo-title-text" title={todo.title}>{todo.title}</span>
           </span>
           <span className={`todo-caret${expanded ? " is-open" : ""}`} aria-hidden="true">›</span>
         </button>
@@ -525,7 +538,6 @@ function TodoRow({ todo, today, expanded, lists, onToggleExpand, onPatch, onAddP
       </div>
       <div className="todo-summary">
         <div className="todo-meta">
-          {inMyDay ? <span className="todo-chip is-brand">今天</span> : null}
           {todo.due_date ? <span className={`todo-chip${late ? " is-late" : dueToday ? " is-due" : ""}`}>{late ? "逾期 · " : "截止 "}{dateLabel(todo.due_date, today)}</span> : null}
           {todo.list ? <span className="todo-chip todo-chip-list" title={todo.list}>{todo.list}</span> : null}
           {todo.subtasks.length ? <span className="todo-chip">子任务 {subDone}/{todo.subtasks.length}</span> : null}

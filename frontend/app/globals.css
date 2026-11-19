@@ -1284,9 +1284,10 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-item:hover { border-color: var(--color-card-hover-border); }
 .todo-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-2) 0 var(--space-4); }
 .todo-check { flex: 0 0 auto; width: 18px; min-height: 18px; margin: 0; cursor: pointer; }
-.todo-row-main { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; min-height: 30px; padding: 4px 0; border: 0; background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; }
+.todo-row-main { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-1); min-width: 0; min-height: 30px; padding: 4px 0; border: 0; background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; }
 .todo-row-main > .todo-caret { color: var(--color-text-muted); }
-.todo-title { display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; font-size: 15px; line-height: 1.45; }
+.todo-title { display: flex; flex: 1 1 auto; align-items: center; gap: var(--space-2); min-width: 0; font-size: 15px; line-height: 1.45; }
+.todo-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo-item.is-done .todo-title { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: var(--color-control-border); }
 .todo-priority { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
 .todo-priority.is-p2 { background: var(--color-warning); }
@@ -1295,6 +1296,7 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-meta { display: flex; flex: 1 1 auto; min-width: 0; gap: var(--space-1); overflow-x: auto; scrollbar-width: none; }
 .todo-chip { flex: 0 0 auto; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: 12px; line-height: 18px; white-space: nowrap; }
 .todo-chip-list { max-width: 9ic; overflow: hidden; text-overflow: ellipsis; }
+.todo-row-day { flex: 0 0 5ic; min-width: 0; min-height: var(--space-5); padding-inline: var(--space-1); overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .todo-chip.is-brand { border-color: color-mix(in srgb, var(--color-brand) 60%, var(--color-border)); color: var(--color-brand); }
 .todo-chip.is-due { border-color: var(--color-warning); color: var(--color-warning); }
 .todo-chip.is-late { border-color: var(--color-error); color: var(--color-error); }
