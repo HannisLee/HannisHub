@@ -207,15 +207,26 @@ def update_todo(owner: str, todo_id: str, payload: dict[str, Any]) -> dict[str, 
     return _public(saved)
 
 
-def add_progress_with_status(owner: str, todo_id: str, text: object, status: object = None) -> dict[str, Any]:
-    """追加进度记录（可选同时修改执行状态），由服务端记录时间并返回含当前状态的条目。"""
+def add_progress_with_status(
+    owner: str,
+    todo_id: str,
+    text: object,
+    status: object = None,
+    done: object = None,
+) -> dict[str, Any]:
+    """追加进度记录（可选同时修改执行状态或完成状态），由服务端记录时间并返回最新状态。"""
     _check_id(todo_id)
     next_status = _status(status) if status is not None else None
+    if done is not None and not isinstance(done, bool):
+        raise HTTPException(status_code=400, detail="完成状态应为布尔值")
     cleaned = _clean(text, MAX_PROGRESS_TEXT, multiline=True) if isinstance(text, str) else ""
     if not cleaned:
         raise HTTPException(status_code=400, detail="请填写进度内容")
     with transaction() as conn:
-        row = conn.execute("SELECT progress, status FROM todos WHERE id = ? AND owner = ?", (todo_id, owner)).fetchone()
+        row = conn.execute(
+            "SELECT progress, status, done, done_at FROM todos WHERE id = ? AND owner = ?",
+            (todo_id, owner),
+        ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="待办不存在")
         now = time.time()
@@ -223,11 +234,18 @@ def add_progress_with_status(owner: str, todo_id: str, text: object, status: obj
         progress = json.loads(row["progress"])
         progress.append(entry)
         saved_status = next_status if next_status is not None else (row["status"] if row["status"] in VALID_STATUSES else DEFAULT_STATUS)
+        saved_done = bool(row["done"]) if done is None else done
+        if done is None:
+            saved_done_at = row["done_at"]
+        elif saved_done != bool(row["done"]):
+            saved_done_at = now if saved_done else None
+        else:
+            saved_done_at = row["done_at"]
         conn.execute(
-            "UPDATE todos SET progress = ?, status = ?, updated_at = ? WHERE id = ? AND owner = ?",
-            (json.dumps(progress, ensure_ascii=False), saved_status, now, todo_id, owner),
+            "UPDATE todos SET progress = ?, status = ?, done = ?, done_at = ?, updated_at = ? WHERE id = ? AND owner = ?",
+            (json.dumps(progress, ensure_ascii=False), saved_status, int(saved_done), saved_done_at, now, todo_id, owner),
         )
-    return {**entry, "status": saved_status}
+    return {**entry, "status": saved_status, "done": saved_done, "done_at": saved_done_at}
 
 
 def add_progress(owner: str, todo_id: str, text: object) -> dict[str, Any]:

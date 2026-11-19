@@ -1021,13 +1021,18 @@ async def todo_update(todo_id: str, request: Request, payload: dict[str, Any] = 
 
 @app.post("/api/todos/{todo_id}/progress")
 async def todo_add_progress(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
-    """为自己的待办添加一条进度记录，可选同时更新执行状态。"""
+    """为自己的待办添加一条进度记录，可选同时更新执行状态或标记完成。"""
     username = _require_user(request)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="请求格式不正确")
     return JSONResponse(
         await run_in_threadpool(
-            todos.add_progress_with_status, username, todo_id, payload.get("text"), payload.get("status"),
+            todos.add_progress_with_status,
+            username,
+            todo_id,
+            payload.get("text"),
+            payload.get("status"),
+            payload.get("done"),
         ),
     )
 

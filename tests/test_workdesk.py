@@ -185,9 +185,15 @@ class TodoTest(_TempData):
 
         res2 = todos.add_progress_with_status("alice", todo_id, "依赖就绪，开始运行", status="in_progress")
         self.assertEqual(res2["status"], "in_progress")
+        self.assertFalse(res2["done"])
+        res3 = todos.add_progress_with_status("alice", todo_id, "实验跑通并归档", done=True)
+        self.assertTrue(res3["done"])
+        self.assertIsNotNone(res3["done_at"])
+        self.assertEqual(res3["status"], "in_progress")
         latest = todos.list_todos("alice")[0]
         self.assertEqual(latest["status"], "in_progress")
-        self.assertEqual([p["text"] for p in latest["progress"]], ["等待依赖修复", "依赖就绪，开始运行"])
+        self.assertTrue(latest["done"])
+        self.assertEqual([p["text"] for p in latest["progress"]], ["等待依赖修复", "依赖就绪，开始运行", "实验跑通并归档"])
 
 
 class DeskTest(_TempData):

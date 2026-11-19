@@ -89,9 +89,22 @@ export function updateTodo(id: string, input: TodoInput): Promise<Todo> {
   return apiFetch<Todo>(`${BASE}/${encodePath(id)}`, { method: "PATCH", body: jsonBody(input) });
 }
 
-export function addTodoProgress(id: string, text: string, status?: TodoStatus): Promise<TodoProgress & { status?: TodoStatus }> {
-  const payload = status ? { text, status } : { text };
-  return apiFetch<TodoProgress & { status?: TodoStatus }>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody(payload) });
+export interface AddProgressOptions {
+  status?: TodoStatus;
+  done?: boolean;
+}
+
+export interface AddProgressResult extends TodoProgress {
+  status?: TodoStatus;
+  done?: boolean;
+  done_at?: number | null;
+}
+
+export function addTodoProgress(id: string, text: string, options: AddProgressOptions = {}): Promise<AddProgressResult> {
+  const payload: { text: string; status?: TodoStatus; done?: boolean } = { text };
+  if (options.status !== undefined) payload.status = options.status;
+  if (options.done !== undefined) payload.done = options.done;
+  return apiFetch<AddProgressResult>(`${BASE}/${encodePath(id)}/progress`, { method: "POST", body: jsonBody(payload) });
 }
 
 export function deleteTodo(id: string): Promise<{ ok: boolean }> {

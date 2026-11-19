@@ -107,13 +107,14 @@ const path = require('node:path');
     assert.equal(createdData.status, 'not_started');
     assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 4');
 
-    // A. 三状态系统：默认待开始 -> 切换进行中 -> 阻塞中 -> 刷新保持 -> 完成后不显示活跃状态 -> 恢复后保持原状态
+    // A. 无左侧复选框与拖动条；状态菜单包含三态与已完成
+    assert.equal(await createdRow.locator('.todo-rail, .todo-check, .todo-drag-handle').count(), 0);
     const statusBtn = createdRow.locator('.todo-status-btn');
     assert.equal((await statusBtn.textContent()).trim(), '待开始');
     await statusBtn.click();
     const menu = createdRow.getByRole('menu');
     await menu.waitFor();
-    assert.equal(await menu.getByRole('menuitemradio').count(), 3);
+    assert.equal(await menu.getByRole('menuitemradio').count(), 4);
     assert.equal(await menu.getByRole('menuitemradio', { name: '待开始' }).getAttribute('aria-checked'), 'true');
     // Escape 关闭菜单
     await page.keyboard.press('Escape');
@@ -129,18 +130,19 @@ const path = require('node:path');
     await createdRow.waitFor();
     assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
 
-    // 完成任务 -> 进入今天完成，统计更新 -> 恢复未完成仍为「阻塞中」
+    // 通过状态菜单标记为「已完成」-> 进入今天完成 -> 通过状态菜单恢复未完成仍保留「阻塞中」
+    await createdRow.locator('.todo-status-btn').click();
     const donePatch = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}`) && r.request().method() === 'PATCH');
-    await createdRow.locator('.todo-check').click();
+    await createdRow.getByRole('menuitemradio', { name: '已完成' }).click();
     await donePatch;
     assert.equal(await page.locator('.todo-progress').textContent(), '已完成 1 / 4');
     await page.getByRole('button', { name: /^今天完成 · 1$/ }).click();
     const doneCard = page.locator('.todo-item.is-done', { hasText: prefix + '新建' });
     await doneCard.waitFor();
-    assert.equal(await doneCard.locator('.todo-status-btn').count(), 0);
-    assert.equal(await doneCard.locator('.todo-done-badge').textContent(), '已完成');
+    assert.equal((await doneCard.locator('.todo-status-btn').textContent()).trim(), '已完成');
+    await doneCard.locator('.todo-status-btn').click();
     const reopenPatch = page.waitForResponse(r => r.url().endsWith(`/api/todos/${createdData.id}`) && r.request().method() === 'PATCH');
-    await doneCard.locator('.todo-check').click();
+    await doneCard.getByRole('menuitemradio', { name: /阻塞中/ }).click();
     await reopenPatch;
     await createdRow.waitFor();
     assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
@@ -171,6 +173,8 @@ const path = require('node:path');
       assert.equal(renderedRows[5], '+45m 09:45 完成第二轮');
       const clockXs = await tlList.locator('.todo-progress-clock').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().x)));
       assert.equal(new Set(clockXs).size, 1, `时刻列应垂直对齐: ${JSON.stringify(clockXs)}`);
+      const leadRights = await tlList.locator('.todo-progress-lead').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().right)));
+      assert.equal(new Set(leadRights).size, 1, `日期末尾与增量末尾应右对齐: ${JSON.stringify(leadRights)}`);
     }
 
     // D. 原地「记进度」编辑：多行 Shift+Enter、Enter 保存、草稿跨任务保留、仅记进度不改状态、配合状态同步保存
@@ -200,6 +204,32 @@ const path = require('node:path');
     await createdRow.getByRole('button', { name: '保存进度', exact: true }).click();
     await progResp2;
     assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '进行中');
+
+    // 记进度并选择「已完成」作为完成结语：原子完成并进入「今天完成」
+    const finishCandidate = await api('/api/todos', 'POST', { title: prefix + '结语任务', my_day: today, status: 'in_progress' });
+    await page.reload();
+    const finishRow = page.locator('.todo-item', { hasText: finishCandidate.title });
+    await finishRow.waitFor();
+    await finishRow.getByRole('button', { name: /记进度/ }).click();
+    await finishRow.getByRole('textbox', { name: '进度内容' }).fill('实验跑通，结语归档');
+    await finishRow.getByLabel('进度保存时执行状态').selectOption('done');
+    const finishProgResp = page.waitForResponse(r => r.url().endsWith(`/api/todos/${finishCandidate.id}/progress`));
+    await finishRow.getByRole('button', { name: '保存进度', exact: true }).click();
+    await finishProgResp;
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 1 / 5');
+    await page.getByRole('button', { name: /^今天完成 · 1$/ }).click();
+    const finishedCard = page.locator('.todo-item.is-done', { hasText: finishCandidate.title });
+    await finishedCard.getByText('实验跑通，结语归档').waitFor();
+    // 清理结语临时任务以免影响后续计数，或通过日期槽拖动测试排序
+    await page.getByRole('button', { name: /^今天完成 · 1$/ }).click();
+
+    // 验证日期槽可拖动及方向键排序
+    const p0DaySlot = page.locator('.todo-item', { hasText: p0Task.title }).locator('.todo-row-day');
+    assert.equal(await p0DaySlot.getAttribute('draggable'), 'true');
+    const reorderResp = page.waitForResponse(r => r.url().endsWith('/api/todos/reorder'));
+    await p0DaySlot.focus();
+    await p0DaySlot.press('ArrowDown');
+    await reorderResp;
 
     // 进度保存失败时保留输入内容
     await page.route(`**/api/todos/${createdData.id}/progress`, route =>

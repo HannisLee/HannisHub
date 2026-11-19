@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { errorMessage } from "../../../lib/format";
 import { buildProgressTimeline, mergeProgressEntries, sortTodoItems, type TodoSortMode } from "../../../lib/todo-timeline";
 import {
   addTodoProgress, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, normalizeTodoStatus,
   PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, reorderTodos, TODO_LIST_MAX, TODO_NOTE_MAX,
   TODO_PROGRESS_MAX, TODO_STATUS_LABELS, TODO_STATUSES, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
-  type Todo, type TodoInput, type TodoPriority, type TodoStatus,
+  type AddProgressOptions, type Todo, type TodoInput, type TodoPriority, type TodoStatus,
 } from "../../../lib/todos";
 import { Button, EmptyState, ErrorState, LoadingState, ProgressBar } from "../../ui/primitives";
 
@@ -22,9 +22,11 @@ interface Group {
   collapsible?: boolean;
 }
 
+type ProgressDraftStatus = TodoStatus | "done";
+
 interface ProgressDraft {
   text: string;
-  status: TodoStatus;
+  status: ProgressDraftStatus;
 }
 
 const VIEW_TITLES: Record<string, string> = {
@@ -215,19 +217,23 @@ export function TodoPanel() {
     }
   }, [load, showNotice]);
 
-  const addProgress = useCallback(async (id: string, text: string, status?: TodoStatus) => {
-    const saved = await addTodoProgress(id, text, status);
+  const addProgress = useCallback(async (id: string, text: string, options: AddProgressOptions = {}) => {
+    const saved = await addTodoProgress(id, text, options);
     const entry = { id: saved.id, text: saved.text, created_at: saved.created_at };
     setTodos(current => current?.map(todo => {
       if (todo.id !== id) return todo;
       return {
         ...todo,
         status: saved.status ? normalizeTodoStatus(saved.status) : todo.status,
+        done: saved.done !== undefined ? saved.done : todo.done,
+        done_at: saved.done_at !== undefined ? saved.done_at : todo.done_at,
         updated_at: saved.created_at,
         progress: mergeProgressEntries(todo.progress, [entry]),
       };
     }) ?? current);
-    showNotice(status ? `进度已保存（${TODO_STATUS_LABELS[status]}）` : "进度已保存");
+    if (options.done === true) showNotice("已完成待办并记录进度");
+    else if (options.done === false) showNotice(options.status ? `已恢复并更新为「${TODO_STATUS_LABELS[options.status]}」` : "已恢复为未完成");
+    else showNotice(options.status ? `进度已保存（${TODO_STATUS_LABELS[options.status]}）` : "进度已保存");
   }, [showNotice]);
 
   const removeTodo = useCallback(async (todo: Todo) => {
@@ -637,7 +643,7 @@ export function TodoPanel() {
                           onOpenProgress={() => {
                             setActiveProgressId(todo.id);
                             setProgressDrafts(prev => (
-                              prev[todo.id] ? prev : { ...prev, [todo.id]: { text: "", status: todo.status } }
+                              prev[todo.id] ? prev : { ...prev, [todo.id]: { text: "", status: todo.done ? "done" : todo.status } }
                             ));
                           }}
                           onCloseProgress={(clearDraft: boolean) => {
@@ -654,7 +660,7 @@ export function TodoPanel() {
                           onChangeProgressDraft={next => {
                             setProgressDrafts(prev => ({ ...prev, [todo.id]: next }));
                           }}
-                          onAddProgress={(text, status) => addProgress(todo.id, text, status)}
+                          onAddProgress={(text, options) => addProgress(todo.id, text, options)}
                           canReorder={rowCanMove}
                           isDragging={isDragging}
                           dropPosition={rowDropPosition}
@@ -709,7 +715,7 @@ interface TodoRowProps {
   onOpenProgress: () => void;
   onCloseProgress: (clearDraft: boolean) => void;
   onChangeProgressDraft: (draft: ProgressDraft) => void;
-  onAddProgress: (text: string, status?: TodoStatus) => Promise<void>;
+  onAddProgress: (text: string, options?: AddProgressOptions) => Promise<void>;
   canReorder: boolean;
   isDragging: boolean;
   dropPosition: "before" | "after" | null;
@@ -765,7 +771,7 @@ function TodoRow({
   const progressListId = `todo-progress-list-${todo.id}`;
 
   const draftText = progressDraft?.text ?? "";
-  const draftStatus = progressDraft?.status ?? currentStatus;
+  const draftStatus: ProgressDraftStatus = progressDraft?.status ?? (todo.done ? "done" : currentStatus);
   const hasUnsavedDraft = Boolean(draftText.trim()) && !writingProgress;
 
   const timeline = useMemo(() => buildProgressTimeline(todo.progress), [todo.progress]);
@@ -822,8 +828,14 @@ function TodoRow({
     setSavingProgress(true);
     setProgressError("");
     try {
-      const statusChanged = !todo.done && draftStatus !== currentStatus ? draftStatus : undefined;
-      await onAddProgress(trimmed, statusChanged);
+      const options: AddProgressOptions = {};
+      if (draftStatus === "done") {
+        if (!todo.done) options.done = true;
+      } else {
+        if (todo.done) options.done = false;
+        if (draftStatus !== currentStatus) options.status = draftStatus;
+      }
+      await onAddProgress(trimmed, options);
       closeEditor(true);
     } catch (value) {
       setProgressError(errorMessage(value));
@@ -837,9 +849,19 @@ function TodoRow({
     void saveProgress();
   }
 
-  function selectStatus(nextStatus: TodoStatus) {
+  function selectStatus(nextStatus: ProgressDraftStatus) {
     setStatusMenuOpen(false);
-    if (nextStatus === currentStatus || savingStatus) return;
+    if (savingStatus) return;
+    if (nextStatus === "done") {
+      if (!todo.done) void onPatch({ done: true }, "已完成待办");
+      return;
+    }
+    if (todo.done) {
+      const input: TodoInput = nextStatus === currentStatus ? { done: false } : { done: false, status: nextStatus };
+      void onPatch(input, `已恢复为「${TODO_STATUS_LABELS[nextStatus]}」`);
+      return;
+    }
+    if (nextStatus === currentStatus) return;
     void onPatch({ status: nextStatus }, `状态已更新为「${TODO_STATUS_LABELS[nextStatus]}」`);
   }
 
@@ -876,59 +898,60 @@ function TodoRow({
       }}
     >
       <div className="todo-item-head">
-        <div className="todo-rail">
-          <label className="todo-check-wrap" title={todo.done ? "恢复为未完成" : "标记为已完成"}>
-            <input
-              type="checkbox"
-              className="todo-check"
-              checked={todo.done}
-              onChange={event => {
-                const nextDone = event.target.checked;
-                void onPatch({ done: nextDone }, nextDone ? "已完成待办" : "已恢复为未完成");
-              }}
-              aria-label={todo.done ? `标记「${todo.title}」为未完成` : `完成「${todo.title}」`}
-            />
-          </label>
-          {canReorder ? (
-            <button
-              type="button"
-              className="todo-drag-handle"
-              draggable
-              onDragStart={event => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", todo.id);
-                if (itemRef.current) {
-                  event.dataTransfer.setDragImage(itemRef.current, 24, 24);
-                }
-                onDragStart();
-              }}
-              onDragEnd={onDragEnd}
-              onKeyDown={event => {
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  onMoveStep(-1);
-                } else if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  onMoveStep(1);
-                }
-              }}
-              title="拖动调整顺序（也可按上下方向键）"
-              aria-label={`拖动排序「${todo.title}」`}
-            >
-              <svg viewBox="0 0 16 10" aria-hidden="true">
-                <path d="M2 3h12M2 7h12" />
-              </svg>
-            </button>
-          ) : null}
-        </div>
         <div className="todo-head-body">
           <div className="todo-row">
-            <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
-              {todo.my_day ? (
-                <time className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}`} dateTime={todo.my_day} title={todo.my_day}>
+            {(() => {
+              const dragProps = canReorder ? {
+                draggable: true,
+                tabIndex: 0,
+                onDragStart: (event: DragEvent<HTMLElement>) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", todo.id);
+                  if (itemRef.current) {
+                    event.dataTransfer.setDragImage(itemRef.current, 24, 24);
+                  }
+                  onDragStart();
+                },
+                onDragEnd,
+                onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    onMoveStep(-1);
+                  } else if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    onMoveStep(1);
+                  } else if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onToggleExpand();
+                  }
+                },
+              } : {};
+              const dayTitle = canReorder
+                ? `${todo.my_day ? `${todo.my_day} · ` : ""}拖动调整顺序（也可按上下方向键）`
+                : todo.my_day || undefined;
+              return todo.my_day ? (
+                <time
+                  className={`todo-chip todo-row-day${inMyDay ? " is-brand" : ""}${canReorder ? " is-draggable" : ""}`}
+                  dateTime={todo.my_day}
+                  title={dayTitle}
+                  aria-label={canReorder ? `拖动排序「${todo.title}」，日期 ${assignedDayLabel(todo.my_day, today)}` : undefined}
+                  onClick={onToggleExpand}
+                  {...dragProps}
+                >
                   {assignedDayLabel(todo.my_day, today)}
                 </time>
-              ) : <span className="todo-row-day" aria-hidden="true" />}
+              ) : (
+                <span
+                  className={`todo-row-day${canReorder ? " is-draggable" : ""}`}
+                  title={dayTitle}
+                  aria-hidden={canReorder ? undefined : true}
+                  aria-label={canReorder ? `拖动排序「${todo.title}」` : undefined}
+                  onClick={canReorder ? onToggleExpand : undefined}
+                  {...dragProps}
+                />
+              );
+            })()}
+            <button type="button" className="todo-row-main" onClick={onToggleExpand} aria-expanded={expanded}>
               <span className="todo-title">
                 <span
                   className={`todo-priority is-p${effectivePriority}`}
@@ -942,53 +965,69 @@ function TodoRow({
             </button>
 
             <div className="todo-row-actions">
-              {todo.done ? (
-                <span className="todo-done-badge">已完成</span>
-              ) : (
-                <div className="todo-status-wrap" ref={statusWrapRef}>
-                  <button
-                    ref={statusButtonRef}
-                    type="button"
-                    className={`todo-status-btn is-${currentStatus}`}
-                    aria-haspopup="menu"
-                    aria-expanded={statusMenuOpen}
-                    aria-busy={savingStatus}
-                    disabled={savingStatus}
-                    aria-label={`执行状态：${TODO_STATUS_LABELS[currentStatus]}，点击切换`}
-                    onClick={event => {
-                      event.stopPropagation();
-                      setStatusMenuOpen(open => !open);
-                    }}
-                  >
-                    <span className="todo-status-dot" aria-hidden="true" />
-                    <span>{TODO_STATUS_LABELS[currentStatus]}</span>
-                  </button>
-                  {statusMenuOpen ? (
-                    <div className="todo-status-menu" role="menu" aria-label={`切换「${todo.title}」执行状态`}>
-                      {TODO_STATUSES.map(statusOption => {
-                        const selected = statusOption === currentStatus;
-                        return (
-                          <button
-                            key={statusOption}
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            className={`todo-status-option is-${statusOption}${selected ? " is-selected" : ""}`}
-                            onClick={event => {
-                              event.stopPropagation();
-                              selectStatus(statusOption);
-                            }}
-                          >
-                            <span className="todo-status-dot" aria-hidden="true" />
-                            <span>{TODO_STATUS_LABELS[statusOption]}</span>
-                            <span className="todo-status-check" aria-hidden="true">{selected ? "✓" : ""}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              )}
+              <div className="todo-status-wrap" ref={statusWrapRef}>
+                <button
+                  ref={statusButtonRef}
+                  type="button"
+                  className={`todo-status-btn ${todo.done ? "is-done" : `is-${currentStatus}`}`}
+                  aria-haspopup="menu"
+                  aria-expanded={statusMenuOpen}
+                  aria-busy={savingStatus}
+                  disabled={savingStatus}
+                  aria-label={todo.done ? "任务已完成，点击可恢复未完成" : `执行状态：${TODO_STATUS_LABELS[currentStatus]}，点击切换`}
+                  onClick={event => {
+                    event.stopPropagation();
+                    setStatusMenuOpen(open => !open);
+                  }}
+                >
+                  <span className="todo-status-dot" aria-hidden="true" />
+                  <span>{todo.done ? "已完成" : TODO_STATUS_LABELS[currentStatus]}</span>
+                </button>
+                {statusMenuOpen ? (
+                  <div className="todo-status-menu" role="menu" aria-label={`切换「${todo.title}」状态`}>
+                    {TODO_STATUSES.map(statusOption => {
+                      const selected = !todo.done && statusOption === currentStatus;
+                      const wasStatus = todo.done && statusOption === currentStatus;
+                      return (
+                        <button
+                          key={statusOption}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selected}
+                          className={`todo-status-option is-${statusOption}${selected ? " is-selected" : ""}`}
+                          onClick={event => {
+                            event.stopPropagation();
+                            selectStatus(statusOption);
+                          }}
+                        >
+                          <span className="todo-status-dot" aria-hidden="true" />
+                          <span>{TODO_STATUS_LABELS[statusOption]}</span>
+                          <span className="todo-status-check" aria-hidden="true">{selected ? "✓" : wasStatus ? "原" : ""}</span>
+                        </button>
+                      );
+                    })}
+                    {!todo.done ? (
+                      <>
+                        <div className="todo-status-divider" role="separator" />
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={false}
+                          className="todo-status-option is-done"
+                          onClick={event => {
+                            event.stopPropagation();
+                            selectStatus("done");
+                          }}
+                        >
+                          <span className="todo-status-dot" aria-hidden="true" />
+                          <span>已完成</span>
+                          <span className="todo-status-check" aria-hidden="true" />
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
 
               <button
                 type="button"
@@ -1078,31 +1117,33 @@ function TodoRow({
                 }}
               />
               <div className="todo-progress-editor-foot">
-                {!todo.done ? (
-                  <label className="todo-progress-status-pick">
-                    <span>状态</span>
-                    <select
-                      value={draftStatus}
-                      disabled={savingProgress}
-                      aria-label="进度保存时执行状态"
-                      onChange={event => onChangeProgressDraft({
+                <label className="todo-progress-status-pick">
+                  <span>状态</span>
+                  <select
+                    value={draftStatus}
+                    disabled={savingProgress}
+                    aria-label="进度保存时执行状态"
+                    onChange={event => {
+                      const raw = event.target.value;
+                      onChangeProgressDraft({
                         text: draftText,
-                        status: normalizeTodoStatus(event.target.value),
-                      })}
-                    >
-                      {TODO_STATUSES.map(statusOption => (
-                        <option key={statusOption} value={statusOption}>{TODO_STATUS_LABELS[statusOption]}</option>
-                      ))}
-                    </select>
-                  </label>
-                ) : <span />}
+                        status: raw === "done" ? "done" : normalizeTodoStatus(raw),
+                      });
+                    }}
+                  >
+                    {TODO_STATUSES.map(statusOption => (
+                      <option key={statusOption} value={statusOption}>{TODO_STATUS_LABELS[statusOption]}</option>
+                    ))}
+                    <option value="done">已完成</option>
+                  </select>
+                </label>
                 <div className="todo-progress-editor-actions">
                   {draftText.trim() ? (
                     <button
                       type="button"
                       className="todo-inline-link"
                       disabled={savingProgress}
-                      onClick={() => onChangeProgressDraft({ text: "", status: currentStatus })}
+                      onClick={() => onChangeProgressDraft({ text: "", status: todo.done ? "done" : currentStatus })}
                     >
                       清空
                     </button>
@@ -1181,22 +1222,31 @@ function TodoDetail({
         />
       </label>
       <div className="todo-detail-grid">
-        {!todo.done ? (
-          <label className="todo-field">
-            <span>执行状态</span>
-            <select
-              value={currentStatus}
-              onChange={event => {
-                const nextStatus = normalizeTodoStatus(event.target.value);
+        <label className="todo-field">
+          <span>状态</span>
+          <select
+            value={todo.done ? "done" : currentStatus}
+            onChange={event => {
+              const raw = event.target.value;
+              if (raw === "done") {
+                if (!todo.done) void onPatch({ done: true }, "已完成待办");
+                return;
+              }
+              const nextStatus = normalizeTodoStatus(raw);
+              if (todo.done) {
+                const input: TodoInput = nextStatus === currentStatus ? { done: false } : { done: false, status: nextStatus };
+                void onPatch(input, `已恢复为「${TODO_STATUS_LABELS[nextStatus]}」`);
+              } else if (nextStatus !== currentStatus) {
                 void onPatch({ status: nextStatus }, `状态已更新为「${TODO_STATUS_LABELS[nextStatus]}」`);
-              }}
-            >
-              {TODO_STATUSES.map(statusOption => (
-                <option key={statusOption} value={statusOption}>{TODO_STATUS_LABELS[statusOption]}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+              }
+            }}
+          >
+            {TODO_STATUSES.map(statusOption => (
+              <option key={statusOption} value={statusOption}>{TODO_STATUS_LABELS[statusOption]}</option>
+            ))}
+            <option value="done">已完成</option>
+          </select>
+        </label>
         <label className="todo-field">
           <span>优先级</span>
           <select value={todo.priority || 2} onChange={event => void onPatch({ priority: Number(event.target.value) as TodoPriority })}>
