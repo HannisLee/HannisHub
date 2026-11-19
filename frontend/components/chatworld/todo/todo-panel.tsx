@@ -649,7 +649,7 @@ function TodoRow({
                 if (savingProgress) return;
                 if (writingProgress) closeProgress();
                 else setWritingProgress(true);
-              }}>＋ 记进度</button>
+              }}>记进度</button>
           </div>
           {hasMeta ? (
             <div className="todo-summary">

@@ -1316,7 +1316,7 @@ html:has(.todo-layout), .private-desk-scroll:has(.todo-layout) { scrollbar-gutte
 .todo-icon:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text-primary); }
 .todo-icon.is-danger:hover:not(:disabled) { color: var(--color-error); }
 .todo-icon:disabled { opacity: 0.3; }
-.todo-text-action { flex: 0 0 auto; min-height: 24px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-brand); font-size: 13px; white-space: nowrap; cursor: pointer; }
+.todo-text-action { flex: 0 0 auto; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--color-white); border-radius: var(--radius-sm); background: transparent; color: var(--color-white); font-size: 12px; white-space: nowrap; cursor: pointer; transition: background-color 160ms ease; }
 .todo-text-action:hover { background: var(--color-surface-hover); }
 .todo-progress-thread { margin: 0 var(--space-4) var(--space-2) var(--todo-indent); padding-left: var(--space-3); border-left: 1px solid var(--color-control-border); }
 .todo-progress-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
