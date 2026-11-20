@@ -399,6 +399,119 @@ const path = require('node:path');
     await nav.getByRole('button', { name: /^已逾期/ }).click();
     await page.locator('.todo-item', { hasText: late.title }).waitFor();
 
+    // 分区：默认「工作」；新建「学习」后自动切过去，两边的待办与计数互相独立
+    await nav.getByRole('button', { name: /^今天/ }).click();
+    const spaceTabs = page.getByRole('tablist', { name: '待办分区' });
+    const workTab = spaceTabs.getByRole('tab', { name: /^工作/ });
+    assert.equal(await workTab.getAttribute('aria-selected'), 'true');
+    const workTodayCount = Number(await workTab.locator('.todo-space-count').textContent());
+    assert.equal(workTodayCount, Number(await nav.getByRole('button', { name: /^今天/ }).locator('.todo-nav-count').textContent()));
+    await page.getByRole('button', { name: '新分区' }).click();
+    const spaceCreated = page.waitForResponse(r => r.url().endsWith('/api/todos/spaces') && r.request().method() === 'POST');
+    await page.getByRole('textbox', { name: '新分区名称' }).fill('学习');
+    await page.getByRole('textbox', { name: '新分区名称' }).press('Enter');
+    const studySpace = await (await spaceCreated).json();
+    const studyTab = spaceTabs.getByRole('tab', { name: /^学习/ });
+    await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent?.startsWith('学习'));
+    await page.getByText('今天还没有安排').waitFor();
+    assert.equal(await page.locator('.todo-item').count(), 0);
+    assert.equal(await nav.locator('.todo-nav-count').count(), 0);
+    assert.equal(await page.locator('.todo-progress').textContent(), '已完成 0 / 0');
+    assert.ok((await addInput.getAttribute('placeholder')).startsWith('在「学习」'));
+    // 在「学习」里添加的待办只属于学习
+    await addInput.fill(prefix + '读论文');
+    await addInput.press('Enter');
+    const studyRow = page.locator('.todo-item', { hasText: prefix + '读论文' });
+    await studyRow.waitFor();
+    const studyTodo = (await api('/api/todos')).todos.find(t => t.title === prefix + '读论文');
+    assert.equal(studyTodo.space, studySpace.id);
+    assert.equal(await studyTab.locator('.todo-space-count').textContent(), '1');
+    if (process.env.SHOT_DIR) {
+      await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'todo-spaces.png') });
+    }
+    await workTab.click();
+    await page.locator('.todo-item', { hasText: p0Task.title }).waitFor();
+    assert.equal(await studyRow.count(), 0);
+    // 刷新后回到上次的分区
+    await studyTab.click();
+    await studyRow.waitFor();
+    await page.reload();
+    await studyRow.waitFor();
+    assert.equal(await studyTab.getAttribute('aria-selected'), 'true');
+    // 键盘：左右方向键切换分区
+    await studyTab.focus();
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await workTab.getAttribute('aria-selected'), 'true');
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await studyTab.getAttribute('aria-selected'), 'true');
+
+    // 双击重命名；重名被拒绝并提示
+    await studyTab.dblclick();
+    const renameBox = page.getByRole('textbox', { name: /^重命名分区/ });
+    await renameBox.fill('工作');
+    await renameBox.press('Enter');
+    await page.getByText('已有名为「工作」的分区').waitFor();
+    await renameBox.fill('读书');
+    await renameBox.press('Enter');
+    const readTab = spaceTabs.getByRole('tab', { name: /^读书/ });
+    await readTab.waitFor();
+
+    // 详情里把待办移到另一个分区
+    await studyRow.locator('.todo-row-main').click();
+    const moved = page.waitForResponse(r => r.url().endsWith(`/api/todos/${studyTodo.id}`) && r.request().method() === 'PATCH');
+    await studyRow.getByLabel('分区', { exact: true }).selectOption({ label: '工作' });
+    await moved;
+    assert.equal(await studyRow.count(), 0);
+    await page.getByText('已移到分区「工作」').waitFor();
+    await workTab.click();
+    await studyRow.waitFor();
+    assert.equal(Number(await workTab.locator('.todo-space-count').textContent()), workTodayCount + 1);
+    await studyRow.locator('.todo-row-main').click();
+    await studyRow.getByLabel('分区', { exact: true }).selectOption({ label: '读书' });
+    await page.waitForResponse(r => r.url().endsWith(`/api/todos/${studyTodo.id}`) && r.request().method() === 'PATCH');
+
+    // 鼠标拖动「读书」到「工作」前面，顺序保存到服务端
+    const [readBox, workBox] = await Promise.all([readTab.boundingBox(), workTab.boundingBox()]);
+    await page.mouse.move(readBox.x + readBox.width / 2, readBox.y + readBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(readBox.x + readBox.width / 2 - 20, readBox.y + readBox.height / 2, { steps: 4 });
+    await page.mouse.move(workBox.x + 6, workBox.y + workBox.height / 2, { steps: 8 });
+    assert.equal(await page.locator('.todo-space-item.is-drop-before').count(), 1);
+    const spacesReordered = page.waitForResponse(r => r.url().endsWith('/api/todos/spaces/reorder'));
+    await page.mouse.up();
+    await spacesReordered;
+    assert.deepEqual((await api('/api/todos')).spaces.map(s => s.name), ['读书', '工作']);
+    assert.equal(await workTab.getAttribute('aria-selected'), 'true', '拖动结束不应误切换分区');
+    // 菜单「右移」恢复顺序
+    await workTab.click();
+    await spaceTabs.getByRole('button', { name: '管理分区「工作」' }).click();
+    const spacesReordered2 = page.waitForResponse(r => r.url().endsWith('/api/todos/spaces/reorder'));
+    await page.getByRole('menuitem', { name: '左移' }).click();
+    await spacesReordered2;
+    assert.deepEqual((await api('/api/todos')).spaces.map(s => s.name), ['工作', '读书']);
+
+    // 删除有待办的分区：默认把待办移到另一个分区
+    await readTab.click();
+    await studyRow.waitFor();
+    await spaceTabs.getByRole('button', { name: '管理分区「读书」' }).click();
+    await page.getByRole('menuitem', { name: '删除分区' }).click();
+    const deletePanel = page.getByRole('group', { name: '删除分区「读书」' });
+    await deletePanel.getByText('还有 1 条待办').waitFor();
+    assert.equal(await deletePanel.getByLabel('移到哪个分区').inputValue(), (await api('/api/todos')).spaces[0].id);
+    await deletePanel.getByRole('button', { name: '删除分区' }).click();
+    await page.getByText('1 条待办移到「工作」').waitFor();
+    assert.equal(await spaceTabs.getByRole('tab').count(), 1);
+    assert.equal(await workTab.getAttribute('aria-selected'), 'true');
+    await studyRow.waitFor();
+    const afterDelete = await api('/api/todos');
+    assert.equal(afterDelete.spaces.length, 1);
+    assert.equal(afterDelete.todos.find(t => t.id === studyTodo.id).space, afterDelete.spaces[0].id);
+    // 只剩一个分区时不能删除
+    await spaceTabs.getByRole('button', { name: '管理分区「工作」' }).click();
+    assert.ok(await page.getByRole('menuitem', { name: '删除分区' }).isDisabled());
+    await page.keyboard.press('Escape');
+    assert.equal(await page.getByRole('menu').count(), 0);
+
     // 空的今天列表：用另一个没有待办的测试账号
     const emptyPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     emptyPage.on('pageerror', error => errors.push(error.message));

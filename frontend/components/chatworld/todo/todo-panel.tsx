@@ -7,12 +7,14 @@ import {
   type TimelineItem, type TodoSortMode,
 } from "../../../lib/todo-timeline";
 import {
-  addTodoProgress, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, normalizeTodoStatus,
-  PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, reorderTodos, TODO_LIST_MAX, TODO_NOTE_MAX,
-  TODO_PROGRESS_MAX, TODO_STATUS_LABELS, TODO_STATUSES, TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
-  type AddProgressOptions, type Todo, type TodoInput, type TodoPriority, type TodoStatus,
+  addTodoProgress, createTodo, createTodoSpace, deleteTodo, deleteTodoSpace, fetchTodos, localDate, newSubtaskId,
+  normalizeTodoStatus, PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, renameTodoSpace, reorderTodos,
+  reorderTodoSpaces, TODO_LIST_MAX, TODO_NOTE_MAX, TODO_PROGRESS_MAX, TODO_STATUS_LABELS, TODO_STATUSES,
+  TODO_SUBTASK_MAX, TODO_TITLE_MAX, updateTodo,
+  type AddProgressOptions, type Todo, type TodoInput, type TodoPriority, type TodoSpace, type TodoStatus,
 } from "../../../lib/todos";
 import { Button, EmptyState, ErrorState, LoadingState, ProgressBar } from "../../ui/primitives";
+import { TodoSpaceBar } from "./todo-space-bar";
 
 /** 左侧视图：今天、逾期、计划中、重要、全部、已完成，以及按清单筛选（list:清单名） */
 type View = "today" | "planned" | "important" | "overdue" | "all" | "done" | `list:${string}`;
@@ -44,6 +46,23 @@ const UNLISTED = "未分类";
 /** 屏幕阅读器用的排序提示，所有可排序标题按钮共用 */
 const REORDER_HINT_ID = "todo-reorder-hint";
 const SORT_STORAGE_KEY = "hannishub:todo-sort";
+const SPACE_STORAGE_KEY = "hannishub:todo-space";
+
+function readSavedSpace(): string {
+  try {
+    return window.localStorage.getItem(SPACE_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveSpace(id: string) {
+  try {
+    window.localStorage.setItem(SPACE_STORAGE_KEY, id);
+  } catch {
+    // 无痕模式等无法写入时，只是下次不记得上次的分区
+  }
+}
 const SORT_LABELS: Record<Exclude<TodoSortMode, "due">, string> = {
   manual: "手动排序",
   priority: "按优先级",
@@ -96,9 +115,13 @@ function isImeComposing(event: KeyboardEvent): boolean {
 }
 
 /** 工位待办：上班用的个人待办清单（三状态执行流、完整进度时间轴、快速添加、手动/优先级/更新排序）。
+ *  顶部分区（如「工作」「学习」）互相独立：左侧视图、清单、计数与添加都只针对当前分区。
  *  既是独立页面 /todo，也内嵌在聊天大厅「我的工位」的对话框中。数据按登录账号隔离。 */
 export function TodoPanel() {
   const [todos, setTodos] = useState<Todo[] | null>(null);
+  const [spaces, setSpaces] = useState<TodoSpace[]>([]);
+  // 当前分区：记在浏览器里，下次打开回到上次的分区；不存在时用第一个
+  const [spaceId, setSpaceId] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [view, setView] = useState<View>("today");
@@ -167,6 +190,7 @@ export function TodoPanel() {
   const load = useCallback(async () => {
     try {
       const data = await fetchTodos();
+      setSpaces(data.spaces ?? []);
       replaceTodos(data.todos);
     } catch (value) {
       setError(errorMessage(value));
@@ -178,7 +202,10 @@ export function TodoPanel() {
     let alive = true;
     fetchTodos()
       .then(data => {
-        if (alive) setTodos(data.todos.map(normalizeTodo));
+        if (!alive) return;
+        setSpaces(data.spaces ?? []);
+        setSpaceId(readSavedSpace());
+        setTodos(data.todos.map(normalizeTodo));
       })
       .catch(value => {
         if (!alive) return;
@@ -271,7 +298,13 @@ export function TodoPanel() {
     }
   }, [activeProgressId, expanded, load, showNotice]);
 
-  const all = useMemo(() => todos ?? [], [todos]);
+  const activeSpace = spaces.find(space => space.id === spaceId) ?? spaces[0];
+  const activeSpaceId = activeSpace?.id ?? "";
+  // 只看当前分区；分区未加载成功时退回显示全部，避免内容凭空消失
+  const all = useMemo(
+    () => (todos ?? []).filter(todo => !activeSpaceId || todo.space === activeSpaceId),
+    [todos, activeSpaceId],
+  );
   const lists = useMemo(() => {
     const counts = new Map<string, number>();
     for (const todo of all) {
@@ -283,6 +316,91 @@ export function TodoPanel() {
 
   // 今天及更早加入且未完成的待办顺延到今天，截止不晚于今天的也收录
   const inToday = useCallback((todo: Todo) => belongsToToday(todo, today), [today]);
+  const spaceStats = useMemo(() => {
+    const todayCounts: Record<string, number> = {};
+    const totals: Record<string, number> = {};
+    for (const todo of todos ?? []) {
+      totals[todo.space] = (totals[todo.space] ?? 0) + 1;
+      if (!todo.done && belongsToToday(todo, today)) todayCounts[todo.space] = (todayCounts[todo.space] ?? 0) + 1;
+    }
+    return { todayCounts, totals };
+  }, [todos, today]);
+
+  const selectSpace = useCallback((id: string) => {
+    setSpaceId(id);
+    saveSpace(id);
+    setExpanded(null);
+    // 清单属于分区，切换后原清单视图不再适用
+    setView(current => (current.startsWith("list:") ? "today" : current));
+  }, []);
+
+  const createSpace = useCallback(async (name: string) => {
+    try {
+      const saved = await createTodoSpace(name);
+      setSpaces(current => [...current, saved]);
+      selectSpace(saved.id);
+      showNotice(`已新建分区「${saved.name}」`);
+      return true;
+    } catch (value) {
+      setError(errorMessage(value));
+      return false;
+    }
+  }, [selectSpace, showNotice]);
+
+  const renameSpace = useCallback(async (id: string, name: string) => {
+    try {
+      const saved = await renameTodoSpace(id, name);
+      setSpaces(current => current.map(space => (space.id === id ? saved : space)));
+      showNotice(`分区已改名为「${saved.name}」`);
+      return true;
+    } catch (value) {
+      setError(errorMessage(value));
+      return false;
+    }
+  }, [showNotice]);
+
+  const reorderSpaces = useCallback(async (ids: string[]) => {
+    let snapshot: TodoSpace[] = [];
+    setSpaces(current => {
+      snapshot = current;
+      const byId = new Map(current.map(space => [space.id, space]));
+      return ids.map(id => byId.get(id)).filter((space): space is TodoSpace => Boolean(space));
+    });
+    try {
+      const data = await reorderTodoSpaces(ids);
+      setSpaces(data.spaces);
+    } catch (value) {
+      setSpaces(snapshot);
+      setError(errorMessage(value));
+    }
+  }, []);
+
+  const removeSpace = useCallback(async (id: string, options: { moveTo?: string; deleteTodos?: boolean }) => {
+    const name = spaces.find(space => space.id === id)?.name ?? "";
+    const target = spaces.find(space => space.id === options.moveTo);
+    try {
+      const result = await deleteTodoSpace(id, options);
+      setSpaces(result.spaces);
+      setTodos(current => {
+        if (!current) return current;
+        if (options.deleteTodos) return current.filter(todo => todo.space !== id);
+        if (options.moveTo) return current.map(todo => (todo.space === id ? { ...todo, space: options.moveTo! } : todo));
+        return current;
+      });
+      if (id === activeSpaceId) selectSpace(options.moveTo ?? result.spaces[0]?.id ?? "");
+      showNotice(
+        result.moved ? `已删除分区「${name}」，${result.moved} 条待办移到「${target?.name ?? ""}」`
+          : result.deleted ? `已删除分区「${name}」及其中 ${result.deleted} 条待办`
+            : `已删除分区「${name}」`,
+      );
+      return true;
+    } catch (value) {
+      setError(errorMessage(value));
+      void load();
+      return false;
+    }
+  }, [activeSpaceId, load, selectSpace, showNotice, spaces]);
+
   const open = all.filter(todo => !todo.done);
   const counts = {
     today: open.filter(inToday).length,
@@ -365,6 +483,7 @@ export function TodoPanel() {
       list: listName.trim() || (view.startsWith("list:") ? view.slice(5) : ""),
       my_day: view === "today" ? today : "",
       status: "not_started",
+      ...(activeSpaceId ? { space: activeSpaceId } : {}),
     };
     try {
       const saved = normalizeTodo(await createTodo(input));
@@ -564,6 +683,19 @@ export function TodoPanel() {
     {error ? <ErrorState message={error} /> : null}
     {todos === null ? <LoadingState /> : (
       <div className="todo-layout">
+        {spaces.length ? (
+          <TodoSpaceBar
+            spaces={spaces}
+            activeId={activeSpaceId}
+            todayCounts={spaceStats.todayCounts}
+            totals={spaceStats.totals}
+            onSelect={selectSpace}
+            onCreate={createSpace}
+            onRename={renameSpace}
+            onReorder={ids => void reorderSpaces(ids)}
+            onDelete={removeSpace}
+          />
+        ) : null}
         <nav className="todo-nav" aria-label="待办视图">
           {navItem("today", "今天", counts.today)}
           {navItem("overdue", "已逾期", overdue)}
@@ -629,7 +761,7 @@ export function TodoPanel() {
                     inputRef.current?.blur();
                   }
                 }}
-                placeholder={view === "today" ? "添加今天要做的事……" : "添加待办……"}
+                placeholder={`${spaces.length > 1 && activeSpace ? `在「${activeSpace.name}」` : ""}${view === "today" ? "添加今天要做的事……" : "添加待办……"}`}
                 aria-label="待办内容"
               />
               {!isAddOpen ? (
@@ -765,6 +897,7 @@ export function TodoPanel() {
                           compact={view === "today"}
                           expanded={expanded === todo.id}
                           lists={lists.map(([name]) => name)}
+                          spaces={spaces}
                           writingProgress={writingProgress}
                           progressDraft={draft}
                           savingStatus={Boolean(savingStatusIds[todo.id])}
@@ -818,6 +951,7 @@ interface TodoRowProps {
   compact: boolean;
   expanded: boolean;
   lists: string[];
+  spaces: TodoSpace[];
   writingProgress: boolean;
   progressDraft?: ProgressDraft;
   savingStatus: boolean;
@@ -841,6 +975,7 @@ function TodoRow({
   compact,
   expanded,
   lists,
+  spaces,
   writingProgress,
   progressDraft,
   savingStatus,
@@ -1268,7 +1403,7 @@ function TodoRow({
       ) : null}
 
       {expanded ? (
-        <TodoDetail todo={todo} today={today} lists={lists} onPatch={onPatch} onDelete={onDelete} />
+        <TodoDetail todo={todo} today={today} lists={lists} spaces={spaces} onPatch={onPatch} onDelete={onDelete} />
       ) : null}
     </li>
   );
@@ -1279,12 +1414,14 @@ function TodoDetail({
   todo,
   today,
   lists,
+  spaces,
   onPatch,
   onDelete,
 }: {
   todo: Todo;
   today: string;
   lists: string[];
+  spaces: TodoSpace[];
   onPatch: (input: TodoInput, feedback?: string) => Promise<boolean>;
   onDelete: () => void;
 }) {
@@ -1375,6 +1512,21 @@ function TodoDetail({
           />
           <datalist id={listId}>{lists.map(name => <option key={name} value={name} />)}</datalist>
         </label>
+        {spaces.length > 1 ? (
+          <label className="todo-field">
+            <span>分区</span>
+            <select
+              aria-label="分区"
+              value={todo.space}
+              onChange={event => {
+                const target = spaces.find(space => space.id === event.target.value);
+                if (target && target.id !== todo.space) void onPatch({ space: target.id }, `已移到分区「${target.name}」`);
+              }}
+            >
+              {spaces.map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
+            </select>
+          </label>
+        ) : null}
         <label className="todo-field todo-field-check">
           <input
             type="checkbox"

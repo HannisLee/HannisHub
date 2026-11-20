@@ -132,6 +132,95 @@ class TodoTest(_TempData):
         self.assertEqual(todos.list_todos("alice"), [])
         self.assertEqual(len(todos.list_todos("bob")), 1)
 
+    def test_spaces_default_migration_and_isolation(self):
+        # 分区功能上线前的旧待办（space 为空）在首次读取时归入自动创建的「工作」分区
+        with database.connect() as conn:
+            conn.execute(
+                "INSERT INTO todos(id, owner, title, created_at, updated_at) VALUES ('aaaaaaaaaaaaaaaa', 'alice', '旧任务', 1, 1)",
+            )
+        data = todos.overview("alice")
+        self.assertEqual([s["name"] for s in data["spaces"]], ["工作"])
+        work = data["spaces"][0]["id"]
+        self.assertEqual(data["todos"][0]["space"], work)
+        self.assertEqual(len(todos.list_spaces("alice")), 1, "重复读取不应再建默认分区")
+
+        study = todos.create_space("alice", {"name": "  学习 "})
+        self.assertEqual(study["name"], "学习")
+        self.assertEqual([s["name"] for s in todos.list_spaces("alice")], ["工作", "学习"])
+        for bad in ({"name": ""}, {"name": "学习"}, {"name": "工作"}):
+            with self.assertRaises(HTTPException):
+                todos.create_space("alice", bad)
+        self.assertEqual(len(todos.create_space("alice", {"name": "长" * 30})["name"]), todos.MAX_SPACE_NAME)
+
+        # 新建未指定分区时进第一个分区；可指定分区或改到另一个分区；别人的分区不可用
+        default = todos.create_todo("alice", {"title": "写周报"})
+        self.assertEqual(default["space"], work)
+        reading = todos.create_todo("alice", {"title": "读论文", "space": study["id"]})
+        self.assertEqual(reading["space"], study["id"])
+        bob_space = todos.list_spaces("bob")[0]["id"]
+        for payload in ({"title": "x", "space": bob_space}, {"title": "x", "space": "../etc"}, {"title": "x", "space": 3}):
+            with self.assertRaises(HTTPException):
+                todos.create_todo("alice", payload)
+        with self.assertRaises(HTTPException):
+            todos.update_todo("alice", default["id"], {"space": bob_space})
+        self.assertEqual(todos.update_todo("alice", default["id"], {"space": study["id"]})["space"], study["id"])
+
+        # 重命名、重名、别人的分区
+        self.assertEqual(todos.rename_space("alice", study["id"], {"name": "读书"})["name"], "读书")
+        with self.assertRaises(HTTPException):
+            todos.rename_space("alice", study["id"], {"name": "工作"})
+        with self.assertRaises(HTTPException):
+            todos.rename_space("bob", study["id"], {"name": "偷改"})
+        self.assertEqual(todos.rename_space("alice", study["id"], {"name": "读书"})["name"], "读书", "改成自己的原名允许")
+
+        # 排序：列出的在前，未列出的保持相对顺序，别人的编号被忽略
+        spaces = todos.list_spaces("alice")
+        ids = [s["id"] for s in spaces]
+        reordered = todos.reorder_spaces("alice", [ids[2], bob_space, ids[0]])
+        self.assertEqual([s["id"] for s in reordered], [ids[2], ids[0], ids[1]])
+        with self.assertRaises(HTTPException):
+            todos.reorder_spaces("alice", ["bad"])
+
+        # 删除：有待办时必须选择去向；移动或一并删除；至少保留一个分区
+        with self.assertRaises(HTTPException) as caught:
+            todos.delete_space("alice", study["id"])
+        self.assertIn("2 条待办", caught.exception.detail)
+        with self.assertRaises(HTTPException):
+            todos.delete_space("alice", study["id"], move_to=study["id"])
+        with self.assertRaises(HTTPException):
+            todos.delete_space("alice", study["id"], move_to=bob_space)
+        result = todos.delete_space("alice", study["id"], move_to=work)
+        self.assertEqual(result["moved"], 2)
+        self.assertTrue(all(t["space"] == work for t in todos.list_todos("alice")))
+        long_space = ids[2]
+        todos.create_todo("alice", {"title": "临时", "space": long_space})
+        result = todos.delete_space("alice", long_space, delete_todos=True)
+        self.assertEqual(result["deleted"], 1)
+        self.assertEqual([s["id"] for s in result["spaces"]], [work])
+        with self.assertRaises(HTTPException):
+            todos.delete_space("alice", work, delete_todos=True)
+        with self.assertRaises(HTTPException):
+            todos.delete_space("bob", work, delete_todos=True)
+        self.assertEqual(len(todos.list_todos("alice")), 3)
+
+        # 只清理某个分区的已完成；删除账号时一并清理分区
+        other = todos.create_space("alice", {"name": "生活"})
+        done_here = todos.create_todo("alice", {"title": "买菜", "space": other["id"], "done": True})
+        todos.update_todo("alice", default["id"], {"done": True})
+        self.assertEqual(todos.clear_completed("alice", space=other["id"]), 1)
+        self.assertNotIn(done_here["id"], [t["id"] for t in todos.list_todos("alice")])
+        self.assertEqual(sum(t["done"] for t in todos.list_todos("alice")), 1)
+        todos.purge_user("alice")
+        with database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM todo_spaces WHERE owner = 'alice'").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM todo_spaces WHERE owner = 'bob'").fetchone()[0], 1)
+
+    def test_space_limit(self):
+        with patch.object(todos, "MAX_SPACES", 2):
+            todos.create_space("alice", {"name": "学习"})
+            with self.assertRaises(HTTPException):
+                todos.create_space("alice", {"name": "生活"})
+
     def test_limit(self):
         with patch.object(todos, "MAX_TODOS", 2):
             todos.create_todo("alice", {"title": "1"})

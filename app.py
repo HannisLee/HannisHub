@@ -985,9 +985,38 @@ async def feature_request_delete(item_id: str, request: Request):
 
 @app.get("/api/todos")
 async def todo_list(request: Request):
-    """当前账号的全部工位待办。"""
+    """当前账号的全部工位待办与分区（没有分区时自动创建默认分区「工作」）。"""
     username = _require_user(request)
-    return JSONResponse({"todos": await run_in_threadpool(todos.list_todos, username)})
+    return JSONResponse(await run_in_threadpool(todos.overview, username))
+
+
+@app.post("/api/todos/spaces")
+async def todo_space_create(request: Request, payload: dict[str, Any] = Body(...)):
+    """新建待办分区（name），排在最后。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.create_space, username, payload))
+
+
+@app.post("/api/todos/spaces/reorder")
+async def todo_space_reorder(request: Request, payload: dict[str, Any] = Body(...)):
+    """按给定的分区编号顺序排列分区。"""
+    username = _require_user(request)
+    ids = payload.get("ids") if isinstance(payload, dict) else None
+    return JSONResponse({"spaces": await run_in_threadpool(todos.reorder_spaces, username, ids)})
+
+
+@app.patch("/api/todos/spaces/{space_id}")
+async def todo_space_rename(space_id: str, request: Request, payload: dict[str, Any] = Body(...)):
+    """重命名待办分区。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.rename_space, username, space_id, payload))
+
+
+@app.delete("/api/todos/spaces/{space_id}")
+async def todo_space_delete(space_id: str, request: Request, move_to: str = "", delete_todos: bool = False):
+    """删除待办分区；分区里还有待办时需给出 move_to（移到的分区）或 delete_todos=true（一并删除）。"""
+    username = _require_user(request)
+    return JSONResponse(await run_in_threadpool(todos.delete_space, username, space_id, move_to or None, delete_todos))
 
 
 @app.post("/api/todos")
@@ -1006,15 +1035,16 @@ async def todo_reorder(request: Request, payload: dict[str, Any] = Body(...)):
 
 @app.post("/api/todos/clear-completed")
 async def todo_clear_completed(request: Request, payload: dict[str, Any] = Body(default={})):
-    """删除已完成的待办；可只清理某个清单（list）。"""
+    """删除已完成的待办；可只清理某个清单（list）或某个分区（space）。"""
     username = _require_user(request)
     list_name = payload.get("list") if isinstance(payload, dict) and isinstance(payload.get("list"), str) else None
-    return JSONResponse({"deleted": await run_in_threadpool(todos.clear_completed, username, list_name)})
+    space = payload.get("space") if isinstance(payload, dict) and isinstance(payload.get("space"), str) else None
+    return JSONResponse({"deleted": await run_in_threadpool(todos.clear_completed, username, list_name, space)})
 
 
 @app.patch("/api/todos/{todo_id}")
 async def todo_update(todo_id: str, request: Request, payload: dict[str, Any] = Body(...)):
-    """修改待办的部分字段（标题、备注、清单、优先级、截止日期、今天、完成、状态、子任务、排序）。"""
+    """修改待办的部分字段（标题、备注、清单、优先级、截止日期、今天、完成、状态、子任务、排序、分区）。"""
     username = _require_user(request)
     return JSONResponse(await run_in_threadpool(todos.update_todo, username, todo_id, payload))
 

@@ -177,6 +177,19 @@ _MIGRATIONS: list[str] = [
     """
     ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'not_started';
     """,
+    # v10：待办分区（如「工作」「学习」），每个分区的待办互相独立；旧待办在首次读取时归入自动创建的默认分区
+    """
+    CREATE TABLE todo_spaces (
+        id         TEXT PRIMARY KEY,
+        owner      TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        sort       REAL NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    CREATE INDEX todo_spaces_owner ON todo_spaces(owner, sort);
+    ALTER TABLE todos ADD COLUMN space TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 _init_lock = threading.Lock()

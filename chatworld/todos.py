@@ -8,6 +8,10 @@
 - subtasks 子任务 [{id, title, done}]（最多 50 个）
 - progress 进度记录 [{id, text, created_at}]，按添加顺序从旧到新保存
 - sort 手动排序值（越小越靠前），新建的排在最后
+- space 所属分区编号（todo_spaces 表）；分区之间的待办互相独立，新建未指定分区时放入第一个分区
+
+分区（todo_spaces）：每个账号至少一个，首次读取时自动创建默认分区「工作」，并把没有分区或分区已不存在的待办归入第一个分区。
+分区名最多 12 字、同一账号内不重名，最多 20 个；删除分区时需指定把其中的待办移到哪个分区，或明确一并删除。
 """
 
 from __future__ import annotations
@@ -33,7 +37,11 @@ DEFAULT_STATUS = "not_started"
 VALID_STATUSES = ("not_started", "in_progress", "blocked")
 SUBTASK_ID = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 TODO_ID = re.compile(r"^[a-f0-9]{16}$")
-FIELDS = ("title", "note", "list", "priority", "due_date", "my_day", "done", "status", "subtasks", "sort")
+SPACE_ID = re.compile(r"^[a-f0-9]{12}$")
+MAX_SPACE_NAME = 12
+MAX_SPACES = 20
+DEFAULT_SPACE_NAME = "工作"
+FIELDS = ("title", "note", "list", "priority", "due_date", "my_day", "done", "status", "subtasks", "sort", "space")
 
 
 def _clean(value: object, limit: int, *, multiline: bool = False) -> str:
@@ -122,6 +130,11 @@ def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
         columns["subtasks"] = _subtasks(payload["subtasks"])
     if "sort" in payload:
         columns["sort"] = _sort(payload["sort"])
+    if "space" in payload:
+        # 是否属于当前账号在写入前由 _check_space 校验
+        if not isinstance(payload["space"], str) or not SPACE_ID.match(payload["space"]):
+            raise HTTPException(status_code=400, detail="分区不存在")
+        columns["space"] = payload["space"]
     return columns
 
 
@@ -142,6 +155,7 @@ def _public(row: Any) -> dict[str, Any]:
         "subtasks": json.loads(row["subtasks"] or "[]"),
         "progress": json.loads(row["progress"]),
         "sort": row["sort"],
+        "space": row["space"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -152,13 +166,55 @@ def _check_id(todo_id: str) -> None:
         raise HTTPException(status_code=404, detail="待办不存在")
 
 
+def _space_public(row: Any) -> dict[str, Any]:
+    return {"id": row["id"], "name": row["name"], "sort": row["sort"], "created_at": row["created_at"]}
+
+
+def _ensure_spaces(conn: Any, owner: str) -> list[Any]:
+    """保证账号至少有一个分区，并把无分区或分区已失效的待办归入第一个分区；返回按顺序排列的分区行。
+    需在 transaction() 中调用。"""
+    spaces = conn.execute("SELECT * FROM todo_spaces WHERE owner = ? ORDER BY sort, created_at", (owner,)).fetchall()
+    if not spaces:
+        now = time.time()
+        conn.execute(
+            "INSERT INTO todo_spaces(id, owner, name, sort, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+            (secrets.token_hex(6), owner, DEFAULT_SPACE_NAME, now, now),
+        )
+        spaces = conn.execute("SELECT * FROM todo_spaces WHERE owner = ? ORDER BY sort, created_at", (owner,)).fetchall()
+    orphan = conn.execute(
+        "SELECT 1 FROM todos WHERE owner = ? AND space NOT IN (SELECT id FROM todo_spaces WHERE owner = ?) LIMIT 1",
+        (owner, owner),
+    ).fetchone()
+    if orphan:
+        conn.execute(
+            "UPDATE todos SET space = ? WHERE owner = ? AND space NOT IN (SELECT id FROM todo_spaces WHERE owner = ?)",
+            (spaces[0]["id"], owner, owner),
+        )
+    return spaces
+
+
+def _check_space(conn: Any, owner: str, space_id: str) -> None:
+    if not conn.execute("SELECT 1 FROM todo_spaces WHERE id = ? AND owner = ?", (space_id, owner)).fetchone():
+        raise HTTPException(status_code=400, detail="分区不存在")
+
+
+def list_spaces(owner: str) -> list[dict[str, Any]]:
+    """当前账号的分区（按顺序），没有时自动创建默认分区。"""
+    with transaction() as conn:
+        return [_space_public(row) for row in _ensure_spaces(conn, owner)]
+
+
+def overview(owner: str) -> dict[str, Any]:
+    """待办页面加载：分区与全部待办在同一事务中读取，保证每条待办的分区都存在。"""
+    with transaction() as conn:
+        spaces = _ensure_spaces(conn, owner)
+        rows = conn.execute("SELECT * FROM todos WHERE owner = ? ORDER BY sort, created_at", (owner,)).fetchall()
+    return {"spaces": [_space_public(row) for row in spaces], "todos": [_public(row) for row in rows]}
+
+
 def list_todos(owner: str) -> list[dict[str, Any]]:
-    """当前账号的全部待办，按手动排序、创建时间排列（筛选与分组在前端完成）。"""
-    with connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM todos WHERE owner = ? ORDER BY sort, created_at", (owner,),
-        ).fetchall()
-    return [_public(row) for row in rows]
+    """当前账号的全部待办，按手动排序、创建时间排列（筛选、分区与分组在前端完成）。"""
+    return overview(owner)["todos"]
 
 
 def create_todo(owner: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -169,6 +225,9 @@ def create_todo(owner: str, payload: dict[str, Any]) -> dict[str, Any]:
     todo_id = secrets.token_hex(8)
     done = columns.get("done", 0)
     with transaction() as conn:
+        spaces = _ensure_spaces(conn, owner)
+        if "space" in columns:
+            _check_space(conn, owner, columns["space"])
         count, last = conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(sort), 0) FROM todos WHERE owner = ?", (owner,),
         ).fetchone()
@@ -179,7 +238,7 @@ def create_todo(owner: str, payload: dict[str, Any]) -> dict[str, Any]:
             "list": columns.get("list", ""), "priority": columns.get("priority", 0),
             "due_date": columns.get("due_date", ""), "my_day": columns.get("my_day", ""), "done": done,
             "done_at": now if done else None, "status": columns.get("status", DEFAULT_STATUS),
-            "subtasks": columns.get("subtasks", "[]"),
+            "subtasks": columns.get("subtasks", "[]"), "space": columns.get("space", spaces[0]["id"]),
             "sort": columns.get("sort", float(last) + 1), "created_at": now, "updated_at": now,
         }
         conn.execute(
@@ -197,6 +256,8 @@ def update_todo(owner: str, todo_id: str, payload: dict[str, Any]) -> dict[str, 
         row = conn.execute("SELECT * FROM todos WHERE id = ? AND owner = ?", (todo_id, owner)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="待办不存在")
+        if "space" in columns:
+            _check_space(conn, owner, columns["space"])
         if "done" in columns and bool(columns["done"]) != bool(row["done"]):
             columns["done_at"] = time.time() if columns["done"] else None
         if columns:
@@ -262,15 +323,18 @@ def delete_todo(owner: str, todo_id: str) -> None:
         raise HTTPException(status_code=404, detail="待办不存在")
 
 
-def clear_completed(owner: str, list_name: str | None = None) -> int:
-    """删除已完成的待办；给出 list_name 时只清理该清单。返回删除条数。"""
+def clear_completed(owner: str, list_name: str | None = None, space: str | None = None) -> int:
+    """删除已完成的待办；给出 list_name 时只清理该清单，给出 space 时只清理该分区。返回删除条数。"""
+    sql = "DELETE FROM todos WHERE owner = ? AND done = 1"
+    params: list[Any] = [owner]
+    if list_name is not None:
+        sql += " AND list = ?"
+        params.append(_clean(list_name, MAX_LIST))
+    if space is not None:
+        sql += " AND space = ?"
+        params.append(space)
     with connect() as conn:
-        if list_name is None:
-            cursor = conn.execute("DELETE FROM todos WHERE owner = ? AND done = 1", (owner,))
-        else:
-            cursor = conn.execute(
-                "DELETE FROM todos WHERE owner = ? AND done = 1 AND list = ?", (owner, _clean(list_name, MAX_LIST)),
-            )
+        cursor = conn.execute(sql, params)
     return cursor.rowcount
 
 
@@ -289,7 +353,106 @@ def reorder(owner: str, ids: object) -> list[dict[str, Any]]:
     return list_todos(owner)
 
 
+def _space_name(value: object) -> str:
+    name = _clean(value, MAX_SPACE_NAME)
+    if not name:
+        raise HTTPException(status_code=400, detail="请填写分区名称")
+    return name
+
+
+def _check_space_id(space_id: str) -> None:
+    if not SPACE_ID.match(space_id or ""):
+        raise HTTPException(status_code=404, detail="分区不存在")
+
+
+def _ensure_unique_name(conn: Any, owner: str, name: str, exclude: str = "") -> None:
+    rows = conn.execute("SELECT id, name FROM todo_spaces WHERE owner = ?", (owner,)).fetchall()
+    if any(row["id"] != exclude and row["name"].casefold() == name.casefold() for row in rows):
+        raise HTTPException(status_code=400, detail=f"已有名为「{name}」的分区")
+
+
+def create_space(owner: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """新建分区，排在最后。"""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求格式不正确")
+    name = _space_name(payload.get("name"))
+    with transaction() as conn:
+        spaces = _ensure_spaces(conn, owner)
+        if len(spaces) >= MAX_SPACES:
+            raise HTTPException(status_code=400, detail=f"分区最多 {MAX_SPACES} 个")
+        _ensure_unique_name(conn, owner, name)
+        now = time.time()
+        space_id = secrets.token_hex(6)
+        conn.execute(
+            "INSERT INTO todo_spaces(id, owner, name, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (space_id, owner, name, max(row["sort"] for row in spaces) + 1, now, now),
+        )
+        saved = conn.execute("SELECT * FROM todo_spaces WHERE id = ?", (space_id,)).fetchone()
+    return _space_public(saved)
+
+
+def rename_space(owner: str, space_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _check_space_id(space_id)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求格式不正确")
+    name = _space_name(payload.get("name"))
+    with transaction() as conn:
+        if not conn.execute("SELECT 1 FROM todo_spaces WHERE id = ? AND owner = ?", (space_id, owner)).fetchone():
+            raise HTTPException(status_code=404, detail="分区不存在")
+        _ensure_unique_name(conn, owner, name, exclude=space_id)
+        conn.execute(
+            "UPDATE todo_spaces SET name = ?, updated_at = ? WHERE id = ? AND owner = ?", (name, time.time(), space_id, owner),
+        )
+        saved = conn.execute("SELECT * FROM todo_spaces WHERE id = ?", (space_id,)).fetchone()
+    return _space_public(saved)
+
+
+def reorder_spaces(owner: str, ids: object) -> list[dict[str, Any]]:
+    """按给定顺序排列分区；未列出的分区保持相对顺序排在后面。"""
+    if not isinstance(ids, list) or len(ids) > MAX_SPACES or not all(isinstance(i, str) and SPACE_ID.match(i) for i in ids):
+        raise HTTPException(status_code=400, detail="分区排序列表不正确")
+    with transaction() as conn:
+        spaces = _ensure_spaces(conn, owner)
+        mine = [row["id"] for row in spaces]
+        listed = [i for i in dict.fromkeys(ids) if i in mine]
+        ordered = listed + [i for i in mine if i not in listed]
+        now = time.time()
+        for index, space_id in enumerate(ordered, start=1):
+            conn.execute("UPDATE todo_spaces SET sort = ?, updated_at = ? WHERE id = ? AND owner = ?", (index, now, space_id, owner))
+        rows = conn.execute("SELECT * FROM todo_spaces WHERE owner = ? ORDER BY sort, created_at", (owner,)).fetchall()
+    return [_space_public(row) for row in rows]
+
+
+def delete_space(owner: str, space_id: str, move_to: str | None = None, delete_todos: bool = False) -> dict[str, Any]:
+    """删除分区。分区里还有待办时必须给出 move_to（移到另一个分区）或 delete_todos=True（一并删除）。
+    至少保留一个分区。返回剩余分区与移动、删除的条数。"""
+    _check_space_id(space_id)
+    with transaction() as conn:
+        spaces = _ensure_spaces(conn, owner)
+        if space_id not in {row["id"] for row in spaces}:
+            raise HTTPException(status_code=404, detail="分区不存在")
+        if len(spaces) <= 1:
+            raise HTTPException(status_code=400, detail="至少保留一个分区")
+        count = conn.execute("SELECT COUNT(*) FROM todos WHERE owner = ? AND space = ?", (owner, space_id)).fetchone()[0]
+        moved = deleted = 0
+        if count and move_to:
+            if move_to == space_id or not SPACE_ID.match(move_to):
+                raise HTTPException(status_code=400, detail="请选择另一个分区")
+            _check_space(conn, owner, move_to)
+            moved = conn.execute(
+                "UPDATE todos SET space = ?, updated_at = ? WHERE owner = ? AND space = ?", (move_to, time.time(), owner, space_id),
+            ).rowcount
+        elif count and delete_todos:
+            deleted = conn.execute("DELETE FROM todos WHERE owner = ? AND space = ?", (owner, space_id)).rowcount
+        elif count:
+            raise HTTPException(status_code=400, detail=f"分区里还有 {count} 条待办，请选择移到哪个分区或一并删除")
+        conn.execute("DELETE FROM todo_spaces WHERE id = ? AND owner = ?", (space_id, owner))
+        rows = conn.execute("SELECT * FROM todo_spaces WHERE owner = ? ORDER BY sort, created_at", (owner,)).fetchall()
+    return {"spaces": [_space_public(row) for row in rows], "moved": moved, "deleted": deleted}
+
+
 def purge_user(owner: str) -> None:
-    """删除账号时清理其全部待办。"""
+    """删除账号时清理其全部待办与分区。"""
     with connect() as conn:
         conn.execute("DELETE FROM todos WHERE owner = ?", (owner,))
+        conn.execute("DELETE FROM todo_spaces WHERE owner = ?", (owner,))

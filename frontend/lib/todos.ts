@@ -49,11 +49,21 @@ export interface Todo {
   subtasks: TodoSubtask[];
   progress: TodoProgress[];
   sort: number;
+  /** 所属分区编号（TodoSpace.id） */
+  space: string;
   created_at: number;
   updated_at: number;
 }
 
-export type TodoInput = Partial<Pick<Todo, "title" | "note" | "list" | "priority" | "due_date" | "my_day" | "done" | "status" | "subtasks" | "sort">>;
+/** 分区：如「工作」「学习」，分区之间的待办互相独立；每个账号至少一个 */
+export interface TodoSpace {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: number;
+}
+
+export type TodoInput = Partial<Pick<Todo, "title" | "note" | "list" | "priority" | "due_date" | "my_day" | "done" | "status" | "subtasks" | "sort" | "space">>;
 
 const BASE = `${API_PATHS.hub}/todos`;
 
@@ -62,6 +72,8 @@ export const TODO_NOTE_MAX = 4000;
 export const TODO_LIST_MAX = 24;
 export const TODO_SUBTASK_MAX = 50;
 export const TODO_PROGRESS_MAX = 1000;
+export const TODO_SPACE_NAME_MAX = 12;
+export const TODO_SPACE_MAX = 20;
 
 export const PRIORITY_OPTIONS: TodoPriority[] = [3, 2, 1];
 export const PRIORITY_TAGS: Record<TodoPriority, string> = {
@@ -77,8 +89,36 @@ export const PRIORITY_LABELS: Record<TodoPriority, string> = {
   0: "P1（默认）",
 };
 
-export function fetchTodos(): Promise<{ todos: Todo[] }> {
-  return apiFetch<{ todos: Todo[] }>(BASE);
+export function fetchTodos(): Promise<{ todos: Todo[]; spaces: TodoSpace[] }> {
+  return apiFetch<{ todos: Todo[]; spaces: TodoSpace[] }>(BASE);
+}
+
+export function createTodoSpace(name: string): Promise<TodoSpace> {
+  return apiFetch<TodoSpace>(`${BASE}/spaces`, { method: "POST", body: jsonBody({ name }) });
+}
+
+export function renameTodoSpace(id: string, name: string): Promise<TodoSpace> {
+  return apiFetch<TodoSpace>(`${BASE}/spaces/${encodePath(id)}`, { method: "PATCH", body: jsonBody({ name }) });
+}
+
+export function reorderTodoSpaces(ids: string[]): Promise<{ spaces: TodoSpace[] }> {
+  return apiFetch<{ spaces: TodoSpace[] }>(`${BASE}/spaces/reorder`, { method: "POST", body: jsonBody({ ids }) });
+}
+
+/** 删除分区：分区里还有待办时传 moveTo（移到哪个分区）或 deleteTodos（一并删除） */
+export function deleteTodoSpace(
+  id: string,
+  options: { moveTo?: string; deleteTodos?: boolean } = {},
+): Promise<{ spaces: TodoSpace[]; moved: number; deleted: number }> {
+  const query = new URLSearchParams();
+  if (options.moveTo) query.set("move_to", options.moveTo);
+  if (options.deleteTodos) query.set("delete_todos", "true");
+  const text = query.toString();
+  const suffix = text ? `?${text}` : "";
+  return apiFetch<{ spaces: TodoSpace[]; moved: number; deleted: number }>(
+    `${BASE}/spaces/${encodePath(id)}${suffix}`,
+    { method: "DELETE" },
+  );
 }
 
 export function createTodo(input: TodoInput): Promise<Todo> {
@@ -115,8 +155,11 @@ export function reorderTodos(ids: string[]): Promise<{ todos: Todo[] }> {
   return apiFetch<{ todos: Todo[] }>(`${BASE}/reorder`, { method: "POST", body: jsonBody({ ids }) });
 }
 
-export function clearCompletedTodos(list?: string): Promise<{ deleted: number }> {
-  return apiFetch<{ deleted: number }>(`${BASE}/clear-completed`, { method: "POST", body: jsonBody(list === undefined ? {} : { list }) });
+export function clearCompletedTodos(list?: string, space?: string): Promise<{ deleted: number }> {
+  const payload: { list?: string; space?: string } = {};
+  if (list !== undefined) payload.list = list;
+  if (space !== undefined) payload.space = space;
+  return apiFetch<{ deleted: number }>(`${BASE}/clear-completed`, { method: "POST", body: jsonBody(payload) });
 }
 
 /** 浏览器本地日期 YYYY-MM-DD（offset 为相对今天的天数） */
