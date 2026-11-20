@@ -8,9 +8,9 @@ import json
 import secrets
 import time
 from fastapi import HTTPException
-from core.database import connect, transaction
+from core.database import connect, db_path, transaction
 from core.auth import list_users
-from chatworld import lobby_profile, lobby_presence, lobby_desks
+from chatworld import chat_room, lobby_profile, lobby_presence, lobby_desks
 from pathlib import Path
 
 # 对方最近一条来信后的这段时间内，可在任意位置回复
@@ -31,8 +31,8 @@ def contacts(owner):
         now = time.time()
         result = []
         for r in peers:
-            last = db.execute('SELECT text, created_at FROM lobby_messages WHERE owner=? AND peer=? ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
-            incoming_row = db.execute('SELECT seq, text, created_at FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0 ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
+            last = db.execute('SELECT text, created_at, attachment_id FROM lobby_messages WHERE owner=? AND peer=? ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
+            incoming_row = db.execute('SELECT seq, text, created_at, attachment_id FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0 ORDER BY seq DESC LIMIT 1', (owner, r['owner'])).fetchone()
             incoming = incoming_row['created_at'] if incoming_row else None
             read = db.execute('SELECT seq FROM lobby_reads WHERE owner=? AND peer=?', (owner, r['owner'])).fetchone()
             count = db.execute('SELECT count(*) FROM lobby_messages WHERE owner=? AND peer=? AND outgoing=0 AND seq>?', (owner, r['owner'], read[0] if read else 0)).fetchone()[0]
@@ -40,12 +40,12 @@ def contacts(owner):
             result.append({
                 'id': r['id'], 'scene_id': lobby_presence.presence.ids.get(r['owner']),
                 'name': identity['name'], 'photo': identity['photo'],
-                'last': last[0] if last else '', 'last_at': last[1] if last else 0, 'unread': count,
+                'last': _preview(last), 'last_at': last[1] if last else 0, 'unread': count,
                 'can_reply': bool(incoming and now - incoming < REPLY_WINDOW_SECONDS),
             })
             if owner == 'lihan':
                 result[-1].update(last_incoming_seq=incoming_row['seq'] if incoming_row else 0,
-                                  last_incoming=incoming_row['text'] if incoming_row else '')
+                                  last_incoming=_preview(incoming_row))
         return result
 
 
@@ -102,33 +102,90 @@ def available(owner, peer, source, opening=False):
 hub_public_rooms = {'foyer', 'hall'}
 
 
+def _preview(row):
+    if not row:
+        return ''
+    return row['text'] or ('[附件]' if row['attachment_id'] else '')
+
+
+def files_dir() -> Path:
+    path = db_path()
+    return path.with_name(f'{path.stem}_private_chat_files')
+
+
+def upload_scope(owner, contact, source):
+    peer = peer_for(owner, contact)
+    _require_available(owner, peer, source)
+    directory = files_dir()
+    if directory.is_dir():
+        # 与消息写入串行，避免清理正在提交的附件。
+        with transaction() as db:
+            referenced = {row[0] for row in db.execute(
+                'SELECT DISTINCT attachment_id FROM lobby_messages WHERE attachment_id IS NOT NULL'
+            )}
+            chat_room.cleanup_files(directory, referenced)
+    return {'owner': owner, 'contact': contact}
+
+
+def file_response_info(owner, contact, file_id, download):
+    peer = peer_for(owner, contact)
+    with connect() as db:
+        if not db.execute(
+            'SELECT 1 FROM lobby_messages WHERE attachment_id=? AND owner=? AND peer=? LIMIT 1',
+            (file_id, owner, peer),
+        ).fetchone():
+            raise HTTPException(404, '附件不存在')
+    return chat_room.file_response_info(file_id, download, files_dir())
+
+
 def messages(owner, contact, before=0):
     peer = peer_for(owner, contact)
     with connect() as db:
-        rows = db.execute('SELECT seq,text,outgoing,created_at FROM lobby_messages WHERE owner=? AND peer=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT 50', (owner, peer, before, before)).fetchall()
-    return [dict(r) for r in reversed(rows)]
+        rows = db.execute('SELECT seq,text,outgoing,created_at,attachment_id FROM lobby_messages WHERE owner=? AND peer=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT 50', (owner, peer, before, before)).fetchall()
+    result = []
+    for row in reversed(rows):
+        message = dict(row)
+        file_id = message.pop('attachment_id')
+        if file_id:
+            try:
+                message['attachment'] = chat_room.attachment_info(chat_room.read_file_meta(file_id, files_dir()))
+            except HTTPException:
+                # 文件丢失时仍可读取历史消息。
+                message['text'] = message['text'] or '[附件不可用]'
+        result.append(message)
+    return result
+
+
+def _require_available(owner, peer, source):
+    if not available(owner, peer, source):
+        raise HTTPException(409, '只能回复对方发来的私聊；发起新的私聊请面对对方按 E，或前往自己的工位电脑')
 
 
 def send(owner, contact, data):
     peer = peer_for(owner, contact)
-    if not available(owner, peer, data.get('source')):
-        raise HTTPException(409, '只能回复对方发来的私聊；发起新的私聊请面对对方按 E，或前往自己的工位电脑')
-    text, rid = data.get('text'), data.get('request_id')
-    if not isinstance(text, str) or not text.strip() or len(text)>1000 or not isinstance(rid,str) or not 1<=len(rid)<=80:
+    _require_available(owner, peer, data.get('source'))
+    text, rid, file_id = data.get('text', ''), data.get('request_id'), data.get('attachment_id')
+    if not isinstance(text, str) or len(text) > 1000 or not isinstance(rid, str) or not 1 <= len(rid) <= 80:
         raise HTTPException(400, '消息格式无效（最多 1000 字）')
-    text = ''.join(c for c in text.strip() if c.isprintable() or c in '\n\t')
-    if not text.strip():
+    if file_id is not None and not isinstance(file_id, str):
+        raise HTTPException(400, '附件编号无效')
+    text = ''.join(c for c in text if c.isprintable() or c in '\n\t').strip()
+    if not text and not file_id:
         raise HTTPException(400, '消息不能为空')
     with transaction() as db:
         old = db.execute('SELECT seq FROM lobby_messages WHERE owner=? AND peer=? AND request_id=? AND outgoing=1', (owner,peer,rid)).fetchone()
         if old:
             return {'ok':True}
+        if file_id:
+            meta = chat_room.read_file_meta(file_id, files_dir())
+            if meta.get('owner') != owner or meta.get('contact') != contact:
+                raise HTTPException(404, '附件不存在')
         last = db.execute('SELECT created_at FROM lobby_messages WHERE owner=? AND outgoing=1 ORDER BY seq DESC LIMIT 1', (owner,)).fetchone()
         if last and time.time()-last[0]<0.8:
             raise HTTPException(429, '发送太快，请稍后重试')
         now = time.time()
         for who, other, outgoing in [(owner,peer,1),(peer,owner,0)]:
-            db.execute('INSERT INTO lobby_messages(owner,peer,request_id,outgoing,text,created_at) VALUES (?,?,?,?,?,?)', (who,other,rid,outgoing,text,now))
+            db.execute('INSERT INTO lobby_messages(owner,peer,request_id,outgoing,text,created_at,attachment_id) VALUES (?,?,?,?,?,?,?)', (who,other,rid,outgoing,text,now,file_id or None))
     return {'ok':True}
 
 

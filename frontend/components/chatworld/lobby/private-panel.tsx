@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { apiFetch, jsonBody } from "../../../lib/api";
 import { fetchLobbyProfile, type LobbyProfile } from "../../../lib/chat-lobby";
-import { errorMessage } from "../../../lib/format";
+import type { ChatAttachment } from "../../../lib/types";
+import { errorMessage, formatBytes } from "../../../lib/format";
 import { Icon } from "../../ui/icon";
 import { Button } from "../../ui/primitives";
 import { ChatEmojiPicker } from "../room/emoji-picker";
+import { ChatAttachmentCard, ChatLightbox, INLINE_IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB, uploadChatAttachment, type LightboxImage } from "../shared/chat-attachment";
 import { Avatar, formatChatTime } from "../shared/chat-avatar";
 import { TodoPanel } from "../todo/todo-panel";
 import { useShell } from "../../layout/shell-context";
@@ -17,6 +19,11 @@ const BASE = "/api/chat-lobby/private-chat";
 const PRIVATE_EVENT = "lobby-private-chat";
 const PAGE_SIZE = 50;
 const MESSAGE_MAX = 1000;
+
+function messageRequestId() {
+  // 局域网 HTTP 下也能生成请求编号。
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 interface Contact {
   id: string;
@@ -31,7 +38,7 @@ interface Contact {
   can_reply: boolean;
 }
 
-interface Message { seq: number; text: string; outgoing: number; created_at: number }
+interface Message { seq: number; text: string; outgoing: number; created_at: number; attachment?: ChatAttachment }
 
 /** 私聊入口：
  *  - near：面对面按 E 发起，只显示当前交谈对象，走开后结束；
@@ -100,17 +107,23 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<{ file: File; previewUrl?: string } | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // 能否向当前联系人发消息；null 表示正在确认
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
-  const request = useRef({ text: "", id: "" });
+  const sending = useRef(false);
+  const uploaded = useRef<{ file: File; id: string } | null>(null);
+  const request = useRef<{ text: string; attachmentId?: string; id: string } | null>(null);
   const narrow = useNarrow();
 
   // 面对面时交谈对象由场景编号决定
@@ -135,6 +148,11 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
   }, [mode, loaded, selected, onClose]);
 
   const choose = (id: string) => {
+    if (sending.current || id === selected) return;
+    setAttachment(null);
+    setLightbox(null);
+    uploaded.current = null;
+    request.current = null;
     setPicked(id);
     setMessages([]);
     setHasMore(false);
@@ -144,6 +162,11 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
     setEmojiOpen(false);
     stickToBottom.current = true;
   };
+
+  useEffect(() => {
+    const url = attachment?.previewUrl;
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [attachment]);
 
   // 与聊天室一致：输入框随内容增高，新消息在阅读底部时自动滚动
   useEffect(() => {
@@ -265,22 +288,58 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
     }
   };
 
+  const stageAttachment = (files: FileList | null) => {
+    if (!files?.length || !selected || allowed === false || sending.current) return;
+    const file = files[0];
+    if (files.length > 1) {
+      setError("每条私聊可发送一个附件，请一次选择一个文件。");
+      return;
+    }
+    if (!file.size || file.size > MAX_ATTACHMENT_BYTES) {
+      setError(file.size ? `单个文件不能超过 ${MAX_ATTACHMENT_MB} MB` : "不能发送空文件");
+      return;
+    }
+    setError("");
+    uploaded.current = null;
+    setAttachment({ file, previewUrl: INLINE_IMAGE_TYPES.has(file.type) ? URL.createObjectURL(file) : undefined });
+  };
+
   const send = async () => {
-    if (busy || !draft.trim() || !selected || allowed === false) return;
+    if (sending.current || (!draft.trim() && !attachment) || !selected || allowed !== true) return;
+    sending.current = true;
     setBusy(true);
     setError("");
-    if (request.current.text !== draft) request.current = { text: draft, id: crypto.randomUUID() };
     try {
-      await apiFetch(`${BASE}/${selected}/messages`, { method: "POST", body: jsonBody({ source: mode, text: draft, request_id: request.current.id }) });
+      let attachmentId: string | undefined;
+      if (attachment) {
+        if (uploaded.current?.file !== attachment.file) {
+          setProgress(0);
+          const result = await uploadChatAttachment(`${BASE}/${selected}/files?source=${mode}`, attachment.file, attachment.previewUrl, setProgress);
+          uploaded.current = { file: attachment.file, id: result.id };
+          setProgress(null);
+        }
+        attachmentId = uploaded.current.id;
+      }
+      if (request.current?.text !== draft || request.current.attachmentId !== attachmentId) {
+        request.current = { text: draft, attachmentId, id: messageRequestId() };
+      }
+      await apiFetch(`${BASE}/${selected}/messages`, {
+        method: "POST",
+        body: jsonBody({ source: mode, text: draft, attachment_id: attachmentId, request_id: request.current.id }),
+      });
       stickToBottom.current = true;
       setEmojiOpen(false);
       setDraft("");
-      request.current = { text: "", id: "" };
+      setAttachment(null);
+      uploaded.current = null;
+      request.current = null;
       window.dispatchEvent(new Event(PRIVATE_EVENT));
     } catch (value) {
       setError(errorMessage(value));
     } finally {
+      sending.current = false;
       setBusy(false);
+      setProgress(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   };
@@ -299,7 +358,7 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
             {contactsError ? <p className="private-muted">{contactsError}</p> : null}
             {loaded && shown.length === 0 ? <p className="private-muted">{query ? "没有匹配的联系人" : "还没有其他账号"}</p> : null}
             {shown.map(c => (
-              <button type="button" key={c.id} className="private-contact" aria-pressed={selected === c.id} onClick={() => choose(c.id)}>
+              <button type="button" key={c.id} className="private-contact" aria-pressed={selected === c.id} disabled={busy} onClick={() => choose(c.id)}>
                 <Avatar nickname={c.name} avatar={c.photo} size="md" />
                 <span className="private-contact-text">
                   <span className="private-contact-name">{c.name}</span>
@@ -312,11 +371,21 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
         </aside>
       ) : null}
 
-      <section className="private-thread">
+      <section className="private-thread"
+        onDragOver={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = selected && allowed === true && !busy ? "copy" : "none";
+        }}
+        onDrop={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          stageAttachment(e.dataTransfer.files);
+        }}>
         {peer ? (
           <header className="private-head">
             {mode !== "near" ? (
-              <button type="button" className="private-back" onClick={() => choose("")} aria-label="返回联系人列表">‹</button>
+              <button type="button" className="private-back" disabled={busy} onClick={() => choose("")} aria-label="返回联系人列表">‹</button>
             ) : null}
             <Avatar nickname={peer.name} avatar={peer.photo} size="sm" />
             <h2 className="private-peer">{peer.name}</h2>
@@ -338,34 +407,62 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
                 const grouped = !!previous && previous.outgoing === m.outgoing && m.created_at - previous.created_at < 300;
                 const name = m.outgoing ? myName : peer?.name ?? "";
                 const photo = m.outgoing ? me?.photo : peer?.photo;
+                const fileUrl = m.attachment ? `${BASE}/${selected}/files/${m.attachment.id}` : undefined;
                 return (
                   <div key={m.seq} className={`chat-row${m.outgoing ? " chat-row-mine" : ""}${grouped ? " chat-row-grouped" : ""}`}>
                     {grouped ? <span className="chat-avatar-spacer" /> : <Avatar nickname={name} avatar={photo} />}
                     <div className="chat-message">
                       {grouped ? null : <span className="chat-message-meta"><strong>{name}</strong> · {formatChatTime(m.created_at)}</span>}
-                      <div className="chat-bubble">{m.text}</div>
+                      {m.text ? <div className="chat-bubble">{m.text}</div> : null}
+                      {m.attachment ? <ChatAttachmentCard attachment={{ ...m.attachment, src: m.attachment.kind === "image" ? fileUrl : undefined }}
+                        downloadHref={`${fileUrl}?download=true`} onOpen={setLightbox} /> : null}
                     </div>
                   </div>
                 );
               })}
             </div>
+            {attachment && allowed !== false ? (
+              <div className="private-attachment-draft">
+                {attachment.previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 本地图片通过临时地址预览
+                  <img src={attachment.previewUrl} alt="" />
+                ) : <Icon name="file" />}
+                <span title={attachment.file.name}>{attachment.file.name}</span>
+                <small role="status">{progress === null ? formatBytes(attachment.file.size) : `上传中 ${progress}%`}</small>
+                <Button type="button" size="sm" variant="quiet" disabled={busy} onClick={() => { setAttachment(null); uploaded.current = null; }}>移除</Button>
+              </div>
+            ) : null}
             {allowed === false ? (
               <p className="private-locked">对方近期没有给你发消息。发起私聊请面对对方按 E，或坐到自己的工位电脑前。</p>
             ) : (
               <form className="chat-composer" onSubmit={e => { e.preventDefault(); void send(); }}>
                 <textarea ref={inputRef} aria-label="私聊消息" rows={1} maxLength={MESSAGE_MAX} value={draft} disabled={busy}
                   placeholder={narrow ? "输入消息" : "输入消息，Enter 发送，Shift+Enter 换行"} onChange={e => setDraft(e.target.value)}
+                  onPaste={e => {
+                    if (!e.clipboardData.files.length) return;
+                    e.preventDefault();
+                    stageAttachment(e.clipboardData.files);
+                  }}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+                <input ref={fileInputRef} type="file" hidden onChange={e => {
+                  stageAttachment(e.currentTarget.files);
+                  e.currentTarget.value = "";
+                }} />
+                <button type="button" className="chat-emoji-toggle" disabled={busy || allowed !== true}
+                  onClick={() => fileInputRef.current?.click()} aria-label="发送图片或文件" title={`发送图片或文件（不超过 ${MAX_ATTACHMENT_MB} MB）`}>
+                  <Icon name="attach" />
+                </button>
                 <div className="chat-emoji-anchor" ref={emojiRef}>
                   <button type="button" className={`chat-emoji-toggle${emojiOpen ? " chat-toolbar-active" : ""}`} disabled={busy}
                     onClick={() => setEmojiOpen(open => !open)} aria-label="表情" aria-expanded={emojiOpen}><Icon name="smile" /></button>
                   {emojiOpen ? <div className="chat-emoji-popover"><ChatEmojiPicker onSelect={insertEmoji} /></div> : null}
                 </div>
-                <Button type="submit" disabled={busy || !draft.trim() || allowed === null}>{busy ? "发送中…" : "发送"}</Button>
+                <Button type="submit" disabled={busy || (!draft.trim() && !attachment) || allowed !== true}>{busy ? "发送中…" : "发送"}</Button>
               </form>
             )}
           </>
         )}
+        {lightbox ? <ChatLightbox lightbox={lightbox} onClose={() => setLightbox(null)} /> : null}
       </section>
     </div>
   );

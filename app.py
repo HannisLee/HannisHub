@@ -413,15 +413,19 @@ async def chat_room_upload(request: Request):
 @app.get("/api/chat-room/files/{file_id}")
 async def chat_room_file(file_id: str, download: bool = Query(False)):
     """读取聊天室附件：常见位图内联显示，其余类型或 download=true 时强制下载。"""
-    path, media_type, filename, disposition = chat_room.file_response_info(file_id, download)
+    return _chat_attachment_response(chat_room.file_response_info(file_id, download), "private, max-age=31536000, immutable")
+
+
+def _chat_attachment_response(info, cache_control: str) -> FileResponse:
+    path, media_type, filename, disposition = info
     return FileResponse(
         path,
         media_type=media_type,
         filename=filename,
         content_disposition_type=disposition,
         headers={
-            # 附件编号随机且内容不变，可长期缓存；禁止内容嗅探并以沙箱方式打开
-            "Cache-Control": "private, max-age=31536000, immutable",
+            # 禁止内容嗅探并以沙箱方式打开
+            "Cache-Control": cache_control,
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
         },
@@ -847,6 +851,20 @@ async def private_send(contact: str, request: Request, payload: dict[str, Any] =
     peer = await run_in_threadpool(private_chat.peer_for, owner, contact)
     lobby_presence.presence.notify_private({owner, peer})
     return result
+
+
+@app.post("/api/chat-lobby/private-chat/{contact}/files")
+async def private_upload(contact: str, request: Request, source: str):
+    """校验发送资格并上传仅可用于当前会话的附件。"""
+    scope = await run_in_threadpool(private_chat.upload_scope, _require_user(request), contact, source)
+    return JSONResponse(await chat_room.save_upload(request, directory=private_chat.files_dir(), scope=scope))
+
+
+@app.get("/api/chat-lobby/private-chat/{contact}/files/{file_id}")
+async def private_file(contact: str, file_id: str, request: Request, download: bool = False):
+    """只允许会话双方读取已发送的附件。"""
+    info = await run_in_threadpool(private_chat.file_response_info, _require_user(request), contact, file_id, download)
+    return _chat_attachment_response(info, "private, no-store")
 
 
 @app.put("/api/chat-lobby/private-chat/{contact}/read")

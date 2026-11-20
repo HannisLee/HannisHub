@@ -190,6 +190,12 @@ _MIGRATIONS: list[str] = [
     CREATE INDEX todo_spaces_owner ON todo_spaces(owner, sort);
     ALTER TABLE todos ADD COLUMN space TEXT NOT NULL DEFAULT '';
     """,
+    # v11：私聊双方副本引用同一份附件
+    """
+    ALTER TABLE lobby_messages ADD COLUMN attachment_id TEXT;
+    CREATE INDEX lobby_messages_attachment ON lobby_messages(attachment_id, owner, peer)
+        WHERE attachment_id IS NOT NULL;
+    """,
 ]
 
 _init_lock = threading.Lock()

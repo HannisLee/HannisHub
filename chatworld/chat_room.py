@@ -332,7 +332,7 @@ def post_message(payload: dict[str, Any]) -> dict[str, Any]:
     client_id = _validate_client_id(payload.get("client_id"))
     content = str(payload.get("content") or "").strip()
     attachment_id = str(payload.get("attachment_id") or "").strip()
-    attachment = _public_attachment(_read_file_meta(attachment_id)) if attachment_id else None
+    attachment = attachment_info(read_file_meta(attachment_id)) if attachment_id else None
     if not content and not attachment:
         raise HTTPException(status_code=400, detail="消息不能为空")
     if len(content) > MAX_MESSAGE_CHARS:
@@ -389,28 +389,21 @@ def clear_messages() -> dict[str, Any]:
 # ---------- 附件 ----------
 
 
-def _file_path(file_id: str) -> Path:
-    return FILES_DIR / file_id
-
-
-def _meta_path(file_id: str) -> Path:
-    return FILES_DIR / f"{file_id}.json"
-
-
-def _read_file_meta(file_id: str) -> dict[str, Any]:
-    """读取附件元信息；编号非法或文件缺失时返回 404。"""
-    if not FILE_ID_PATTERN.match(file_id):
+def read_file_meta(file_id: str, directory: Path | None = None) -> dict[str, Any]:
+    """读取指定附件目录的元信息；编号非法或文件缺失时返回 404。"""
+    directory = directory if directory is not None else FILES_DIR
+    if not FILE_ID_PATTERN.fullmatch(file_id):
         raise HTTPException(status_code=404, detail="附件不存在")
     try:
-        meta = json.loads(_meta_path(file_id).read_text(encoding="utf-8"))
+        meta = json.loads((directory / f"{file_id}.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=404, detail="附件不存在") from exc
-    if not _file_path(file_id).is_file():
+    if not (directory / file_id).is_file():
         raise HTTPException(status_code=404, detail="附件不存在")
     return meta
 
 
-def _public_attachment(meta: dict[str, Any]) -> dict[str, Any]:
+def attachment_info(meta: dict[str, Any]) -> dict[str, Any]:
     """随消息保存与返回的附件信息。"""
     result = {key: meta[key] for key in ("id", "name", "size", "mime", "kind") if key in meta}
     if meta.get("width") and meta.get("height"):
@@ -447,9 +440,13 @@ def cleanup_orphan_files() -> int:
             for message in _read_store()["messages"]
             if isinstance(message.get("attachment"), dict)
         }
+    return cleanup_files(FILES_DIR, referenced)
+
+
+def cleanup_files(directory: Path, referenced: set[str]) -> int:
     now = time.time()
     removed = 0
-    for path in FILES_DIR.iterdir():
+    for path in directory.iterdir():
         try:
             age = now - path.stat().st_mtime
         except OSError:
@@ -460,13 +457,13 @@ def cleanup_orphan_files() -> int:
             path.unlink(missing_ok=True)
             continue
         if path.suffix == ".json" and path.stem not in referenced:
-            _file_path(path.stem).unlink(missing_ok=True)
+            (directory / path.stem).unlink(missing_ok=True)
             path.unlink(missing_ok=True)
             removed += 1
     return removed
 
 
-async def save_upload(request: Request) -> dict[str, Any]:
+async def save_upload(request: Request, *, directory: Path | None = None, scope: dict[str, str] | None = None) -> dict[str, Any]:
     """以原始请求体流式保存一个附件，返回附件信息供随后发送消息。
 
     文件名放在 x-file-name 头（URL 编码），图片尺寸放在 x-image-width / x-image-height 头。
@@ -482,10 +479,13 @@ async def save_upload(request: Request) -> dict[str, Any]:
     mime = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()[:100] or "application/octet-stream"
     kind = "image" if mime in INLINE_IMAGE_TYPES else "file"
     file_id = uuid.uuid4().hex
-    FILES_DIR.mkdir(parents=True, exist_ok=True)
-    cleanup_orphan_files()
+    public = directory is None
+    directory = FILES_DIR if directory is None else directory
+    directory.mkdir(parents=True, exist_ok=True)
+    if public:
+        cleanup_orphan_files()
 
-    temp_path = FILES_DIR / f"{file_id}.part"
+    temp_path = directory / f"{file_id}.part"
     size = 0
     try:
         with temp_path.open("wb") as output:
@@ -498,7 +498,7 @@ async def save_upload(request: Request) -> dict[str, Any]:
                 output.write(chunk)
         if size == 0:
             raise HTTPException(status_code=400, detail="不能发送空文件")
-        os.replace(temp_path, _file_path(file_id))
+        os.replace(temp_path, directory / file_id)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
@@ -516,16 +516,23 @@ async def save_upload(request: Request) -> dict[str, Any]:
     if kind == "image" and width and height:
         meta["width"] = width
         meta["height"] = height
-    _meta_path(file_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-    return _public_attachment(meta)
+    if scope:
+        meta.update(scope)
+    try:
+        (directory / f"{file_id}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        (directory / file_id).unlink(missing_ok=True)
+        raise
+    return attachment_info(meta)
 
 
-def file_response_info(file_id: str, download: bool) -> tuple[Path, str, str, str]:
+def file_response_info(file_id: str, download: bool, directory: Path | None = None) -> tuple[Path, str, str, str]:
     """返回 (路径, 媒体类型, 文件名, 展示方式)。
 
     只有常见位图且未要求下载时才内联显示，其余一律以 application/octet-stream 强制下载。
     """
-    meta = _read_file_meta(file_id)
+    directory = directory if directory is not None else FILES_DIR
+    meta = read_file_meta(file_id, directory)
     inline = meta.get("kind") == "image" and meta.get("mime") in INLINE_IMAGE_TYPES and not download
     media_type = str(meta["mime"]) if inline else "application/octet-stream"
-    return _file_path(file_id), media_type, str(meta.get("name") or "file"), "inline" if inline else "attachment"
+    return directory / file_id, media_type, str(meta.get("name") or "file"), "inline" if inline else "attachment"

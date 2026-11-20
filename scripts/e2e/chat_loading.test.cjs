@@ -30,7 +30,14 @@ const assert = require('node:assert/strict');
     await composer.fill(message);
     await page.locator('.chat-composer').getByRole('button', { name: '发送', exact: true }).click();
     await page.locator('.chat-row[data-msg-id] .chat-bubble', { hasText: message }).waitFor();
-    await page.getByRole('link', { name: '工位待办', exact: true }).click();
+    await page.locator('.chat-composer input[type=file]').setInputFiles({
+      name: '聊天室回归.txt', mimeType: 'text/plain', buffer: Buffer.from('公共附件'),
+    });
+    const download = page.locator('.chat-row[data-msg-id]').getByRole('link', { name: '下载 聊天室回归.txt' });
+    await download.waitFor();
+    const file = await page.request.get(new URL(await download.getAttribute('href'), origin).href);
+    assert.equal(await file.text(), '公共附件');
+    await page.getByRole('link', { name: '待办', exact: true }).click();
     await page.waitForURL('**/todo/');
     await page.getByRole('link', { name: '聊天室', exact: true }).click();
     await page.locator('.chat-bubble', { hasText: message }).waitFor();

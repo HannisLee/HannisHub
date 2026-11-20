@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
-import { API_PATHS, apiFetch, jsonBody, uploadBinary } from "../../../lib/api";
+import { API_PATHS, apiFetch, jsonBody } from "../../../lib/api";
 import {
   CHAT_CLIENT_ID_KEY,
   addChatUnread,
@@ -12,10 +12,11 @@ import {
   announceChatMessages,
   setChatSoundEnabled,
 } from "../../../lib/chat-notify";
-import { errorMessage, formatBytes } from "../../../lib/format";
+import { errorMessage } from "../../../lib/format";
 import type { AuthStatus, ChatAttachment, ChatRoomMessage, ChatRoomMessages, ChatRoomProfile } from "../../../lib/types";
 import { Icon } from "../../ui/icon";
 import { Button, ErrorState, LoadingState } from "../../ui/primitives";
+import { ChatAttachmentCard, ChatLightbox, INLINE_IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB, uploadChatAttachment, type AttachmentDisplay, type LightboxImage } from "../shared/chat-attachment";
 import { Avatar, formatChatTime as formatTime } from "../shared/chat-avatar";
 import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
@@ -28,11 +29,6 @@ const FILES = `${API_PATHS.chatRoom}/files`;
 const NICKNAME_KEY = "hannishub_chat_nickname";
 const POLL_MS = 2000;
 const SEND_TIMEOUT_MS = 15000;
-const MAX_ATTACHMENT_MB = 50;
-const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
-/** 与后端一致：只有这些位图在页面内显示，其余按文件发送 */
-const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-
 /** 本地待发送消息：先显示在界面上，后台发送成功后替换为服务端消息 */
 interface PendingMessage {
   nonce: string;
@@ -83,16 +79,6 @@ function fileUrl(id: string, download = false): string {
   return `${FILES}/${encodeURIComponent(id)}${download ? "?download=true" : ""}`;
 }
 
-/** 读取本地图片尺寸，用于预留显示空间，避免图片加载后页面跳动 */
-function readImageSize(url: string): Promise<{ width: number; height: number } | null> {
-  return new Promise(resolve => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => resolve(null);
-    image.src = url;
-  });
-}
-
 /** 一行可渲染的消息：服务端消息或本地待发送消息 */
 interface DisplayMessage {
   /** 服务端消息编号；本地待发送消息没有 */
@@ -105,15 +91,8 @@ interface DisplayMessage {
   content: string;
   created_at: number;
   /** 附件信息；本地待发送时 name/size 来自本地文件 */
-  attachment?: { id?: string; name: string; size: number; kind: "image" | "file"; width?: number; height?: number; src?: string };
+  attachment?: AttachmentDisplay;
   pending?: PendingMessage;
-}
-
-/** 按图片原始比例计算缩略图尺寸，最大 320×280 */
-function thumbnailStyle(width?: number, height?: number) {
-  if (!width || !height) return undefined;
-  const scale = Math.min(1, 320 / width, 280 / height);
-  return { width: Math.round(width * scale), aspectRatio: `${width} / ${height}` };
 }
 
 /** 公共聊天室：顶部为在线人数与个人设置，中部为共享消息流，底部为输入框、附件与表情 */
@@ -131,7 +110,8 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [newBelow, setNewBelow] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [lightbox, setLightbox] = useState<{ src: string; name: string; download?: string } | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
+  const closeLightbox = useCallback(() => setLightbox(null), []);
   const { soundEnabled } = useChatNotify();
 
   const lastIdRef = useRef(0);
@@ -293,17 +273,8 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
     if (!item?.file) return;
     const file = item.file;
     try {
-      const headers: Record<string, string> = {
-        "Content-Type": file.type || "application/octet-stream",
-        "x-file-name": encodeURIComponent(file.name),
-      };
-      const size = item.previewUrl ? await readImageSize(item.previewUrl) : null;
-      if (size) {
-        headers["x-image-width"] = String(size.width);
-        headers["x-image-height"] = String(size.height);
-      }
       let lastPercent = -1;
-      const attachment = await uploadBinary<ChatAttachment>(FILES, file, headers, percent => {
+      const attachment = await uploadChatAttachment(FILES, file, item.previewUrl, percent => {
         if (percent === lastPercent) return;
         lastPercent = percent;
         updatePending(current => current.map(entry => (entry.nonce === nonce ? { ...entry, progress: percent } : entry)));
@@ -401,18 +372,6 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
       document.removeEventListener("keydown", onKey);
     };
   }, [emojiOpen]);
-
-  // 大图预览按 Esc 关闭
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setLightbox(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [lightbox]);
 
   function onScroll() {
     const box = listRef.current;
@@ -590,42 +549,6 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
     })),
   ];
 
-  function renderAttachment(message: DisplayMessage) {
-    const attachment = message.attachment;
-    if (!attachment) return null;
-    const uploading = message.pending?.status === "sending" && !message.pending.attachment;
-    const progress = message.pending?.progress ?? 0;
-    const downloadHref = attachment.id ? fileUrl(attachment.id, true) : undefined;
-    const download = downloadHref ? (
-      <a className="chat-attachment-download" href={downloadHref} download={attachment.name} title="下载" aria-label={`下载 ${attachment.name}`}>
-        <Icon name="download" />
-      </a>
-    ) : null;
-
-    if (attachment.kind === "image" && attachment.src) {
-      const src = attachment.src;
-      return (
-        <div className="chat-image" style={thumbnailStyle(attachment.width, attachment.height)}>
-          <button type="button" className="chat-image-open" onClick={() => setLightbox({ src, name: attachment.name, download: downloadHref })} aria-label={`查看 ${attachment.name}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- 聊天附件为受保护的动态地址 */}
-            <img src={src} alt={attachment.name} loading="lazy" />
-          </button>
-          {uploading ? <span className="chat-upload-overlay">{progress}%</span> : download}
-        </div>
-      );
-    }
-    return (
-      <div className="chat-file">
-        <span className="chat-file-icon"><Icon name="file" /></span>
-        <span className="chat-file-info">
-          <span className="chat-file-name" title={attachment.name}>{attachment.name}</span>
-          <span className="chat-file-size">{uploading ? `上传中 ${progress}% · ` : ""}{formatBytes(attachment.size)}</span>
-          {uploading ? <span className="chat-file-progress"><span style={{ width: `${progress}%` }} /></span> : null}
-        </span>
-        {download}
-      </div>
-    );
-  }
 
   return (
     <section
@@ -702,7 +625,10 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
                 {grouped ? <span className="chat-avatar-spacer" /> : <Avatar nickname={message.nickname} avatar={message.avatar} />}
                 <div className={`chat-message${status === "sending" ? " chat-message-sending" : ""}${status === "failed" ? " chat-message-failed" : ""}`}>
                   {grouped ? null : <span className="chat-message-meta"><strong>{message.nickname}</strong> · {formatTime(message.created_at)}</span>}
-                  {renderAttachment(message)}
+                  {message.attachment ? <ChatAttachmentCard attachment={message.attachment}
+                    downloadHref={message.attachment.id ? fileUrl(message.attachment.id, true) : undefined}
+                    progress={message.pending?.status === "sending" && !message.pending.attachment ? message.pending.progress ?? 0 : undefined}
+                    onOpen={setLightbox} /> : null}
                   {message.content ? <div className="chat-bubble">{message.content}</div> : null}
                   {status === "failed" && message.pending ? (
                     <span className="chat-send-failed">
@@ -747,17 +673,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
         <Button onClick={send} disabled={!draft.trim() || !clientId}>发送</Button>
       </div>
 
-      {lightbox ? (
-        <div className="chat-lightbox" role="dialog" aria-label={lightbox.name} onClick={() => setLightbox(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- 聊天附件为受保护的动态地址 */}
-          <img src={lightbox.src} alt={lightbox.name} onClick={event => event.stopPropagation()} />
-          <div className="chat-lightbox-bar" onClick={event => event.stopPropagation()}>
-            <span className="chat-lightbox-name">{lightbox.name}</span>
-            {lightbox.download ? <a className="button button-secondary button-sm" href={lightbox.download} download={lightbox.name}>下载原图</a> : null}
-            <Button size="sm" variant="quiet" onClick={() => setLightbox(null)}>关闭</Button>
-          </div>
-        </div>
-      ) : null}
+      {lightbox ? <ChatLightbox lightbox={lightbox} onClose={closeLightbox} /> : null}
     </section>
   );
 }

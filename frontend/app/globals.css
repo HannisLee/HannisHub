@@ -1043,8 +1043,8 @@ input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: var(--colo
 .chat-message-sending .chat-bubble, .chat-message-sending .chat-file { opacity: 0.6; }
 .chat-message.chat-message-failed .chat-bubble, .chat-message.chat-message-failed .chat-file, .chat-message.chat-message-failed .chat-image { border-color: var(--color-error); }
 /* 聊天附件：图片缩略图、文件卡片、拖拽提示与大图预览 */
-.chat-image { position: relative; max-width: min(320px, 100%); overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-bg); }
-.chat-image-open { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.chat-image { position: relative; max-width: min(320px, 100%); min-height: 88px; overflow: hidden; border: 1px solid var(--color-divider); border-radius: var(--radius-lg); background: var(--color-bg); }
+.chat-image-open { display: block; width: 100%; height: 100%; min-height: 88px; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .chat-image img { display: block; width: 100%; height: 100%; max-height: 280px; object-fit: cover; }
 .chat-upload-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--color-bg) 55%, transparent); color: var(--color-text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
 .chat-attachment-download { display: inline-flex; flex: 0 0 auto; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-surface); color: var(--color-text-secondary); transition: color 160ms ease, border-color 160ms ease; }
@@ -1850,6 +1850,11 @@ html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; us
 .private-locked { flex: 0 0 auto; margin: 0; padding: var(--space-4) 0 0; border-top: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 13px; line-height: 1.6; }
 .private-panel .chat-composer { flex: 0 0 auto; }
 .private-panel .chat-composer textarea { min-width: 0; width: 0; max-height: min(200px, 24dvh); }
+.private-attachment-draft { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); min-width: 0; padding-block: var(--space-2); }
+.private-attachment-draft img, .private-attachment-draft > svg { width: 32px; height: 32px; flex: 0 0 auto; object-fit: cover; border-radius: var(--radius-sm); }
+.private-attachment-draft > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.private-attachment-draft > small { flex: 0 0 auto; color: var(--color-text-muted); }
+.private-attachment-draft > button { flex: 0 0 auto; margin-left: auto; }
 /* 私聊弹窗中表情面板对齐发送区右边缘，窄屏保持在窗口内。 */
 .private-panel .chat-emoji-anchor { position: static; }
 .private-panel .chat-emoji-picker { width: min(352px, calc(100vw - 80px)); }

@@ -142,6 +142,60 @@ const assert=require('node:assert/strict');
    if(shots) await gp.screenshot({path:`${shots}/inbox-${width}x${height}.png`});
    await gp.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
  }
- console.log('私聊浏览器检查通过：三账号隔离、定向通知、幂等发送、已读与距离失效、任意位置回复、提醒入口、多尺寸布局与头像同步');
+ // 独立私聊页实际发送剪贴板图片，第三个账号不能读取或引用该附件。
+ const ap=pages[0];
+ await ap.goto(origin+'/private-chat');
+ await ap.getByRole('button',{name:/访客小G/}).click();
+ const attach=ap.getByRole('button',{name:'发送图片或文件'});
+ await attach.waitFor();
+ const send=ap.getByRole('button',{name:'发送',exact:true});
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/axkAAAAASUVORK5CYII=';
+ await ap.getByRole('textbox',{name:'私聊消息'}).evaluate((input,png)=>{
+   const data=new DataTransfer();
+   data.items.add(new File([Uint8Array.from(atob(png),c=>c.charCodeAt(0))],'剪贴板.png',{type:'image/png'}));
+   input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+ },png);
+ await ap.locator('.private-attachment-draft img').waitFor();
+ await send.click();
+ const thumbnail=ap.getByRole('button',{name:'查看 剪贴板.png'});
+ await thumbnail.click();
+ await ap.getByRole('dialog',{name:'剪贴板.png'}).waitFor();
+ await ap.keyboard.press('Escape');
+ await ap.getByRole('dialog',{name:'剪贴板.png'}).waitFor({state:'hidden'});
+ const image=(await req(gp,lihan.id+'/messages')).data.at(-1).attachment;
+ assert.equal(image.kind,'image');assert.equal(image.name,'剪贴板.png');assert.equal(image.width,1);
+ const filePath=(contact,id)=>'/api/chat-lobby/private-chat/'+contact+'/files/'+id;
+ const imageResponse=await gp.request.get(origin+filePath(lihan.id,image.id));
+ assert.equal(imageResponse.status(),200);
+ assert.equal(imageResponse.headers()['cache-control'],'private, no-store');
+ assert.deepEqual(await imageResponse.body(),Buffer.from(png,'base64'));
+ assert.equal((await pages[2].request.get(origin+filePath(lihan.id,image.id))).status(),404);
+ assert.equal((await pages[2].request.get(origin+'/api/chat-room/files/'+image.id)).status(),404);
+ assert.equal((await gp.request.get(origin+filePath(lihan.id,image.id)+'?download=true')).headers()['content-disposition'].startsWith('attachment;'),true);
+ assert.equal((await req(gp,lihan.id+'/messages','POST',{source:'inbox',attachment_id:image.id,request_id:'receiver-cannot-reuse'})).status,404);
+ await ap.reload();
+ await ap.getByRole('button',{name:/访客小G/}).click();
+ await thumbnail.waitFor();
+ await ap.waitForTimeout(850); // 同账号发送间隔为 0.8 秒。
+ await ap.locator('.private-thread input[type=file]').setInputFiles({name:'准备移除.txt',mimeType:'text/plain',buffer:Buffer.from('草稿')});
+ await ap.getByText('准备移除.txt',{exact:true}).waitFor();
+ await ap.getByRole('button',{name:'移除'}).click();
+ await ap.locator('.private-attachment-draft').waitFor({state:'hidden'});
+ await ap.locator('.private-thread').evaluate(thread=>{
+   const data=new DataTransfer();
+   data.items.add(new File(['附件内容'],'拖入.txt',{type:'text/plain'}));
+   thread.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+ });
+ await ap.getByText('拖入.txt',{exact:true}).waitFor();
+ await ap.getByRole('textbox',{name:'私聊消息'}).fill('随附说明');
+ await send.click();
+ await ap.getByRole('link',{name:'下载 拖入.txt'}).waitFor();
+ const file=(await req(gp,lihan.id+'/messages')).data.at(-1);
+ assert.equal(file.text,'随附说明');
+ assert.equal(file.attachment.kind,'file');
+ const download=await gp.request.get(origin+filePath(lihan.id,file.attachment.id));
+ assert.equal(download.status(),200);
+ assert.equal(await download.text(),'附件内容');
+ console.log('私聊浏览器检查通过：三账号隔离、定向通知、幂等发送、已读与距离失效、任意位置回复、提醒入口、多尺寸布局、头像同步、图片与文件发送及访问隔离');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});
