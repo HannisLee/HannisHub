@@ -150,3 +150,28 @@ export function sortTodoItems<T extends SortableTodo>(items: readonly T[], mode:
 export function blockedFirst<T extends { status?: string }>(items: readonly T[]): T[] {
   return [...items.filter(item => item.status === "blocked"), ...items.filter(item => item.status !== "blocked")];
 }
+
+/** 本地日历日期 YYYY-MM-DD 前后平移若干天（按日历计算，不受夏令时影响）。 */
+export function shiftDay(day: string, delta: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const date = new Date(y, m - 1, d + delta);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+/** 是否属于「今天」视图（调用方只传未完成的待办）：
+ *  今天或更早加入「今天」且仍未完成的（昨天及之前未做完的会顺延），以及截止日期不晚于今天的。
+ *  加入日期晚于今天（未来）的不算。 */
+export function belongsToToday(todo: { my_day: string; due_date: string }, today: string): boolean {
+  return (Boolean(todo.my_day) && todo.my_day <= today) || (Boolean(todo.due_date) && todo.due_date <= today);
+}
+
+/** 进度时间的相对显示：今天只显示 HH:MM，昨天显示「昨天 HH:MM」，更早显示 MM-DD HH:MM（非今年带年份）。 */
+export function progressTimeLabel(item: Pick<TimelineItem, "kind" | "dateTimeText" | "timeText">, today: string): string {
+  if (item.kind === "unknown") return "时间未知";
+  const day = item.dateTimeText.slice(0, 10);
+  if (day === today) return item.timeText;
+  if (day === shiftDay(today, -1)) return `昨天 ${item.timeText}`;
+  const [year, month, date] = day.split("-");
+  const prefix = year === today.slice(0, 4) ? "" : `${year}-`;
+  return `${prefix}${month}-${date} ${item.timeText}`;
+}

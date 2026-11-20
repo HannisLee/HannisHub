@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { errorMessage } from "../../../lib/format";
-import { blockedFirst, buildProgressTimeline, mergeProgressEntries, sortTodoItems, type TimelineItem, type TodoSortMode } from "../../../lib/todo-timeline";
+import {
+  belongsToToday, blockedFirst, buildProgressTimeline, mergeProgressEntries, progressTimeLabel, sortTodoItems,
+  type TimelineItem, type TodoSortMode,
+} from "../../../lib/todo-timeline";
 import {
   addTodoProgress, createTodo, deleteTodo, fetchTodos, localDate, newSubtaskId, normalizeTodoStatus,
   PRIORITY_LABELS, PRIORITY_OPTIONS, PRIORITY_TAGS, reorderTodos, TODO_LIST_MAX, TODO_NOTE_MAX,
@@ -72,15 +75,6 @@ function assignedDayLabel(day: string, today: string): string {
   if (days === 0) return "今天";
   if (days === 1) return "昨天";
   return days > 0 ? `${days}天前` : `${-days}天后`;
-}
-
-/** 进度时间：今天视图只显示 HH:MM；其他视图显示 MM-DD HH:MM（非今年加年份） */
-function progressTimeLabel(item: TimelineItem, compact: boolean): string {
-  if (item.kind === "unknown") return "时间未知";
-  if (compact) return item.timeText;
-  const [year, month, day] = item.dateTimeText.slice(0, 10).split("-");
-  const prefix = year === String(new Date().getFullYear()) ? "" : `${year}-`;
-  return `${prefix}${month}-${day} ${item.timeText}`;
 }
 
 function sameLocalDay(timestamp: number | null, day: string): boolean {
@@ -287,7 +281,8 @@ export function TodoPanel() {
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh-CN"));
   }, [all]);
 
-  const inToday = useCallback((todo: Todo) => todo.my_day === today || (Boolean(todo.due_date) && todo.due_date <= today), [today]);
+  // 今天及更早加入且未完成的待办顺延到今天，截止不晚于今天的也收录
+  const inToday = useCallback((todo: Todo) => belongsToToday(todo, today), [today]);
   const open = all.filter(todo => !todo.done);
   const counts = {
     today: open.filter(inToday).length,
@@ -819,7 +814,7 @@ export function TodoPanel() {
 interface TodoRowProps {
   todo: Todo;
   today: string;
-  /** 今天视图：不显示「今天」日期标签，进度时间只显示 HH:MM */
+  /** 今天视图：标题左侧不占日期列；从更早日子顺延来的待办在元信息行标注「昨天加入」等 */
   compact: boolean;
   expanded: boolean;
   lists: string[];
@@ -866,6 +861,8 @@ function TodoRow({
   const dueToday = !todo.done && todo.due_date === today;
   const subDone = todo.subtasks.filter(sub => sub.done).length;
   const inMyDay = todo.my_day === today;
+  // 加入「今天」的日期早于今天且仍未完成：顺延到今天视图
+  const carriedOver = !todo.done && Boolean(todo.my_day) && todo.my_day < today;
   const currentStatus = normalizeTodoStatus(todo.status);
 
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
@@ -991,6 +988,9 @@ function TodoRow({
 
   // 元信息改为一行纯文字，不再使用描边标签
   const metaParts: { key: string; text: string; className?: string }[] = [];
+  if (compact && carriedOver) {
+    metaParts.push({ key: "carried", text: `${assignedDayLabel(todo.my_day, today)}加入`, className: "is-emphasis" });
+  }
   if (todo.due_date) {
     metaParts.push({
       key: "due",
@@ -1010,7 +1010,7 @@ function TodoRow({
         dateTime={item.isoTime ?? undefined}
         title={item.kind === "unknown" ? undefined : item.dateTimeText}
       >
-        {progressTimeLabel(item, compact)}
+        {progressTimeLabel(item, today)}
       </time>
     </li>
   );
@@ -1378,10 +1378,13 @@ function TodoDetail({
         <label className="todo-field todo-field-check">
           <input
             type="checkbox"
-            checked={todo.my_day === today}
+            checked={Boolean(todo.my_day) && todo.my_day <= today}
             onChange={event => void onPatch({ my_day: event.target.checked ? today : "" })}
           />
-          <span>加入今天</span>
+          <span>
+            加入今天
+            {todo.my_day && todo.my_day < today ? <span className="todo-field-hint">（{assignedDayLabel(todo.my_day, today)}加入）</span> : null}
+          </span>
         </label>
       </div>
 

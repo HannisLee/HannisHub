@@ -3,7 +3,7 @@
 字段：
 - title 标题（必填，最多 200 字）、note 备注（最多 4000 字）、list 所属清单（最多 24 字，空为「未分类」）
 - priority 优先级 0 无 / 1 低 / 2 中 / 3 高；due_date 截止日期 YYYY-MM-DD（空为不设）
-- my_day 加入「今天」的日期 YYYY-MM-DD（由浏览器按本地日期给出，过了这一天自动不再算「今天」）
+- my_day 加入「今天」的日期 YYYY-MM-DD（由浏览器按本地日期给出；未完成时过了这一天仍顺延显示在「今天」，前端标注「昨天加入」等）
 - done 是否完成、done_at 完成时间；status 执行状态（not_started 待开始 / in_progress 进行中 / blocked 阻塞中，与 done 独立）
 - subtasks 子任务 [{id, title, done}]（最多 50 个）
 - progress 进度记录 [{id, text, created_at}]，按添加顺序从旧到新保存

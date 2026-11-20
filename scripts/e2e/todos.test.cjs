@@ -48,15 +48,17 @@ const path = require('node:path');
 
     // 如提供了 TEST_DB，直接往隔离测试库写入精确时间戳的 6 条进度，验收时间轴规则
     if (process.env.TEST_DB) {
+      // 时间相对运行当天生成：昨天 4 条、今天 2 条，验证「今天 HH:MM / 昨天 HH:MM」的相对显示
       const timestamps = await page.evaluate(() => {
-        const mk = (y, m, d, hh, mm) => Math.floor(new Date(y, m - 1, d, hh, mm, 0).getTime() / 1000);
+        const now = new Date();
+        const mk = (dayOffset, hh, mm) => Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hh, mm, 0).getTime() / 1000);
         return [
-          { id: 'tl1', text: '开始训练', created_at: mk(2026, 11, 19, 15, 0) },
-          { id: 'tl2', text: '完成第一次测试', created_at: mk(2026, 11, 19, 17, 0) },
-          { id: 'tl3', text: '发现问题', created_at: mk(2026, 11, 19, 17, 35) },
-          { id: 'tl4', text: '完成修复', created_at: mk(2026, 11, 19, 18, 55) },
-          { id: 'tl5', text: '开始第二轮', created_at: mk(2026, 11, 20, 9, 0) },
-          { id: 'tl6', text: '完成第二轮', created_at: mk(2026, 11, 20, 9, 45) },
+          { id: 'tl1', text: '开始训练', created_at: mk(-1, 15, 0) },
+          { id: 'tl2', text: '完成第一次测试', created_at: mk(-1, 17, 0) },
+          { id: 'tl3', text: '发现问题', created_at: mk(-1, 17, 35) },
+          { id: 'tl4', text: '完成修复', created_at: mk(-1, 18, 55) },
+          { id: 'tl5', text: '开始第二轮', created_at: mk(0, 9, 0) },
+          { id: 'tl6', text: '完成第二轮', created_at: mk(0, 9, 45) },
         ];
       });
       execFileSync(process.env.PYTHON_BIN || 'python3', [
@@ -189,7 +191,7 @@ const path = require('node:path');
     assert.equal((await createdRow.locator('.todo-status-btn').textContent()).trim(), '阻塞中');
     await page.unroute(`**/api/todos/${createdData.id}`);
 
-    // B. 进度：第二行只显示最新一条，更早记录折叠为「N 条更早记录」，展开后按时间倒序；今天视图仅显示 HH:MM
+    // B. 进度：第二行只显示最新一条，更早记录折叠为「N 条更早记录」，展开后按时间倒序；今天的只显示 HH:MM，昨天的显示「昨天 HH:MM」
     const tlRow = page.locator('.todo-item', { hasText: 'C588-2node-16gbs8-amp-both' });
     const tlList = tlRow.getByRole('list', { name: '进度记录' });
     if (process.env.TEST_DB) {
@@ -200,13 +202,13 @@ const path = require('node:path');
       await moreBtn.click();
       const olderList = tlRow.getByRole('list', { name: '更早的进度记录' });
       assert.deepEqual(await olderList.locator('li').evaluateAll(els => els.map(el => el.innerText.replace(/\s+/g, ' ').trim())), [
-        '开始第二轮 09:00', '完成修复 18:55', '发现问题 17:35', '完成第一次测试 17:00', '开始训练 15:00',
+        '开始第二轮 09:00', '完成修复 昨天 18:55', '发现问题 昨天 17:35', '完成第一次测试 昨天 17:00', '开始训练 昨天 15:00',
       ]);
-      // 时间右对齐（tabular-nums），不显示日期与 +时长
+      // 时间右对齐（tabular-nums），不显示 +时长
       const timeRights = await tlRow.locator('.todo-progress-time').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().right)));
       assert.equal(new Set(timeRights).size, 1, `时间应右对齐: ${JSON.stringify(timeRights)}`);
       assert.equal(await tlRow.locator('.todo-progress-time').first().evaluate(el => getComputedStyle(el).fontVariantNumeric), 'tabular-nums');
-      assert.equal(await tlRow.locator('.todo-progress-time').first().getAttribute('title'), '2026-11-20 09:45');
+      assert.equal(await tlRow.locator('.todo-progress-time').first().getAttribute('title'), `${today} 09:45`);
       if (process.env.SHOT_DIR) {
         await tlRow.screenshot({ path: path.join(process.env.SHOT_DIR, 'todo-card-expanded.png') });
       }
@@ -359,6 +361,27 @@ const path = require('node:path');
     if (process.env.SHOT_DIR) {
       await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'todo-desktop.png'), fullPage: true });
     }
+
+    // 昨天加入「今天」但没做完的待办顺延到今天的「待完成」，并标注「昨天加入」；详情中「加入今天」保持勾选
+    const yesterday = await page.evaluate(() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('en-CA'); });
+    const carried = await api('/api/todos', 'POST', { title: prefix + '昨天遗留', my_day: yesterday });
+    const futureDay = await api('/api/todos', 'POST', { title: prefix + '明天才做', my_day: await page.evaluate(() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toLocaleDateString('en-CA'); }) });
+    const todayCountBefore = Number(await nav.getByRole('button', { name: /^今天/ }).locator('.todo-nav-count').textContent());
+    await page.reload();
+    const carriedRow = page.locator('.todo-group', { has: page.getByRole('heading', { name: /^待完成/ }) }).locator('.todo-item', { hasText: carried.title });
+    await carriedRow.waitFor();
+    assert.equal((await carriedRow.locator('.todo-meta').textContent()).trim(), '昨天加入');
+    assert.equal(await page.locator('.todo-item', { hasText: futureDay.title }).count(), 0);
+    assert.equal(Number(await nav.getByRole('button', { name: /^今天/ }).locator('.todo-nav-count').textContent()), todayCountBefore + 1);
+    await carriedRow.locator('.todo-row-main').click();
+    assert.ok(await carriedRow.getByRole('checkbox', { name: /加入今天/ }).isChecked());
+    await carriedRow.locator('.todo-row-main').click();
+    // 顺延的待办完成后进入「今天完成」
+    await carriedRow.locator('.todo-status-btn').click();
+    const carriedDone = page.waitForResponse(r => r.url().endsWith(`/api/todos/${carried.id}`) && r.request().method() === 'PATCH');
+    await carriedRow.getByRole('menuitemradio', { name: '已完成' }).click();
+    await carriedDone;
+    assert.equal(await carriedRow.count(), 0);
 
     // 「全部」视图保留「今天」日期标签（纯文字、固定宽度，位于标题左侧）
     await nav.getByRole('button', { name: /^全部/ }).click();

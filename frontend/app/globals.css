@@ -1401,6 +1401,7 @@ html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; us
 .todo-field textarea { min-height: 84px; font-size: 14px; }
 .todo-field-check { display: flex; align-items: center; gap: var(--space-2); min-height: 36px; cursor: pointer; }
 .todo-field-check > span { color: var(--todo-text-body); font-size: 14px; }
+.todo-field-hint { color: var(--todo-text-meta); font-size: 12px; }
 .todo-subtasks { display: grid; gap: var(--space-2); }
 .todo-subtasks ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .todo-subtasks li { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; color: var(--todo-text-body); font-size: 14px; }

@@ -11,7 +11,7 @@ function load(path) {
   return loaded.exports;
 }
 
-const { blockedFirst, buildProgressTimeline, formatDurationShort, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
+const { belongsToToday, blockedFirst, buildProgressTimeline, progressTimeLabel, shiftDay, formatDurationShort, sortProgressEntries, sortTodoItems } = load("../lib/todo-timeline.ts");
 
 function tsLocal(y, m, d, hh, mm, ss = 0) {
   return Math.floor(new Date(y, m - 1, d, hh, mm, ss).getTime() / 1000);
@@ -106,4 +106,29 @@ test("阻塞中任务稳定置顶，其余保持原顺序", () => {
   ];
   assert.deepEqual(blockedFirst(items).map(i => i.id), ["b", "d", "a", "c"]);
   assert.deepEqual(blockedFirst([]), []);
+});
+
+test("今天视图收录：今天及更早加入且未完成的顺延，截止不晚于今天的也收录，未来加入的不收录", () => {
+  const today = "2026-11-20";
+  assert.equal(belongsToToday({ my_day: today, due_date: "" }, today), true);
+  assert.equal(belongsToToday({ my_day: "2026-11-19", due_date: "" }, today), true);
+  assert.equal(belongsToToday({ my_day: "2026-10-01", due_date: "" }, today), true);
+  assert.equal(belongsToToday({ my_day: "2026-11-21", due_date: "" }, today), false);
+  assert.equal(belongsToToday({ my_day: "", due_date: "" }, today), false);
+  assert.equal(belongsToToday({ my_day: "", due_date: today }, today), true);
+  assert.equal(belongsToToday({ my_day: "", due_date: "2026-11-18" }, today), true);
+  assert.equal(belongsToToday({ my_day: "", due_date: "2026-11-21" }, today), false);
+});
+
+test("日期平移跨月跨年，进度时间按今天 / 昨天 / 更早相对显示", () => {
+  assert.equal(shiftDay("2026-03-01", -1), "2026-02-28");
+  assert.equal(shiftDay("2027-01-01", -1), "2026-12-31");
+  assert.equal(shiftDay("2026-11-20", 1), "2026-11-21");
+  const at = (day, time) => ({ kind: "anchor", dateTimeText: `${day} ${time}`, timeText: time });
+  assert.equal(progressTimeLabel(at("2026-11-20", "09:05"), "2026-11-20"), "09:05");
+  assert.equal(progressTimeLabel(at("2026-11-19", "18:38"), "2026-11-20"), "昨天 18:38");
+  assert.equal(progressTimeLabel(at("2026-11-02", "08:00"), "2026-11-20"), "11-02 08:00");
+  assert.equal(progressTimeLabel(at("2025-12-31", "23:50"), "2026-11-20"), "2025-12-31 23:50");
+  assert.equal(progressTimeLabel(at("2026-12-31", "23:50"), "2027-01-01"), "昨天 23:50");
+  assert.equal(progressTimeLabel({ kind: "unknown", dateTimeText: "时间未知", timeText: "—" }, "2026-11-20"), "时间未知");
 });
