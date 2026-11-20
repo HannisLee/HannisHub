@@ -348,6 +348,8 @@ export interface AsrRecord {
   id: string;
   name?: string;
   filename?: string;
+  source_url?: string | null;
+  uploaded_at?: number;
   status?: string;
   progress?: number;
   progress_detail?: string;

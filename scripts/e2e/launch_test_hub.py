@@ -36,6 +36,7 @@ if os.environ.get("HANNISHUB_TEST_EXTERNAL_TERMINAL") != "1":
     auth.SETTINGS_PATH.write_text(json.dumps(config))
     terminal_process = subprocess.Popen([sys.executable, "-m", "server.terminal_service"], cwd=Path(__file__).resolve().parents[2])
 import app as hub
+hub.model_manager_app.ASR_JOB_DIR = work / "asr_jobs"
 import uvicorn
 try:
     uvicorn.run(hub.app, host="127.0.0.1", port=port, lifespan="off", log_level="warning")

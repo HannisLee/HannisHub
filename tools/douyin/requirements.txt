@@ -1,0 +1,1 @@
+dy-cli @ git+https://github.com/Youhai020616/douyin.git@6b10a49a92ea3369d633043a99f20cfebb5d857e

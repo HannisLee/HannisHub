@@ -474,6 +474,7 @@ _download_lock   # 下载任务状态读写锁
 | PUT | `/api/asr/extraction-settings` | 保存当前账号的 ASR 提炼提示词：管理员写入 ai_settings.json，其他账号写入数据库 |
 | GET | `/api/asr` | 获取唯一运行中的 ASR 实例信息及 `/health` 就绪状态 `ready` |
 | POST | `/api/asr/transcriptions` | 上传一个音频，创建历史 item 并在后台队列中转写，立即返回 `202` |
+| POST | `/api/asr/transcriptions/douyin` | 提交 JSON `{"text":"抖音视频链接或分享文案"}`，最多 4096 字。为当前账号创建下载及转写历史，返回 `202` 和 `record`。历史包含 `source_url` |
 | POST | `/api/start` | 启动已注册服务（model 为 `custom:<id>` 启 vLLM，或 `llama:<id>` 启 llama.cpp） |
 | POST | `/api/stop` | 停止指定 PID 或全部受管实例 |
 | POST | `/api/restart` | 重启指定 PID 或最新受管实例 |
@@ -592,6 +593,10 @@ _download_lock   # 下载任务状态读写锁
 - 不传 pid 时读取最新受管进程日志；没有受管进程时回退到 `settings.log_file`
 
 **ASR 专用转写：**
+
+- 抖音入口接受中国版抖音短链、视频长链、含 `modal_id` 的电脑版链接或完整分享文案。后台核对作品 ID，优先下载作品播放音轨，必要时下载含音轨的视频，再复用现有的 FFmpeg 和 Qwen3 ASR 队列。下载逐段校验响应区间和长度，历史显示作品名称和原视频链接。下载超时为 240 秒。服务重启时会重新下载未完成的文件，已完整保存的媒体直接进入转写。
+- 下载适配器位于 `tools/douyin/`，复用固定版本的 `dy-cli`，使用独立环境。部署时执行 `python -m venv tools/douyin/.venv` 和 `tools/douyin/.venv/bin/pip install -r tools/douyin/requirements.txt`，并确保 Hub 可调用 FFmpeg 与 ffprobe。下载器从抖音获取媒体，转写由本机 ASR 执行。
+
 1. 服务注册时明确选择 ASR 或标准 LLM。ASR 服务的 Open 固定跳转到 `/asr`；标准 LLM 服务的 Open 打开 `/chat/{pid}` 通用聊天页；OCR 服务的 Open 通过 `/llama-manager/llama-process/{pid}/` 打开受管工作台，代理改写工作台绝对资源路径并转发流式请求
 2. 专用页将服务与批量拖放/点击上传区置顶，转写历史放在下方；可一次选择或拖入多个音频，支持 M4S 及所有可被 FFmpeg 解码的常见音视频格式，单文件最多 4 GB。后端不再按扩展名拒绝文件，而是以文件内容交给 FFmpeg 探测
 3. 转写时后端自动使用唯一运行且健康检查就绪的 ASR 受管实例；服务未运行、初始化中或存在多个实例时，上传仍可接收并在后台等待。音频写入本地任务目录，并由 FFmpeg 解码、静音检测和导出为 FLAC 后再转写；初始单片最长 600 秒，若导出后的 FLAC 超过 16 MB 安全阈值则自动继续切分。未安装 FFmpeg 时会返回安装提示；没有初始化信息的独立 DASH M4S 片段无法单独解码，需提供完整 MP4/M4A 或合并后的媒体文件

@@ -36,6 +36,8 @@ from model_manager.asr_audio import (
 )
 from urllib.parse import unquote
 
+from tools.douyin.download import download_video, parse_share_text
+
 import httpx
 import psutil
 import tqdm as _tqdm_module
@@ -2109,11 +2111,11 @@ def _transcribe_qwen3_asr(item: dict, input_path: Path, work_dir: Path, on_progr
     }
 
 
-_ASR_ACTIVE_STATUSES = ("uploading", "queued", "processing", "transcribing")
+_ASR_ACTIVE_STATUSES = ("uploading", "downloading", "queued", "processing", "transcribing")
 # 允许由业务代码更新的列，防止拼接 SQL 时混入任意列名
 _ASR_UPDATABLE_COLUMNS = {
     "name", "duration", "chunks", "text_length", "status", "progress", "progress_detail",
-    "error", "transcript", "extraction",
+    "error", "transcript", "extraction", "source_url",
 }
 
 
@@ -2136,6 +2138,7 @@ def _asr_history_snapshot(record: dict) -> dict:
         "id": record.get("id"),
         "name": record.get("name"),
         "original_filename": record.get("original_filename"),
+        "source_url": record.get("source_url"),
         "uploaded_at": record.get("uploaded_at"),
         "duration": record.get("duration"),
         "chunks": record.get("chunks"),
@@ -2153,7 +2156,7 @@ def _asr_history_snapshots(owner: str) -> list[dict]:
     with database.connect() as conn:
         rows = conn.execute(
             "SELECT id, name, original_filename, uploaded_at, duration, chunks, text_length, status, progress, "
-            "progress_detail, error, extraction IS NOT NULL AS has_extraction "
+            "progress_detail, error, source_url, extraction IS NOT NULL AS has_extraction "
             "FROM asr_records WHERE owner = ? ORDER BY uploaded_at DESC",
             (owner,),
         ).fetchall()
@@ -2165,18 +2168,19 @@ def _asr_history_snapshots(owner: str) -> list[dict]:
     return snapshots
 
 
-def _create_asr_history_record(filename: str, owner: str) -> dict:
-    """为指定账号创建一个上传中的 ASR 历史记录；原始音频只保存在任务目录。"""
+def _create_asr_history_record(filename: str, owner: str, source_url: str | None = None) -> dict:
+    """为指定账号创建 ASR 历史记录；媒体只保存在任务目录。"""
     record_id = f"asr_{uuid.uuid4().hex}"
     record = {
         "id": record_id,
         "owner": owner,
         "name": (Path(filename).stem.strip() or "未命名转写")[:160],
         "original_filename": filename,
+        "source_url": source_url,
         "uploaded_at": time.time(),
-        "status": "uploading",
+        "status": "queued" if source_url else "uploading",
         "progress": 0,
-        "progress_detail": "正在接收上传",
+        "progress_detail": "正在等待下载抖音视频" if source_url else "正在接收上传",
     }
     with database.connect() as conn:
         conn.execute(
@@ -2252,12 +2256,22 @@ def _make_asr_progress_reporter(record_id: str):
     return report
 
 
-def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir: Path):
+def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir: Path, source_url: str | None = None):
     """按队列执行一个转写任务，并将结果写回数据库。"""
     with _asr_task_semaphore:
         report_progress = _make_asr_progress_reporter(record_id)
         completed = False
         try:
+            if source_url and not input_path.is_file():
+                report_progress("downloading", 0, "正在下载抖音视频")
+                work_dir.mkdir(parents=True, exist_ok=True)
+                temporary_media = work_dir / "download.mp4.tmp"
+                media = download_video(source_url, temporary_media, ASR_MAX_UPLOAD_BYTES)
+                changes = {"source_url": media["source_url"]}
+                if media["title"]:
+                    changes["name"] = media["title"]
+                _update_asr_history_record(record_id, changes)
+                temporary_media.replace(input_path)
             result = _transcribe_qwen3_asr(item, input_path, work_dir, report_progress)
             _complete_asr_history_record(record_id, result)
             completed = True
@@ -2265,7 +2279,7 @@ def _run_asr_history_task(record_id: str, item: dict, input_path: Path, work_dir
             try:
                 _update_asr_history_record(record_id, {
                     "status": "error",
-                    "progress_detail": "处理失败",
+                    "progress_detail": "抖音视频下载失败" if source_url and not input_path.is_file() else "处理失败",
                     "error": str(exc)[:1500],
                 })
             except Exception:
@@ -2288,7 +2302,7 @@ async def recover_interrupted_asr_tasks():
     recoverable = []
     with database.transaction() as conn:
         rows = conn.execute(
-            f"SELECT id, status, original_filename FROM asr_records WHERE status IN ({', '.join('?' for _ in _ASR_ACTIVE_STATUSES)})",
+            f"SELECT id, status, original_filename, source_url FROM asr_records WHERE status IN ({', '.join('?' for _ in _ASR_ACTIVE_STATUSES)})",
             _ASR_ACTIVE_STATUSES,
         ).fetchall()
         for row in rows:
@@ -2298,9 +2312,11 @@ async def recover_interrupted_asr_tasks():
             else:
                 work_dir = ASR_JOB_DIR / record_id
                 input_path = work_dir / f"audio{_asr_upload_suffix(str(row['original_filename'] or 'audio'))}"
-                if record_id and input_path.is_file():
-                    changes = ("queued", "服务重启后继续等待转写队列", None)
-                    recoverable.append((record_id, input_path, work_dir))
+                source_url = row["source_url"]
+                if record_id and (input_path.is_file() or source_url):
+                    detail = "服务重启后重新等待下载" if source_url and not input_path.is_file() else "服务重启后继续等待转写队列"
+                    changes = ("queued", detail, None)
+                    recoverable.append((record_id, input_path, work_dir, source_url))
                 else:
                     changes = ("error", "服务重启后未找到音频", "服务重启后未找到音频，无法继续转写")
             status, detail, error = changes
@@ -2310,11 +2326,16 @@ async def recover_interrupted_asr_tasks():
                 (status, status, detail, error, record_id),
             )
 
-    for record_id, input_path, work_dir in recoverable:
-        task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, record_id, {}, input_path, work_dir))
-        _asr_background_tasks.add(task)
-        task.add_done_callback(_asr_background_tasks.discard)
+    for record_id, input_path, work_dir, source_url in recoverable:
+        _schedule_asr_task(record_id, input_path, work_dir, source_url)
     return len(recoverable)
+
+
+def _schedule_asr_task(record_id: str, input_path: Path, work_dir: Path, source_url: str | None = None):
+    args = (record_id, {}, input_path, work_dir)
+    task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, *args, **({"source_url": source_url} if source_url else {})))
+    _asr_background_tasks.add(task)
+    task.add_done_callback(_asr_background_tasks.discard)
 
 
 def _find_asr_history_record(record_id: str, owner: str | None = None) -> dict:
@@ -2664,10 +2685,25 @@ async def transcribe_with_qwen3_asr(request: Request):
             shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"保存上传音频失败：{str(exc)[:500]}") from exc
 
-    task = asyncio.create_task(asyncio.to_thread(_run_asr_history_task, history_record["id"], {}, input_path, work_dir))
-    _asr_background_tasks.add(task)
-    task.add_done_callback(_asr_background_tasks.discard)
+    _schedule_asr_task(history_record["id"], input_path, work_dir)
     return JSONResponse({"ok": True, "record": history_record}, status_code=202)
+
+
+@app.post("/api/asr/transcriptions/douyin")
+async def transcribe_douyin_video(request: Request, body: dict):
+    """接收抖音分享链接，在当前账号下创建下载及转写任务。"""
+    owner = _asr_request_owner(request)
+    text = body.get("text")
+    if not isinstance(text, str) or len(text) > 4096:
+        raise HTTPException(status_code=400, detail="请输入不超过 4096 字的抖音分享文案")
+    try:
+        source_url, _ = parse_share_text(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record = _create_asr_history_record("抖音视频.mp4", owner, source_url)
+    work_dir = ASR_JOB_DIR / record["id"]
+    _schedule_asr_task(record["id"], work_dir / "audio.mp4", work_dir, source_url)
+    return JSONResponse({"ok": True, "record": record}, status_code=202)
 
 
 @app.get("/api/settings")

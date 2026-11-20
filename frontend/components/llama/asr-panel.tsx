@@ -21,6 +21,8 @@ export function AsrPanel() {
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [error, setError] = useState("");
   const [startingAsr, setStartingAsr] = useState(false);
+  const [douyinText, setDouyinText] = useState("");
+  const [submittingDouyin, setSubmittingDouyin] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
@@ -99,6 +101,23 @@ export function AsrPanel() {
       setStatus("ASR 提炼提示词已保存");
       setError("");
     } catch (value) { setError(errorMessage(value)); }
+  }
+
+  async function submitDouyin() {
+    setSubmittingDouyin(true);
+    setError("");
+    try {
+      const { record } = await apiFetch<{ record: AsrRecord }>(`${API_PATHS.llama}/asr/transcriptions/douyin`, {
+        method: "POST",
+        body: jsonBody({ text: douyinText.trim() }),
+      });
+      setRecords(current => [record, ...current.filter(item => item.id !== record.id)]);
+      setDouyinText("");
+    } catch (value) {
+      setError(errorMessage(value));
+    } finally {
+      setSubmittingDouyin(false);
+    }
   }
 
   async function startDefaultAsr() {
@@ -229,6 +248,14 @@ export function AsrPanel() {
           onDragOver={event => event.preventDefault()}
           onDrop={event => { event.preventDefault(); void upload(event.dataTransfer.files); }}
         ><span className="upload-mark">↑</span><strong>拖入音频，或点击选择文件</strong><small>支持 FFmpeg 可以解码的常见音视频格式，单文件最大 4 GB。上传完成前请勿关闭页面。</small></div>
+        <form className="stack-list" onSubmit={event => { event.preventDefault(); void submitDouyin(); }}>
+          <Field label="抖音视频">
+            <textarea rows={2} maxLength={4096} placeholder="粘贴抖音视频链接或完整分享文案" value={douyinText} onChange={event => setDouyinText(event.target.value)} />
+          </Field>
+          <div className="row-actions">
+            <Button type="submit" disabled={submittingDouyin || !douyinText.trim()}>{submittingDouyin ? "提交中…" : "下载并转写"}</Button>
+          </div>
+        </form>
         {uploads.length ? <div className="upload-list">{uploads.map(item => <div className="upload-row" key={item.id}><div><strong>{item.name}</strong><span>{item.status} · {item.detail}</span></div><ProgressBar value={item.progress} /></div>)}</div> : null}
       </Card>
 
@@ -241,7 +268,8 @@ export function AsrPanel() {
             <article className="history-row" key={record.id}>
               <div className="history-main">
                 <div className="history-title"><strong>{record.name || record.filename || record.id}</strong><Badge tone={record.status === "completed" ? "success" : record.status === "error" ? "error" : "warning"}>{record.status || "unknown"}</Badge></div>
-                <span>{formatDate(record.created_at)} · {record.progress_detail || ""}</span>
+                <span>{formatDate(record.uploaded_at ?? record.created_at)} · {record.progress_detail || ""}</span>
+                {record.source_url ? <a href={record.source_url} target="_blank" rel="noreferrer">查看抖音原视频</a> : null}
                 {record.progress !== undefined && record.status !== "completed" ? <ProgressBar value={record.progress || 0} /> : null}
                 {record.error ? <small className="error-text">{record.error}</small> : null}
               </div>
@@ -256,7 +284,7 @@ export function AsrPanel() {
             </article>
             );
           })}</div>
-        ) : <EmptyState title="还没有转写历史" detail="上传第一个音频后，后台结果会显示在这里。" />}
+        ) : <EmptyState title="还没有转写历史" detail="上传音频或提交抖音视频后，后台结果会显示在这里。" />}
       </Card>
 
       <Card>

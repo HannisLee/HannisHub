@@ -196,6 +196,10 @@ _MIGRATIONS: list[str] = [
     CREATE INDEX lobby_messages_attachment ON lobby_messages(attachment_id, owner, peer)
         WHERE attachment_id IS NOT NULL;
     """,
+    # v12：转写历史可以关联抖音原视频。
+    """
+    ALTER TABLE asr_records ADD COLUMN source_url TEXT;
+    """,
 ]
 
 _init_lock = threading.Lock()

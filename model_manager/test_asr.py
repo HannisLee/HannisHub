@@ -15,6 +15,7 @@ from unittest.mock import patch
 from model_manager.app import _asr_extract_text, _asr_max_completion_tokens
 import model_manager.app as app
 from core import database
+from tools.douyin.download import _download_ranges
 
 
 class TempDatabaseMixin:
@@ -296,6 +297,60 @@ class AsrRecoveryTests(TempDatabaseMixin, unittest.IsolatedAsyncioTestCase):
                 app._run_asr_history_task("asr_failed", {"pid": 123}, audio, work_dir)
             self.assertTrue(audio.is_file())
             self.assertFalse(chunk.exists())
+
+
+class AsrDouyinTests(TempDatabaseMixin, unittest.IsolatedAsyncioTestCase):
+    def test_media_download_rejects_wrong_range_and_uses_matching_mirror(self):
+        def respond(request):
+            self.assertEqual(request.headers["Range"], "bytes=0-3")
+            if request.url.host == "first.test":
+                return httpx.Response(206, headers={"Content-Range": "bytes 0-3/8"}, content=b"bad!")
+            return httpx.Response(206, headers={"Content-Range": "bytes 0-3/4"}, content=b"good")
+
+        output = self.root / "media.tmp"
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            self.assertTrue(_download_ranges(client, ["https://first.test", "https://second.test"], 4, output))
+        self.assertEqual(output.read_bytes(), b"good")
+
+    async def test_share_text_downloads_and_archives_under_current_account(self):
+        source = "https://v.douyin.com/example/"
+        canonical = "https://www.douyin.com/video/7708232933441588490"
+
+        def download(url, path, max_bytes):
+            self.assertEqual(url, source)
+            self.assertEqual(max_bytes, app.ASR_MAX_UPLOAD_BYTES)
+            self.assertTrue(path.name.endswith(".tmp"))
+            path.write_bytes(b"media")
+            return {"source_url": canonical, "title": "视频标题"}
+
+        def transcribe(item, path, work_dir, on_progress):
+            self.assertEqual(path.read_bytes(), b"media")
+            return {"text": "转写内容", "duration": 12, "chunks": 1}
+
+        tasks = set()
+        transport = httpx.ASGITransport(app=app.app)
+        with patch.object(app, "_asr_background_tasks", tasks), \
+                patch.object(app, "download_video", side_effect=download), \
+                patch.object(app, "_transcribe_qwen3_asr", side_effect=transcribe):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                submission = await client.post("/api/asr/transcriptions/douyin", json={"text": f"分享文字 {source} 复制打开"})
+                self.assertEqual(submission.status_code, 202)
+                record_id = submission.json()["record"]["id"]
+                await asyncio.gather(*list(tasks))
+                history = (await client.get("/api/asr/history")).json()["records"]
+                result = await client.get(f"/api/asr/history/{record_id}/text")
+        self.assertEqual(history[0]["source_url"], canonical)
+        self.assertEqual(history[0]["name"], "视频标题")
+        self.assertEqual(result.json()["text"], "转写内容")
+        self.assertFalse((app.ASR_JOB_DIR / record_id).exists())
+        self.assertEqual(app._asr_history_snapshots("bob"), [])
+
+    async def test_rejects_non_douyin_links_before_creating_history(self):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app.app), base_url="http://test") as client:
+            for url in ("https://v.douyin.com.example.org/example/", "https://www.tiktok.com/video/7708232933441588490"):
+                res = await client.post("/api/asr/transcriptions/douyin", json={"text": url})
+                self.assertEqual(res.status_code, 400)
+        self.assertEqual(app._asr_history_snapshots("alice"), [])
 
 
 if __name__ == "__main__":
