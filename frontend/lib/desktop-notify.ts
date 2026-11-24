@@ -3,11 +3,20 @@ export function canUseDesktopNotifications(): boolean {
   return typeof window !== "undefined" && window.isSecureContext && "Notification" in window;
 }
 
-export function showDesktopNotification(title: string, options: NotificationOptions, onClick: () => void): void {
-  if (!canUseDesktopNotifications() || Notification.permission !== "granted") return;
+export function showDesktopNotification(
+  title: string,
+  options: NotificationOptions,
+  onClick: () => void,
+  onError?: () => void,
+): boolean {
+  if (!canUseDesktopNotifications() || Notification.permission !== "granted") return false;
   try {
     const notification = new Notification(title, options);
     notification.onclick = () => { window.focus(); onClick(); notification.close(); };
+    if (onError) notification.onerror = onError;
     setTimeout(() => notification.close(), 20000);
-  } catch { /* 浏览器通知不可用时不影响其他提醒 */ }
+    return true;
+  } catch {
+    return false;
+  }
 }

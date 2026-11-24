@@ -39,9 +39,11 @@ async function focus(page,value){
  assert.equal((await api(a,'/api/chat-lobby/desks/mine','PUT',{desk:'desk-1'})).status,200);
  await api(a,'/api/chat-lobby/profile','PUT',{name:'管理员测试',avatar:null,photo:''});
  await a.goto(origin+'/terminal');
+ const setup=await admin.newPage();await setup.goto(origin+'/settings/global');
+ await setup.getByRole('button',{name:'重新申请权限',exact:true}).click();
+ await setup.getByText('已授权并开启新消息桌面提醒。',{exact:true}).waitFor();
+ await setup.close();
  await a.getByRole('button',{name:'消息提醒设置',exact:true}).click();
- await a.getByRole('button',{name:'开启桌面通知',exact:true}).click();
- await a.getByText('已开启。切到其他标签页或应用后，新消息会显示系统通知。',{exact:true}).waitFor();
  assert.equal(await a.getByRole('checkbox',{name:'桌面通知',exact:true}).isChecked(),true);
  await a.getByRole('button',{name:'收起',exact:true}).click();
  await a.waitForFunction(()=>window.__contacts>0);
@@ -59,6 +61,13 @@ async function focus(page,value){
  assert.equal(player.x,hall.x+seat.x);assert.equal(player.y,hall.y+seat.y);
  await guest.evaluate(player=>window.__socket.send(JSON.stringify({type:'state',room:player.room,x:player.x,y:player.y+20,dir:'up',moving:false})),player);
  const contact=(await api(guest,'/api/chat-lobby/private-chat/contacts')).data.find(c=>c.name==='管理员测试');
+ const foreground=await admin.newPage();await foreground.goto(origin+'/llama/ocr');
+ await foreground.waitForFunction(()=>window.__contacts>0);
+ await focus(foreground,true);
+ let resumeContacts;
+ const contactsGate=new Promise(resolve=>{resumeContacts=resolve;});
+ // 模拟后台标签页已显示系统通知，前台标签页才收到未读更新。
+ await foreground.route('**/private-chat/contacts',async route=>{await contactsGate;await route.continue();});
  await focus(a,false);await focus(b,false);
  assert.equal((await api(guest,`/api/chat-lobby/private-chat/${contact.id}/messages`,'POST',{source:'near',text:'跨页面私聊提醒',request_id:'admin-notify-'+Date.now()})).status,200);
  for(const page of [a,b])await page.waitForFunction(()=>document.title.startsWith('(1)'));
@@ -66,6 +75,10 @@ async function focus(page,value){
  const noticeCount=async()=>await a.evaluate(()=>window.__notices.length)+await b.evaluate(()=>window.__notices.length);
  assert.equal(await noticeCount(),1);
  assert.equal(await a.evaluate(()=>window.__dings)+await b.evaluate(()=>window.__dings),2);
+ resumeContacts();
+ await foreground.locator('.admin-message-toast').getByText('跨页面私聊提醒',{exact:true}).waitFor();
+ assert.equal(await foreground.evaluate(()=>window.__notices.length),0);
+ await foreground.close();
  const reader=(await a.evaluate(()=>window.__notices.length))?a:b;
  const previous=reader.url();await focus(reader,true);
  await reader.evaluate(()=>window.__notices[0].notification.onclick(new Event('click')));

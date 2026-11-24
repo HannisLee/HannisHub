@@ -9,7 +9,7 @@ import { setAdminChatAlertHandler, setChatSoundEnabled, unlockChatAudio } from "
 import {
   ADMIN_OPEN_CHAT_EVENT, ADMIN_PRIVATE_VIEW_EVENT, adminRoomAlert, canUseDesktopNotifications, dismissAdminToast,
   getAdminNotifyServerSnapshot, getAdminNotifySnapshot, openAdminAlert, openAdminPrivate,
-  setAdminDesktop, setViewedPrivate, subscribeAdminNotify, updateAdminContacts, type AdminContact,
+  requestAdminDesktopPermission, setAdminDesktop, setViewedPrivate, subscribeAdminNotify, updateAdminContacts, type AdminContact,
 } from "../../lib/admin-notify";
 import { useChatNotify } from "../chatworld/room/chat-watcher";
 import { Button } from "../ui/primitives";
@@ -101,8 +101,7 @@ export function AdminMessageControls() {
     unlockChatAudio();
     if (!available) return;
     try {
-      const permission = await Notification.requestPermission();
-      setAdminDesktop(permission === "granted");
+      const permission = await requestAdminDesktopPermission();
       setStatus(permission === "granted" ? "已开启。切到其他标签页或应用后，新消息会显示系统通知。" : permission === "denied" ? "浏览器已阻止通知，可在地址栏的站点设置中允许。" : "尚未授权，标签页、提示音与网页提醒仍然可用。");
     } catch { setStatus("当前浏览器无法申请系统通知，其他提醒仍然可用。"); }
   };

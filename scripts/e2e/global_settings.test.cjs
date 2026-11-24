@@ -71,25 +71,34 @@ async function main() {
     assert.equal(await page.evaluate(() => localStorage.getItem("hannishub_admin_desktop_notify")), null);
     assert.equal(await page.evaluate(() => window.permissionRequests), 0);
 
+    const reapply = page.getByRole("button", { name: "重新申请权限", exact: true });
     await page.evaluate(() => { window.testPermission = "default"; });
     await send.click();
     await page.getByRole("status").filter({ hasText: "尚未授权" }).waitFor();
-    assert.equal(await page.evaluate(() => window.permissionRequests), 1);
-    await page.evaluate(() => { window.testPermission = "denied"; });
-    await send.click();
-    await page.getByRole("status").filter({ hasText: "通知权限已被阻止" }).waitFor();
-    assert.equal(await page.evaluate(() => window.testNotices.length), 1);
+    assert.equal(await page.evaluate(() => window.permissionRequests), 0);
+    await reapply.click();
+    await page.getByRole("status").filter({ hasText: "重新申请并选择允许" }).waitFor();
     assert.equal(await page.evaluate(() => window.permissionRequests), 1);
 
-    await page.evaluate(() => {
-      window.testPermission = "default";
-      window.testPermissionResponse = "granted";
-    });
+    await page.evaluate(() => { window.testPermission = "denied"; });
+    await reapply.click();
+    await page.getByRole("status").filter({ hasText: "通知权限已被阻止" }).waitFor();
+    assert.equal(await page.evaluate(() => window.testNotices.length), 1);
+    assert.equal(await page.evaluate(() => window.permissionRequests), 2);
+
+    await page.evaluate(() => { window.testPermission = "granted"; });
+    await reapply.click();
+    await page.getByRole("status").filter({ hasText: "已授权并开启新消息桌面提醒" }).waitFor();
+    assert.equal(await page.evaluate(() => window.permissionRequests), 3);
+    assert.equal(await page.evaluate(() => window.testNotices.length), 1);
+    assert.equal(await page.evaluate(() => localStorage.getItem("hannishub_admin_desktop_notify")), "on");
+    await page.getByRole("button", { name: "消息提醒设置", exact: true }).click();
+    assert.equal(await page.getByRole("checkbox", { name: "桌面通知", exact: true }).isChecked(), true);
+    await page.getByRole("button", { name: "收起", exact: true }).click();
     await send.click();
     await page.getByRole("status").filter({ hasText: "已请求显示测试通知" }).waitFor();
     assert.equal(await page.evaluate(() => window.testNotices.length), 2);
-    assert.equal(await page.evaluate(() => window.permissionRequests), 2);
-    assert.equal(await page.evaluate(() => localStorage.getItem("hannishub_admin_desktop_notify")), null);
+    assert.equal(await page.evaluate(() => window.permissionRequests), 3);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => { Object.defineProperty(window, "isSecureContext", { value: false }); });

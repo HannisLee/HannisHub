@@ -45,6 +45,12 @@ export function setAdminDesktop(enabled: boolean) {
   update({ desktop: enabled });
 }
 
+export async function requestAdminDesktopPermission(): Promise<NotificationPermission> {
+  const permission = await Notification.requestPermission();
+  setAdminDesktop(permission === "granted");
+  return permission;
+}
+
 export function setViewedPrivate(contact: string | null) { viewedContact = contact; }
 export function dismissAdminToast() { clearTimeout(toastTimer); update({ toast: null }); }
 export function openAdminPrivate(contact: string | null) { update({ contact, toast: null }); }
@@ -54,9 +60,19 @@ export function openAdminAlert(alert: AdminAlert) {
   else window.dispatchEvent(new Event(ADMIN_OPEN_CHAT_EVENT));
 }
 
-/** Web Locks 保证多个标签页只提醒一次；旧浏览器与禁用存储时退回尽力去重。 */
+function showAdminToast(alert: AdminAlert) {
+  update({ toast: alert });
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => update({ toast: null }), 8000);
+}
+
+/** 使用 Web Locks 协调提示音和系统通知；旧浏览器与禁用存储时退回尽力去重。 */
 async function deliver(key: string, seq: number, alert: AdminAlert, room = false) {
   const notify = () => {
+    const focused = !document.hidden && document.hasFocus();
+    const reading = focused && alert.contact === viewedContact;
+    // 私聊横幅需要显示在用户正在用的页面，即使另一个标签页先认领了系统提醒。
+    if (alert.contact && focused && !reading) showAdminToast(alert);
     let ledger: Record<string, number> = {};
     try { ledger = JSON.parse(localStorage.getItem(CLAIM_KEY) || "{}"); if (!ledger || typeof ledger !== "object" || Array.isArray(ledger)) ledger = {}; } catch { /* 使用内存去重 */ }
     if (seq <= Math.max(claims.get(key) || 0, Number(ledger[key]) || 0)) return;
@@ -64,12 +80,10 @@ async function deliver(key: string, seq: number, alert: AdminAlert, room = false
     ledger[key] = seq;
     try { localStorage.setItem(CLAIM_KEY, JSON.stringify(Object.fromEntries(Object.entries(ledger).slice(-256)))); } catch { /* 使用内存去重 */ }
     if (room && seq <= getLastRead()) return;
-    if (alert.contact === viewedContact && !document.hidden && document.hasFocus()) return;
-    update({ toast: alert });
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => update({ toast: null }), 8000);
+    if (reading) return;
+    if (!alert.contact || !focused) showAdminToast(alert);
     playChatDing();
-    if (!getAdminNotifySnapshot().desktop || (!document.hidden && document.hasFocus())) return;
+    if (!getAdminNotifySnapshot().desktop || focused) return;
     showDesktopNotification(alert.title, { body: alert.body.slice(0, 240), tag: `hannishub-admin-${key}`, icon: "/icon.svg", silent: true }, () => openAdminAlert(alert));
   };
   if (navigator.locks) {

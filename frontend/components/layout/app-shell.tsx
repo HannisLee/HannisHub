@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
-import { requestStartupPermissions } from "../../lib/startup-permissions";
 import { ADMIN_HOME, canVisitPage, isActivePath, isAdmin, navigation, navTitle, REGULAR_HOME } from "../../lib/navigation";
 import type { AuthStatus } from "../../lib/types";
 import { Icon } from "../ui/icon";
@@ -106,10 +105,6 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
       .catch(error => { if (active) setAuthError(error instanceof Error ? error.message : "无法读取登录状态"); });
     return () => { active = false; };
   }, [router]);
-
-  useEffect(() => {
-    if (auth?.authenticated) void requestStartupPermissions();
-  }, [auth?.authenticated]);
 
   useEffect(() => {
     const redirect = (event: Event) => {
