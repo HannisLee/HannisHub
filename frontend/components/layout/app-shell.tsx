@@ -156,6 +156,8 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
       <ShellContext.Provider value={shellInfo}>
         <DocumentTitle title={pageTitle} unread={totalUnread} />
         <main className={`immersive-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
+        <ChatToastView />
+        <AdminMessageOverlays admin={admin} />
         <OnlineNotices key={shellInfo.username} username={shellInfo.username} />
       </ShellContext.Provider>
     );
@@ -212,7 +214,8 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
           </header>
           <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
         </div>
-        {admin ? <AdminMessageOverlays /> : onChatPage ? null : <ChatToastView />}
+        {!admin && !onChatPage ? <ChatToastView /> : null}
+        <AdminMessageOverlays admin={admin} />
         <OnlineNotices key={shellInfo.username} username={shellInfo.username} />
       </div>
     </ShellContext.Provider>

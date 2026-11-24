@@ -77,7 +77,7 @@ class PrivateChatTest(unittest.TestCase):
         self.assertTrue(all(r['photo'] == '🐱' and r['last_at'] == 0 and r['can_reply'] is False for r in rows))
         self.assertTrue(all('username' not in r and 'owner' not in r for r in rows))
 
-    def test_only_admin_gets_incoming_notification_cursor(self):
+    def test_incoming_notification_cursor_for_both_accounts(self):
         with patch.object(dm, 'list_users', return_value=[{'username': name} for name in ['lihan', 'a']]):
             admin_id = next(row['id'] for row in dm.contacts('a') if row['name'] == 'lihan')
             dm.send('a', admin_id, {'source': 'near', 'text': '找管理员', 'request_id': 'admin-alert'})
@@ -87,7 +87,9 @@ class PrivateChatTest(unittest.TestCase):
             self.assertGreater(seq, 0)
             dm.send('lihan', contact['id'], {'source': 'inbox', 'text': '收到', 'request_id': 'admin-reply'})
             self.assertEqual(dm.contacts('lihan')[0]['last_incoming_seq'], seq)
-            self.assertNotIn('last_incoming_seq', dm.contacts('a')[0])
+            recipient = dm.contacts('a')[0]
+            self.assertEqual(recipient['last_incoming'], '收到')
+            self.assertGreater(recipient['last_incoming_seq'], seq)
 
 
 if __name__ == '__main__': unittest.main()

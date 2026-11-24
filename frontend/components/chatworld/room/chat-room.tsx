@@ -20,7 +20,7 @@ import { ChatAttachmentCard, ChatLightbox, INLINE_IMAGE_TYPES, MAX_ATTACHMENT_BY
 import { Avatar, formatChatTime as formatTime } from "../shared/chat-avatar";
 import { useChatNotify } from "./chat-watcher";
 import { ChatEmojiPicker } from "./emoji-picker";
-import { useShell } from "../../layout/shell-context";
+import { ROOM_MESSAGE_EVENT } from "../../../lib/online-notice-events";
 import { ADMIN_PRIVATE_VIEW_EVENT } from "../../../lib/admin-notify";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
@@ -97,7 +97,6 @@ interface DisplayMessage {
 
 /** 公共聊天室：顶部为在线人数与个人设置，中部为共享消息流，底部为输入框、附件与表情 */
 export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
-  const admin = useShell()?.admin ?? false;
   const [messages, setMessages] = useState<ChatRoomMessage[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const [profiles, setProfiles] = useState<Record<string, ChatRoomProfile>>({});
@@ -133,7 +132,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
   const me = profiles[clientId];
 
   /** 当前是否在看最新消息：页面可见且滚动在底部 */
-  const isAttended = useCallback(() => !document.hidden && (!admin || (document.hasFocus() && !document.querySelector(".admin-private-dialog[open]"))), [admin]);
+  const isAttended = useCallback(() => !document.hidden && document.hasFocus() && !document.querySelector(".admin-private-dialog[open]"), []);
   const isWatching = useCallback(() => isAttended() && stickToBottomRef.current, [isAttended]);
 
   const updatePending = useCallback((update: (current: PendingMessage[]) => PendingMessage[]) => {
@@ -294,7 +293,7 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
       try {
         const data = await fetchMessages();
         initializedRef.current = true;
-        if (!admin || isAttended()) markChatRead(lastIdRef.current);
+        if (isAttended()) markChatRead(lastIdRef.current);
         // 首次进入或尚未绑定账号时登记资料：名字与头像由服务端按登录账号取自「我的房间」
         if (!data.profiles?.[id]?.linked) {
           let nickname = storageGet(NICKNAME_KEY);
@@ -311,29 +310,26 @@ export function ChatRoom({ embedded = false }: { embedded?: boolean } = {}) {
         setLoading(false);
       }
     })();
-    const timer = window.setInterval(() => {
-      // 页面隐藏时也继续轮询，以便计入未读并播放提示音
-      fetchMessages().then(() => setError("")).catch(value => setError(errorMessage(value)));
-    }, POLL_MS);
-    // 回到页面且停在底部时，视为已读
+    const refresh = () => {
+      if (initializedRef.current) fetchMessages().then(() => setError("")).catch(value => setError(errorMessage(value)));
+    };
+    const timer = window.setInterval(refresh, POLL_MS);
     const onVisible = () => {
-      if (isWatching() && (!admin || listRef.current?.isConnected)) markChatRead(lastIdRef.current);
+      if (isWatching() && listRef.current?.isConnected) markChatRead(lastIdRef.current);
       if (isAttended()) syncRead();
     };
     document.addEventListener("visibilitychange", onVisible);
-    if (admin) {
-      window.addEventListener("focus", onVisible);
-      window.addEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
-    }
+    window.addEventListener("focus", onVisible);
+    window.addEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
+    window.addEventListener(ROOM_MESSAGE_EVENT, refresh);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
-      if (admin) {
-        window.removeEventListener("focus", onVisible);
-        window.removeEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
-      }
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener(ADMIN_PRIVATE_VIEW_EVENT, onVisible);
+      window.removeEventListener(ROOM_MESSAGE_EVENT, refresh);
     };
-  }, [admin, fetchMessages, isAttended, isWatching, saveProfile, syncRead]);
+  }, [fetchMessages, isAttended, isWatching, saveProfile, syncRead]);
 
   // 停留在底部时，新消息（含本地待发送消息）自动滚动到底
   useEffect(() => {

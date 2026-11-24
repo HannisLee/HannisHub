@@ -48,7 +48,18 @@ async function focus(page,value){
  await a.getByRole('button',{name:'收起',exact:true}).click();
  await a.waitForFunction(()=>window.__contacts>0);
  const b=await admin.newPage();await b.goto(origin+'/llama/ocr');await b.waitForFunction(()=>window.__contacts>0);
- const visitor=await browser.newContext();const guest=await visitor.newPage();await login(guest,'guest');
+ const visitor=await browser.newContext({permissions:['notifications']});
+ await visitor.addInitScript(()=>{
+  window.__focused=true;document.hasFocus=()=>window.__focused;
+  window.__guestNotices=[];
+  const Native=window.Notification;
+  window.Notification=class extends Native {
+   constructor(title,options){super(title,options);window.__guestNotices.push({title,body:options.body,notification:this});}
+  };
+ });
+ const guest=await visitor.newPage();await login(guest,'guest');
+ const receiver=await visitor.newPage();await receiver.goto(origin+'/llama/ocr');
+ await receiver.getByRole('button',{name:'退出',exact:true}).waitFor();
  await guest.evaluate(()=>{
   window.__players={};window.__events=[];
   const socket=new WebSocket(location.origin.replace('http','ws')+'/api/chat-lobby/ws');window.__socket=socket;
@@ -84,8 +95,14 @@ async function focus(page,value){
  await reader.evaluate(()=>window.__notices[0].notification.onclick(new Event('click')));
  const dialog=reader.getByRole('dialog',{name:'管理员私聊',exact:true});await dialog.waitFor();
  await dialog.getByText('跨页面私聊提醒',{exact:true}).last().waitFor();assert.equal(reader.url(),previous);
+ await focus(receiver,false);
  const input=dialog.locator('textarea');await input.fill('不离开当前页面回复');await input.press('Enter');
  await dialog.getByText('不离开当前页面回复',{exact:true}).last().waitFor();
+ await receiver.waitForFunction(()=>window.__guestNotices.some(n=>n.title.startsWith('私聊')&&n.body==='不离开当前页面回复'));
+ await receiver.evaluate(()=>window.__guestNotices[0].notification.onclick(new Event('click')));
+ const guestDialog=receiver.getByRole('dialog',{name:'私聊',exact:true});
+ await guestDialog.getByText('不离开当前页面回复',{exact:true}).last().waitFor();
+ await guestDialog.getByRole('button',{name:'关闭私聊',exact:true}).click();
  for(const page of [a,b])await page.waitForFunction(()=>!document.title.startsWith('('));
  const rows=(await api(guest,`/api/chat-lobby/private-chat/${contact.id}/messages`)).data;assert.equal(rows.at(-1).text,'不离开当前页面回复');
  await reader.setViewportSize({width:390,height:844});
@@ -138,9 +155,29 @@ async function focus(page,value){
  await insecure.getByRole('button',{name:'消息提醒设置',exact:true}).click();assert.equal(await insecure.getByRole('button',{name:'开启桌面通知',exact:true}).isDisabled(),true);
  await insecure.close();
  const closeCode=await guest.evaluate(()=>new Promise(resolve=>{const socket=new WebSocket(location.origin.replace('http','ws')+'/api/chat-lobby/ws?background=1');socket.onclose=e=>resolve(e.code);}));assert.ok([4403,1006].includes(closeCode));
+ await focus(receiver,false);
+ const roomNotice='普通账号收到聊天室系统通知';
+ await api(lobby,'/api/chat-room/profile','PUT',{client_id:'admin-online-notify',nickname:'管理员测试'});
+ const posted=await api(lobby,'/api/chat-room/messages','POST',{client_id:'admin-online-notify',content:roomNotice,nonce:'guest-receives-room-'+Date.now()});
+ assert.equal(posted.status,200,JSON.stringify(posted.data));
+ await receiver.waitForFunction(body=>window.__guestNotices.some(n=>n.title.startsWith('聊天室')&&n.body===body),roomNotice);
+ const say='同一个大厅房间的发言';
+ await lobby.evaluate(({player,say})=>new Promise((resolve,reject)=>{
+  const speechSocket=new WebSocket(location.origin.replace('http','ws')+'/api/chat-lobby/ws');
+  window.__speechSocket=speechSocket;
+  speechSocket.onerror=reject;
+  speechSocket.onopen=()=>{
+   speechSocket.send(JSON.stringify({type:'state',room:player.room,x:player.x,y:player.y,dir:'down',moving:false}));
+   speechSocket.send(JSON.stringify({type:'say',text:say}));
+   resolve();
+  };
+ }),{player,say});
+ await receiver.waitForFunction(body=>window.__guestNotices.some(n=>n.title.startsWith('大厅')&&n.body===body),say);
+ await lobby.evaluate(()=>window.__speechSocket.close());
+ await receiver.close();
  await a.close();await b.close();
  await guest.waitForFunction(()=>!Object.values(window.__players).some(p=>p.name==='管理员测试'));
  await guest.goto(origin+'/chat-lobby');await guest.locator('canvas').first().waitFor();assert.equal(await guest.getByRole('button',{name:'消息提醒设置',exact:true}).count(),0);
- console.log('通过：管理员直接挂终端与 OCR 工位显示、真实大厅优先、角色去重、跨页面私聊与回复、聊天室失焦/遮挡未读、音频/桌面去重、通知点击、拒绝与不安全上下文、普通账号边界');
+ console.log('通过：跨页面私聊、聊天室与大厅通知，普通账号接收及点击，跨标签页去重、已读同步和管理员工位状态');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1)});

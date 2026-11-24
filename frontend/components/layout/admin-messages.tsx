@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { lobbySocketUrl } from "../../lib/chat-lobby";
-import { setAdminChatAlertHandler, setChatSoundEnabled, unlockChatAudio } from "../../lib/chat-notify";
+import { setChatAlertHandler, setChatSoundEnabled, unlockChatAudio } from "../../lib/chat-notify";
+import { PRIVATE_MESSAGE_EVENT } from "../../lib/online-notice-events";
 import {
   ADMIN_OPEN_CHAT_EVENT, ADMIN_PRIVATE_VIEW_EVENT, adminRoomAlert, canUseDesktopNotifications, dismissAdminToast,
   getAdminNotifyServerSnapshot, getAdminNotifySnapshot, openAdminAlert, openAdminPrivate,
@@ -15,7 +16,6 @@ import { useChatNotify } from "../chatworld/room/chat-watcher";
 import { Button } from "../ui/primitives";
 
 const PrivatePanel = dynamic(() => import("../chatworld/lobby/private-panel").then(module => module.PrivatePanel), { ssr: false });
-const PRIVATE_EVENT = "lobby-private-chat";
 
 export function useAdminMessages(enabled: boolean, onLobby: boolean, admin: boolean) {
   const router = useRouter();
@@ -54,7 +54,7 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean, admin: bool
       socket.onmessage = event => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "private-chat") window.dispatchEvent(new Event(PRIVATE_EVENT));
+          if (data.type === "private-chat") window.dispatchEvent(new Event(PRIVATE_MESSAGE_EVENT));
           else if (data.type === "desks") activity();
         } catch { /* 忽略无效帧 */ }
       };
@@ -62,8 +62,8 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean, admin: bool
         if (alive && ![4401, 4403].includes(event.code)) retry = setTimeout(connect, Math.min(10000, 1000 * 2 ** attempts++));
       };
     };
-    if (admin) setAdminChatAlertHandler(adminRoomAlert);
-    window.addEventListener(PRIVATE_EVENT, update);
+    setChatAlertHandler(messages => adminRoomAlert(messages, admin));
+    window.addEventListener(PRIVATE_MESSAGE_EVENT, update);
     window.addEventListener(ADMIN_OPEN_CHAT_EVENT, openChat);
     window.addEventListener(ADMIN_PRIVATE_VIEW_EVENT, viewPrivate);
     window.addEventListener("focus", update);
@@ -75,11 +75,11 @@ export function useAdminMessages(enabled: boolean, onLobby: boolean, admin: bool
     const heartbeat = setInterval(activity, 8000);
     return () => {
       alive = false;
-      setAdminChatAlertHandler(null);
+      setChatAlertHandler(null);
       setViewedPrivate(null);
       clearTimeout(initial); clearTimeout(retry); clearInterval(polling); clearInterval(heartbeat);
       socket?.close();
-      window.removeEventListener(PRIVATE_EVENT, update);
+      window.removeEventListener(PRIVATE_MESSAGE_EVENT, update);
       window.removeEventListener(ADMIN_OPEN_CHAT_EVENT, openChat);
       window.removeEventListener(ADMIN_PRIVATE_VIEW_EVENT, viewPrivate);
       window.removeEventListener("focus", update);
@@ -121,7 +121,7 @@ export function AdminMessageControls() {
   </div>;
 }
 
-function PrivateDialog({ contact }: { contact: string }) {
+function PrivateDialog({ contact, admin }: { contact: string; admin: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -129,19 +129,19 @@ function PrivateDialog({ contact }: { contact: string }) {
     return () => dialog?.close();
   }, []);
   const close = () => openAdminPrivate(null);
-  return <dialog ref={ref} className="lobby-machine is-compact admin-private-dialog" aria-label="管理员私聊" onCancel={event => { event.preventDefault(); close(); }}>
+  return <dialog ref={ref} className="lobby-machine is-compact admin-private-dialog" aria-label={admin ? "管理员私聊" : "私聊"} onCancel={event => { event.preventDefault(); close(); }}>
     <header className="lobby-machine-bar"><strong>私聊</strong><Button variant="quiet" size="sm" onClick={close} aria-label="关闭私聊">关闭 · Esc</Button></header>
     <div className="lobby-machine-body is-fill"><PrivatePanel mode="inbox" contactId={contact} onClose={close} /></div>
   </dialog>;
 }
 
-export function AdminMessageOverlays() {
+export function AdminMessageOverlays({ admin }: { admin: boolean }) {
   const state = useSyncExternalStore(subscribeAdminNotify, getAdminNotifySnapshot, getAdminNotifyServerSnapshot);
   return <>
     {state.toast ? <div className="chat-toast" role="status">
       <button type="button" className="chat-toast-body admin-message-toast" onClick={() => state.toast && openAdminAlert(state.toast)}><span className="chat-toast-title">{state.toast.title}</span><span className="chat-toast-content">{state.toast.body}</span></button>
       <button type="button" className="chat-toast-close" onClick={dismissAdminToast} aria-label="关闭提醒">×</button>
     </div> : null}
-    {state.contact !== null ? <PrivateDialog key={state.contact} contact={state.contact} /> : null}
+    {state.contact !== null ? <PrivateDialog key={state.contact} contact={state.contact} admin={admin} /> : null}
   </>;
 }

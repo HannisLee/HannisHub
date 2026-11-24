@@ -438,9 +438,12 @@ def _chat_attachment_response(info, cache_control: str) -> FileResponse:
 
 
 @app.post("/api/chat-room/messages")
-async def chat_room_post(payload: dict[str, Any] = Body(...)):
+async def chat_room_post(request: Request, payload: dict[str, Any] = Body(...)):
     """以昵称发送一条聊天室消息。"""
-    return JSONResponse(await run_in_threadpool(chat_room.post_message, payload))
+    owner = _require_user(request)
+    message = await run_in_threadpool(chat_room.post_message, payload)
+    await _send_online_notice({"type": "chat-room"}, exclude=owner)
+    return JSONResponse(message)
 
 
 @app.delete("/api/chat-room/messages")
@@ -855,6 +858,7 @@ async def private_send(contact: str, request: Request, payload: dict[str, Any] =
     result = await run_in_threadpool(private_chat.send, owner, contact, payload)
     peer = await run_in_threadpool(private_chat.peer_for, owner, contact)
     lobby_presence.presence.notify_private({owner, peer})
+    await _send_online_notice({"type": "private-chat"}, include={peer})
     return result
 
 
@@ -1105,7 +1109,7 @@ async def chat_lobby_socket(websocket: WebSocket):
     if not username or not _websocket_origin_allowed(websocket):
         await websocket.close(code=lobby_presence.CLOSE_FORBIDDEN)
         return
-    await lobby_presence.presence.serve(websocket, username)
+    await lobby_presence.presence.serve(websocket, username, _notify_lobby_speech)
 
 
 @app.get("/api/point-clouds/file")
@@ -1186,16 +1190,14 @@ async def notification_socket(websocket: WebSocket):
         _notification_connections.discard(websocket)
 
 
-@app.post("/api/notifications/broadcast-test")
-async def broadcast_test_notification(request: Request):
-    if not is_terminal_admin(current_username(request.session)):
-        raise HTTPException(status_code=403, detail="仅管理员可以发送广播通知")
-
-    payload = {"id": secrets.token_hex(16)}
+async def _send_online_notice(
+    payload: dict[str, str], *, include: set[str] | None = None, exclude: str | None = None,
+) -> list[str]:
     recipients = [
         (socket, owner)
         for socket in _notification_connections
         if (owner := current_username(socket.session))
+        and owner != exclude and (include is None or owner in include)
     ]
 
     async def send(socket: WebSocket, owner: str) -> str | None:
@@ -1206,7 +1208,20 @@ async def broadcast_test_notification(request: Request):
             _notification_connections.discard(socket)
             return None
 
-    sent = [owner for owner in await asyncio.gather(*(send(*recipient) for recipient in recipients)) if owner]
+    return [owner for owner in await asyncio.gather(*(send(*recipient) for recipient in recipients)) if owner]
+
+
+async def _notify_lobby_speech(name: str, text: str, recipients: set[str]) -> None:
+    await _send_online_notice({
+        "type": "lobby-say", "id": secrets.token_hex(16), "name": name, "text": text,
+    }, include=recipients)
+
+
+@app.post("/api/notifications/broadcast-test")
+async def broadcast_test_notification(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="仅管理员可以发送广播通知")
+    sent = await _send_online_notice({"id": secrets.token_hex(16)})
     return {"accounts": len(set(sent)), "connections": len(sent)}
 
 

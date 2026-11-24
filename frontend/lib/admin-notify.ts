@@ -1,4 +1,4 @@
-/** 管理员跨页面私聊与桌面提醒；只在管理员外壳启用，未读数以服务端为准。 */
+/** 跨页面私聊与桌面提醒，未读数以服务端为准。 */
 import { getLastRead, messagePreview, playChatDing } from "./chat-notify";
 import type { ChatRoomMessage } from "./types";
 import { showDesktopNotification } from "./desktop-notify";
@@ -67,7 +67,7 @@ function showAdminToast(alert: AdminAlert) {
 }
 
 /** 使用 Web Locks 协调提示音和系统通知；旧浏览器与禁用存储时退回尽力去重。 */
-async function deliver(key: string, seq: number, alert: AdminAlert, room = false) {
+async function deliver(key: string, seq: number, alert: AdminAlert, admin: boolean, room = false) {
   const notify = () => {
     const focused = !document.hidden && document.hasFocus();
     const reading = focused && alert.contact === viewedContact;
@@ -81,9 +81,9 @@ async function deliver(key: string, seq: number, alert: AdminAlert, room = false
     try { localStorage.setItem(CLAIM_KEY, JSON.stringify(Object.fromEntries(Object.entries(ledger).slice(-256)))); } catch { /* 使用内存去重 */ }
     if (room && seq <= getLastRead()) return;
     if (reading) return;
-    if (!alert.contact || !focused) showAdminToast(alert);
+    if ((!room || admin) && (!alert.contact || !focused)) showAdminToast(alert);
     playChatDing();
-    if (!getAdminNotifySnapshot().desktop || focused) return;
+    if (focused || (admin && !getAdminNotifySnapshot().desktop)) return;
     showDesktopNotification(alert.title, { body: alert.body.slice(0, 240), tag: `hannishub-admin-${key}`, icon: "/icon.svg", silent: true }, () => openAdminAlert(alert));
   };
   if (navigator.locks) {
@@ -91,19 +91,19 @@ async function deliver(key: string, seq: number, alert: AdminAlert, room = false
   } else notify();
 }
 
-export function adminRoomAlert(messages: readonly ChatRoomMessage[]) {
+export function adminRoomAlert(messages: readonly ChatRoomMessage[], admin: boolean) {
   const message = messages.at(-1);
-  if (message) void deliver("room", message.id, { title: `聊天室 · ${message.nickname}`, body: messagePreview(message) }, true);
+  if (message) void deliver("room", message.id, { title: `聊天室 · ${message.nickname}`, body: messagePreview(message) }, admin, true);
 }
 
-export function updateAdminContacts(contacts: AdminContact[], alertsEnabled = true) {
+export function updateAdminContacts(contacts: AdminContact[], admin: boolean) {
   const latest = [...contacts].sort((a, b) => Number(b.unread > 0) - Number(a.unread > 0) || b.last_incoming_seq - a.last_incoming_seq)[0]?.id ?? null;
   update({ unread: contacts.reduce((sum, contact) => sum + contact.unread, 0), latest });
   for (const contact of contacts) {
     const seen = seenPrivate.get(contact.id) || 0;
     seenPrivate.set(contact.id, Math.max(seen, contact.last_incoming_seq));
-    if (alertsEnabled && baseline && contact.unread > 0 && contact.last_incoming_seq > seen) {
-      void deliver(`private:${contact.id}`, contact.last_incoming_seq, { title: `私聊 · ${contact.name}`, body: contact.last_incoming, contact: contact.id });
+    if (baseline && contact.unread > 0 && contact.last_incoming_seq > seen) {
+      void deliver(`private:${contact.id}`, contact.last_incoming_seq, { title: `私聊 · ${contact.name}`, body: contact.last_incoming, contact: contact.id }, admin);
     }
   }
   baseline = true;

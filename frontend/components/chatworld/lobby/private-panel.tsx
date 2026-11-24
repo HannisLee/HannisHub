@@ -11,12 +11,11 @@ import { ChatEmojiPicker } from "../room/emoji-picker";
 import { ChatAttachmentCard, ChatLightbox, INLINE_IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB, uploadChatAttachment, type LightboxImage } from "../shared/chat-attachment";
 import { Avatar, formatChatTime } from "../shared/chat-avatar";
 import { TodoPanel } from "../todo/todo-panel";
-import { useShell } from "../../layout/shell-context";
 import { ADMIN_PRIVATE_VIEW_EVENT } from "../../../lib/admin-notify";
+import { PRIVATE_MESSAGE_EVENT } from "../../../lib/online-notice-events";
 
 const BASE = "/api/chat-lobby/private-chat";
 /** 私聊有变化（新消息、已读）时的页面事件：WebSocket 定向通知与本页发送后都会派发 */
-const PRIVATE_EVENT = "lobby-private-chat";
 const PAGE_SIZE = 50;
 const MESSAGE_MAX = 1000;
 
@@ -77,12 +76,12 @@ function usePrivateContacts() {
     };
     const initial = window.setTimeout(load, 0);
     const timer = window.setInterval(load, 5000);
-    window.addEventListener(PRIVATE_EVENT, load);
+    window.addEventListener(PRIVATE_MESSAGE_EVENT, load);
     return () => {
       alive = false;
       window.clearTimeout(initial);
       window.clearInterval(timer);
-      window.removeEventListener(PRIVATE_EVENT, load);
+      window.removeEventListener(PRIVATE_MESSAGE_EVENT, load);
     };
   }, []);
   return { contacts, error };
@@ -99,7 +98,6 @@ interface PrivatePanelProps {
 
 /** 私聊窗口：左侧联系人（面对面时隐藏），右侧消息与发送区；窄屏时联系人与会话分两屏切换。 */
 export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanelProps) {
-  const admin = useShell()?.admin ?? false;
   const { contacts: loaded, error: contactsError } = usePrivateContacts();
   const contacts = useMemo(() => loaded ?? [], [loaded]);
   const [picked, setPicked] = useState(mode === "inbox" ? contactId ?? "" : "");
@@ -129,10 +127,9 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
   // 面对面时交谈对象由场景编号决定
   const selected = mode === "near" ? contacts.find(c => c.scene_id === sceneId)?.id ?? "" : picked;
   useEffect(() => {
-    if (!admin) return;
     window.dispatchEvent(new CustomEvent(ADMIN_PRIVATE_VIEW_EVENT, { detail: selected || null }));
     return () => { window.dispatchEvent(new CustomEvent(ADMIN_PRIVATE_VIEW_EVENT, { detail: null })); };
-  }, [admin, selected]);
+  }, [selected]);
   const peer = contacts.find(c => c.id === selected);
   const lastMessage = messages.at(-1)?.seq;
 
@@ -216,7 +213,7 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
         if (seq > lastRead && document.visibilityState === "visible" && document.hasFocus()) {
           lastRead = seq;
           await apiFetch(`${BASE}/${selected}/read`, { method: "PUT", body: jsonBody({ seq }) });
-          window.dispatchEvent(new Event(PRIVATE_EVENT));
+          window.dispatchEvent(new Event(PRIVATE_MESSAGE_EVENT));
         }
       } catch (value) {
         if (alive) setError(errorMessage(value));
@@ -225,12 +222,12 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
     const update = () => { void load(); };
     update();
     const timer = window.setInterval(update, 2000);
-    window.addEventListener(PRIVATE_EVENT, update);
+    window.addEventListener(PRIVATE_MESSAGE_EVENT, update);
     window.addEventListener("focus", update);
     return () => {
       alive = false;
       window.clearInterval(timer);
-      window.removeEventListener(PRIVATE_EVENT, update);
+      window.removeEventListener(PRIVATE_MESSAGE_EVENT, update);
       window.removeEventListener("focus", update);
     };
   }, [selected]);
@@ -257,11 +254,11 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
     const update = () => { void check(); };
     update();
     const timer = window.setInterval(update, mode === "near" ? 1000 : 4000);
-    window.addEventListener(PRIVATE_EVENT, update);
+    window.addEventListener(PRIVATE_MESSAGE_EVENT, update);
     return () => {
       alive = false;
       window.clearInterval(timer);
-      window.removeEventListener(PRIVATE_EVENT, update);
+      window.removeEventListener(PRIVATE_MESSAGE_EVENT, update);
     };
   }, [selected, mode, onClose]);
 
@@ -333,7 +330,7 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
       setAttachment(null);
       uploaded.current = null;
       request.current = null;
-      window.dispatchEvent(new Event(PRIVATE_EVENT));
+      window.dispatchEvent(new Event(PRIVATE_MESSAGE_EVENT));
     } catch (value) {
       setError(errorMessage(value));
     } finally {

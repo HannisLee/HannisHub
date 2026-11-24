@@ -38,6 +38,7 @@ import math
 import re
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
@@ -317,20 +318,29 @@ class LobbyPresence:
         conn.emote_at = now
         self._broadcast(member, {"type": "emote", "id": member.id, "key": key})
 
-    def _handle_say(self, conn: Connection, data: dict[str, Any]) -> None:
+    def _handle_say(self, conn: Connection, data: dict[str, Any]) -> str | None:
         """说话气泡：规则同表情，只从主连接、位于公共房间时广播；内容不落盘。"""
         text = data.get("text")
         member = self.members.get(conn.username)
         if not isinstance(text, str) or member is None or member.primary is not conn or not member.visible:
-            return
+            return None
         text = " ".join("".join(ch for ch in text if ch.isprintable() or ch.isspace()).split())[:MAX_SAY_CHARS]
         if not text:
-            return
+            return None
         now = time.monotonic()
         if now - conn.say_at < SAY_INTERVAL_SECONDS:
-            return
+            return None
         conn.say_at = now
         self._broadcast(member, {"type": "say", "id": member.id, "text": text})
+        return text
+
+    def speech_recipients(self, conn: Connection) -> set[str]:
+        room = (conn.state or {}).get("room")
+        return {
+            member.username for member in self.members.values()
+            if member.username != conn.username and member.visible and member.primary in self.connections
+            and not member.primary.background and (member.primary.state or {}).get("room") == room
+        }
 
     def _handle_pool(self, conn: Connection, data: dict[str, Any]) -> None:
         """台球桌消息：入座时使用该账号在大厅中的名字。"""
@@ -375,7 +385,10 @@ class LobbyPresence:
 
     # ---------- 连接入口 ----------
 
-    async def serve(self, websocket: WebSocket, username: str) -> None:
+    async def serve(
+        self, websocket: WebSocket, username: str,
+        notify_speech: Callable[[str, str, set[str]], Awaitable[None]] | None = None,
+    ) -> None:
         """处理一个已通过鉴权的 WebSocket 连接，直到断开。"""
         background = websocket.query_params.get("background") == "1"
         if background and username != "lihan":
@@ -423,7 +436,9 @@ class LobbyPresence:
                 elif data.get("type") == "emote":
                     self._handle_emote(conn, data)
                 elif data.get("type") == "say":
-                    self._handle_say(conn, data)
+                    speech = self._handle_say(conn, data)
+                    if speech and notify_speech:
+                        await notify_speech(member.name, speech, self.speech_recipients(conn))
                 elif data.get("type") == "pool":
                     self._handle_pool(conn, data)
         except Exception:

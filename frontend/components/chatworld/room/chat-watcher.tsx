@@ -20,6 +20,7 @@ import {
   updateFaviconBadge,
 } from "../../../lib/chat-notify";
 import type { ChatRoomMessages } from "../../../lib/types";
+import { ROOM_MESSAGE_EVENT } from "../../../lib/online-notice-events";
 
 const MESSAGES = `${API_PATHS.chatRoom}/messages`;
 const WATCH_MS = 4000;
@@ -70,22 +71,35 @@ export function useChatWatcher(enabled: boolean) {
     }
 
     let timer: number | undefined;
+    let running = true;
+    let queued = false;
     const loop = async () => {
+      if (running) { queued = true; return; }
+      window.clearTimeout(timer);
+      running = true;
       try {
         await check();
       } catch {
         // 网络抖动时静默跳过，下一轮重试
       }
-      if (!cancelled) timer = window.setTimeout(loop, WATCH_MS);
+      running = false;
+      if (cancelled) return;
+      if (queued) {
+        queued = false;
+        void loop();
+      } else timer = window.setTimeout(loop, WATCH_MS);
     };
+    window.addEventListener(ROOM_MESSAGE_EVENT, loop);
     initialize()
       .catch(() => undefined)
       .finally(() => {
-        if (!cancelled) timer = window.setTimeout(loop, WATCH_MS);
+        running = false;
+        if (!cancelled) timer = window.setTimeout(loop, queued ? 0 : WATCH_MS);
       });
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.removeEventListener(ROOM_MESSAGE_EVENT, loop);
     };
   }, [enabled]);
 }

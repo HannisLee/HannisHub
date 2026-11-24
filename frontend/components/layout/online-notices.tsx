@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
+import { getAdminNotifySnapshot } from "../../lib/admin-notify";
 import { canUseDesktopNotifications, showDesktopNotification } from "../../lib/desktop-notify";
+import { isAdmin } from "../../lib/navigation";
+import { PRIVATE_MESSAGE_EVENT, ROOM_MESSAGE_EVENT } from "../../lib/online-notice-events";
 import type { AuthStatus } from "../../lib/types";
+import { useRouter } from "next/navigation";
 
 const TITLE = "HannisHub 在线广播测试";
 const BODY = "管理员向当前在线的会话发送了一条测试通知。";
@@ -18,6 +22,7 @@ function showBroadcast(id: string) {
 }
 
 export function OnlineNotices({ username }: { username: string }) {
+  const router = useRouter();
   const [notice, setNotice] = useState("");
   const [permissionStatus, setPermissionStatus] = useState("");
 
@@ -35,11 +40,27 @@ export function OnlineNotices({ username }: { username: string }) {
       socket.onopen = () => { attempts = 0; };
       socket.onmessage = async event => {
         try {
-          const { id } = JSON.parse(event.data);
+          const { id, type, name, text } = JSON.parse(event.data);
+          // 聊天事件仅触发刷新，消息内容由现有认证接口返回。
+          if (type === "private-chat" || type === "chat-room") {
+            window.dispatchEvent(new Event(type === "private-chat" ? PRIVATE_MESSAGE_EVENT : ROOM_MESSAGE_EVENT));
+            return;
+          }
           if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) return;
           // 用当前 Cookie 复验，避免已从其他标签页退出的页面继续显示通知。
           const session = await apiFetch<AuthStatus>("/api/auth/status", { cache: "no-store" });
           if (!active || !session.authenticated || session.username !== username) return;
+          if (type === "lobby-say") {
+            if ((!document.hidden && document.hasFocus()) || typeof name !== "string" || typeof text !== "string") return;
+            if (isAdmin(username) && !getAdminNotifySnapshot().desktop) return;
+            showDesktopNotification(`大厅 · ${name}`, {
+              body: text,
+              icon: "/icon.svg",
+              tag: `hannishub-lobby-${id}`,
+              silent: true,
+            }, () => router.push("/chat-lobby"));
+            return;
+          }
           setNotice(id);
           setPermissionStatus("");
           showBroadcast(id);
@@ -61,7 +82,7 @@ export function OnlineNotices({ username }: { username: string }) {
       clearTimeout(expiry);
       socket?.close();
     };
-  }, [username]);
+  }, [router, username]);
 
   async function enableDesktop() {
     try {

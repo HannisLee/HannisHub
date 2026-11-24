@@ -42,10 +42,9 @@ def contacts(owner):
                 'name': identity['name'], 'photo': identity['photo'],
                 'last': _preview(last), 'last_at': last[1] if last else 0, 'unread': count,
                 'can_reply': bool(incoming and now - incoming < REPLY_WINDOW_SECONDS),
+                'last_incoming_seq': incoming_row['seq'] if incoming_row else 0,
+                'last_incoming': _preview(incoming_row),
             })
-            if owner == 'lihan':
-                result[-1].update(last_incoming_seq=incoming_row['seq'] if incoming_row else 0,
-                                  last_incoming=_preview(incoming_row))
         return result
 
 
