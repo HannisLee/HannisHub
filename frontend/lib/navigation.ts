@@ -60,6 +60,7 @@ export const navigation: NavGroup[] = [
     items: [
       { href: "/settings/global", label: "全局设置", icon: "settings", adminOnly: true },
       { href: "/settings", label: "AI 能力", icon: "settings" },
+      { href: "/settings/big-label", label: "大Label", icon: "settings" },
       { href: "/settings/users", label: "用户管理", icon: "users" },
       { href: "/files", label: "文件游览", icon: "files" },
       // 服务器文件已整合进文件游览顶部的服务器连接切换栏，侧栏入口隐藏
