@@ -9,10 +9,26 @@ async function login(page, username) {
   await page.getByRole("button", { name: "登录 HannisHub" }).click();
 }
 
+async function watchNotificationConnection(target) {
+  await target.addInitScript(() => {
+    window.notificationConnected = false;
+    window.WebSocket = class extends window.WebSocket {
+      constructor(...args) {
+        super(...args);
+        if (this.url.endsWith("/api/notifications/ws")) {
+          this.addEventListener("open", () => { window.notificationConnected = true; });
+          this.addEventListener("close", () => { window.notificationConnected = false; });
+        }
+      }
+    };
+  });
+}
+
 async function main() {
   const browser = await chromium.launch({ executablePath: process.env.CHROME || "/usr/bin/google-chrome" });
   try {
     const admin = await browser.newContext({ permissions: ["notifications"], viewport: { width: 1360, height: 900 } });
+    await watchNotificationConnection(admin);
     await admin.addInitScript(() => {
       const Native = window.Notification;
       window.testNotices = [];
@@ -112,12 +128,15 @@ async function main() {
     await page.waitForURL(/\/terminal\/?$/);
 
     const deepLink = await browser.newPage();
+    await watchNotificationConnection(deepLink);
     await deepLink.goto(origin + "/settings/global");
     await login(deepLink, "lihan");
     await deepLink.waitForURL(/\/settings\/global\/?$/);
     await deepLink.getByRole("heading", { name: "全局设置", exact: true }).waitFor();
 
-    const guest = await browser.newPage();
+    const guestContext = await browser.newContext();
+    await watchNotificationConnection(guestContext);
+    const guest = await guestContext.newPage();
     await guest.goto(origin + "/login");
     await login(guest, "guest");
     await guest.waitForURL(/\/chat-lobby\/?$/);
@@ -128,7 +147,22 @@ async function main() {
     assert.equal(await guest.getByRole("button", { name: "发送测试通知", exact: true }).count(), 0);
     assert.equal((await guest.request.get(origin + "/settings/global/index.txt")).status(), 403);
     assert.equal((await guest.request.get(recoveryUrl)).status(), 403);
-    console.log("通过：管理员默认终端与深链、普通账号权限、网络恢复设置、原生桌面通知、权限提示、提醒开关隔离与窄屏。");
+    const anotherGuestTab = await guestContext.newPage();
+    await anotherGuestTab.goto(origin + "/chat");
+    for (const online of [page, deepLink, guest, anotherGuestTab]) {
+      await online.waitForFunction(() => window.notificationConnected);
+    }
+    const broadcastUrl = origin + "/api/notifications/broadcast-test";
+    assert.equal((await guest.request.post(broadcastUrl, { headers: { Origin: origin } })).status(), 403);
+    assert.equal((await deepLink.request.post(broadcastUrl, { headers: { Origin: "https://evil.invalid" } })).status(), 403);
+    await deepLink.getByRole("button", { name: "向所有在线会话发送测试通知", exact: true }).click();
+    await deepLink.getByText("已向 2 个在线账号的 4 个浏览器会话发送广播。", { exact: true }).waitFor();
+    for (const online of [page, deepLink, guest, anotherGuestTab]) {
+      await online.getByRole("region", { name: "HannisHub 在线广播测试" }).waitFor();
+    }
+    await page.waitForFunction(() => window.testNotices.some(notice => notice.title === "HannisHub 在线广播测试"));
+    await guest.getByRole("button", { name: "允许桌面通知", exact: true }).waitFor();
+    console.log("通过：全局设置、桌面权限、多个账号及多个会话的在线广播、管理员及来源限制。");
   } finally {
     await browser.close();
   }

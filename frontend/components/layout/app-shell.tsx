@@ -13,6 +13,7 @@ import { DocumentTitle } from "./document-title";
 import { ShellContext, type ShellInfo } from "./shell-context";
 import { SidebarNav } from "./sidebar-nav";
 import { AdminMessageControls, AdminMessageOverlays, useAdminMessages } from "./admin-messages";
+import { OnlineNotices } from "./online-notices";
 
 /** 侧栏收起状态按浏览器标签页保存，刷新与跨页面跳转后保持同一形态 */
 const COLLAPSE_STORAGE_KEY = "hannishub_sidebar_collapsed";
@@ -155,6 +156,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
       <ShellContext.Provider value={shellInfo}>
         <DocumentTitle title={pageTitle} unread={totalUnread} />
         <main className={`immersive-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
+        <OnlineNotices key={shellInfo.username} username={shellInfo.username} />
       </ShellContext.Provider>
     );
   }
@@ -211,6 +213,7 @@ export function AppShell({ children, contentClassName = "", immersiveForRegular 
           <main className={`content-container${contentClassName ? ` ${contentClassName}` : ""}`}>{children}</main>
         </div>
         {admin ? <AdminMessageOverlays /> : onChatPage ? null : <ChatToastView />}
+        <OnlineNotices key={shellInfo.username} username={shellInfo.username} />
       </div>
     </ShellContext.Provider>
   );

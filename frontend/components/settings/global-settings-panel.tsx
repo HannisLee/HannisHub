@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { requestAdminDesktopPermission } from "../../lib/admin-notify";
+import { apiFetch } from "../../lib/api";
 import { canUseDesktopNotifications, showDesktopNotification } from "../../lib/desktop-notify";
 import { useShell } from "../layout/shell-context";
 import { Button, Card, CardHeader } from "../ui/primitives";
@@ -53,16 +54,32 @@ export function GlobalSettingsPanel() {
     setStatus(sent ? "已请求显示测试通知，请查看桌面或系统通知中心。" : NOTIFICATION_ERROR);
   }
 
+  async function broadcastTest() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const { accounts, connections } = await apiFetch<{ accounts: number; connections: number }>(
+        "/api/notifications/broadcast-test", { method: "POST" },
+      );
+      setStatus(`已向 ${accounts} 个在线账号的 ${connections} 个浏览器会话发送广播。`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "发送广播失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <header className="page-header"><h1 className="page-title">全局设置</h1></header>
       <div className="stack-grid">
         <NetworkRecoveryPanel />
         <Card>
-          <CardHeader title="桌面通知" description="授权后开启新消息桌面提醒，也可以发送一条测试通知检查当前浏览器。" />
+          <CardHeader title="桌面通知" description="可测试当前浏览器，或向所有在线会话发送测试广播。在线会话会显示网页提示，已授权的浏览器也会收到系统通知。" />
           <div className="row-actions">
             <Button type="button" variant="secondary" onClick={requestPermission} disabled={busy}>重新申请权限</Button>
             <Button type="button" onClick={testNotification} disabled={busy}>发送测试通知</Button>
+            <Button type="button" variant="secondary" onClick={broadcastTest} disabled={busy}>向所有在线会话发送测试通知</Button>
           </div>
           <div role="status">{status ? <p className="card-footer-note">{status}</p> : null}</div>
         </Card>

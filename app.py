@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote
 
-from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictBool
@@ -1165,6 +1165,49 @@ def update_network_recovery(request: Request, settings: NetworkRecoverySettings)
             "revision": secrets.token_hex(8),
         })
     return JSONResponse(_network_recovery_status(), headers={"Cache-Control": "no-store"})
+
+
+# ---------- 在线广播通知 ----------
+
+_notification_connections: set[WebSocket] = set()
+
+
+@app.websocket("/api/notifications/ws")
+async def notification_socket(websocket: WebSocket):
+    if not current_username(websocket.session) or not _websocket_origin_allowed(websocket):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept()
+    _notification_connections.add(websocket)
+    try:
+        while (await websocket.receive())["type"] != "websocket.disconnect":
+            pass
+    finally:
+        _notification_connections.discard(websocket)
+
+
+@app.post("/api/notifications/broadcast-test")
+async def broadcast_test_notification(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="仅管理员可以发送广播通知")
+
+    payload = {"id": secrets.token_hex(16)}
+    recipients = [
+        (socket, owner)
+        for socket in _notification_connections
+        if (owner := current_username(socket.session))
+    ]
+
+    async def send(socket: WebSocket, owner: str) -> str | None:
+        try:
+            await asyncio.wait_for(socket.send_json(payload), timeout=2)
+            return owner
+        except (TimeoutError, WebSocketDisconnect, RuntimeError, OSError):
+            _notification_connections.discard(socket)
+            return None
+
+    sent = [owner for owner in await asyncio.gather(*(send(*recipient) for recipient in recipients)) if owner]
+    return {"accounts": len(set(sent)), "connections": len(sent)}
 
 
 # ---------- 网页终端（仅管理员） ----------

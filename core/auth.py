@@ -369,7 +369,7 @@ def _accepts_html(scope: dict[str, Any]) -> bool:
 
 
 # 普通账号可连接的 WebSocket 路径
-REGULAR_WEBSOCKET_PATHS = {"/api/chat-lobby/ws"}
+REGULAR_WEBSOCKET_PATHS = {"/api/chat-lobby/ws", "/api/notifications/ws"}
 # 普通账号登录后的默认页面，也是访问受限页面时的跳转目标
 REGULAR_HOME = "/chat-lobby"
 
@@ -437,7 +437,7 @@ class AuthMiddleware:
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") == "websocket":
-            # WebSocket 同样需要有效会话，未登录在握手阶段直接拒绝；普通账号只能连接聊天大厅同步通道
+            # WebSocket 同样需要有效会话，普通账号仅能连接显式开放的通道
             username = current_username(scope.get("session") or {})
             if username == "lihan" or (username and scope.get("path") in REGULAR_WEBSOCKET_PATHS):
                 await self.app(scope, receive, send)
