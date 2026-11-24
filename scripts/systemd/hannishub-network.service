@@ -1,0 +1,8 @@
+[Unit]
+Description=HannisHub 本机网络巡检
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/hannishub-network.env
+ExecStart=/usr/bin/python3 ${HANNISHUB_NETWORK_WORKER} ${HANNISHUB_NETWORK_SETTINGS} ${HANNISHUB_NETWORK_INTERFACE}
+TimeoutStartSec=100s

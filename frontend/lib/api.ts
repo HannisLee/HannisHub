@@ -5,6 +5,7 @@ export const API_PATHS = {
   fileManager: "/api/file-manager",
   ocr: "/api/ocr",
   aiSettings: "/api/ai-settings",
+  networkRecovery: "/api/network-recovery",
   chatRoom: "/api/chat-room",
   chatLobby: "/api/chat-lobby",
   users: "/api/users",

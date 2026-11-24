@@ -4,6 +4,7 @@ import { useState } from "react";
 import { canUseDesktopNotifications } from "../../lib/admin-notify";
 import { useShell } from "../layout/shell-context";
 import { Button, Card, CardHeader } from "../ui/primitives";
+import { NetworkRecoveryPanel } from "./network-recovery-panel";
 
 const NOTIFICATION_ERROR = "浏览器未能显示通知，请检查系统通知设置后重试。";
 
@@ -49,6 +50,7 @@ export function GlobalSettingsPanel() {
     <>
       <header className="page-header"><h1 className="page-title">全局设置</h1></header>
       <div className="stack-grid">
+        <NetworkRecoveryPanel />
         <Card>
           <CardHeader title="桌面通知" description="发送一条测试通知到当前浏览器。首次测试时，请在浏览器提示里选择允许。" />
           <Button type="button" onClick={testNotification} disabled={busy}>{busy ? "正在检查权限…" : "发送测试通知"}</Button>

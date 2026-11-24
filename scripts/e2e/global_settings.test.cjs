@@ -1,4 +1,4 @@
-// 在隔离 Hub 验证账号首页及管理员桌面通知测试。
+// 在隔离 Hub 验证账号首页、桌面通知和本机网络恢复设置。
 const assert = require("node:assert/strict");
 const { chromium } = require(process.env.PW_CORE);
 const origin = `http://127.0.0.1:${process.env.HUB_PORT || 18127}`;
@@ -43,6 +43,25 @@ async function main() {
     assert.equal(await sidebar.getByText(/总览|Overview/).count(), 0);
     await settings.click();
     await page.getByRole("heading", { name: "全局设置", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "本机网络恢复", exact: true }).waitFor();
+    await page.getByText("巡检尚未运行", { exact: true }).waitFor();
+    const recoveryUrl = origin + "/api/network-recovery";
+    const pauseRecovery = page.getByRole("button", { name: "暂停自动恢复" });
+    const enableRecovery = page.getByRole("button", { name: "启用自动恢复" });
+    const [saved] = await Promise.all([
+      page.waitForResponse(response => response.url() === recoveryUrl && response.request().method() === "PUT"),
+      pauseRecovery.click(),
+    ]);
+    assert.equal(saved.status(), 200);
+    assert.deepEqual(await saved.json(), { enabled: false, monitor: null });
+    assert.equal((await page.request.put(recoveryUrl, {
+      headers: { Origin: "https://evil.invalid" },
+      data: { enabled: true },
+    })).status(), 403);
+    await page.reload();
+    await enableRecovery.waitFor();
+    await enableRecovery.click();
+    await pauseRecovery.waitFor();
     const send = page.getByRole("button", { name: "发送测试通知", exact: true });
     await send.click();
     await page.getByRole("status").filter({ hasText: "已请求显示测试通知" }).waitFor();
@@ -99,7 +118,8 @@ async function main() {
     await guest.waitForURL(/\/chat-lobby\/?$/);
     assert.equal(await guest.getByRole("button", { name: "发送测试通知", exact: true }).count(), 0);
     assert.equal((await guest.request.get(origin + "/settings/global/index.txt")).status(), 403);
-    console.log("通过：管理员默认终端与深链、普通账号权限、原生桌面通知、权限提示、提醒开关隔离与窄屏。");
+    assert.equal((await guest.request.get(recoveryUrl)).status(), 403);
+    console.log("通过：管理员默认终端与深链、普通账号权限、网络恢复设置、原生桌面通知、权限提示、提醒开关隔离与窄屏。");
   } finally {
     await browser.close();
   }

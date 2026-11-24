@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -10,6 +11,7 @@ from urllib.parse import unquote
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, StrictBool
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -23,6 +25,7 @@ from core.auth import (
     current_username,
     delete_user,
     ensure_auth_settings,
+    get_settings_section,
     is_configured,
     is_login_allowed,
     is_terminal_admin,
@@ -32,9 +35,11 @@ from core.auth import (
     migrate_legacy_admin,
     record_login_failure,
     set_user_password,
+    update_settings_section,
     validate_password,
     validate_username,
 )
+from core import network_recovery
 from model_manager import ai_settings
 from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lobby_linkup, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
@@ -1125,6 +1130,41 @@ async def auth_status(request: Request):
             "terminal": is_terminal_admin(username),
         }
     )
+
+
+class NetworkRecoverySettings(BaseModel):
+    enabled: StrictBool
+
+
+def _network_recovery_status() -> dict[str, Any]:
+    config = get_settings_section(network_recovery.SETTINGS_SECTION)
+    enabled = config is None or (isinstance(config, dict) and config.get("enabled", True) is True)
+    state = network_recovery.read_object(network_recovery.state_path())
+    fields = (
+        "interface", "authorized", "checked_at", "status", "connectivity",
+        "address", "gateway", "outage_seconds", "last_reconnect", "last_reboot",
+    )
+    monitor = {field: state.get(field) for field in fields} if state else None
+    return {"enabled": enabled, "monitor": monitor}
+
+
+@app.get("/api/network-recovery")
+def read_network_recovery(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="本机网络恢复仅对管理员开放")
+    return JSONResponse(_network_recovery_status(), headers={"Cache-Control": "no-store"})
+
+
+@app.put("/api/network-recovery")
+def update_network_recovery(request: Request, settings: NetworkRecoverySettings):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="本机网络恢复仅对管理员开放")
+    if settings.enabled != _network_recovery_status()["enabled"]:
+        update_settings_section(network_recovery.SETTINGS_SECTION, {
+            "enabled": settings.enabled,
+            "revision": secrets.token_hex(8),
+        })
+    return JSONResponse(_network_recovery_status(), headers={"Cache-Control": "no-store"})
 
 
 # ---------- 网页终端（仅管理员） ----------

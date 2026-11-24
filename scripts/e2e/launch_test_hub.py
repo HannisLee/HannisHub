@@ -37,6 +37,7 @@ if os.environ.get("HANNISHUB_TEST_EXTERNAL_TERMINAL") != "1":
     terminal_process = subprocess.Popen([sys.executable, "-m", "server.terminal_service"], cwd=Path(__file__).resolve().parents[2])
 import app as hub
 hub.model_manager_app.ASR_JOB_DIR = work / "asr_jobs"
+hub.network_recovery.state_path = lambda: work / "network-recovery.json"
 import uvicorn
 try:
     uvicorn.run(hub.app, host="127.0.0.1", port=port, lifespan="off", log_level="warning")

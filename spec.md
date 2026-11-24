@@ -1042,3 +1042,13 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 用户在「提醒」中点击「开启桌面通知」后，才调用浏览器 `Notification.requestPermission()`；需要 HTTPS 或 localhost 安全上下文以及通知 API 支持。权限允许且开启后，网页隐藏或窗口失焦时，新消息会显示系统通知，点击通知聚焦对应页面并打开私聊或聊天室。浏览器拒绝、HTTP 内网地址或系统通知不可用时，保留标签页、网页提示和声音，并在设置中说明原因；不反复自动申请权限。
 - 提示音沿用 `hannishub_chat_sound` 与 Web Audio（首次用户交互后解锁，1.5 秒节流），系统通知设为静音以避免双重声音；桌面开关保存于当前浏览器的 `hannishub_admin_desktop_notify`。管理员各标签页同步提醒开关。消息提示通过 Web Locks 与浏览器存储游标 `hannishub_admin_message_alerts` 去重；不支持 Web Locks 时退回存储及内存去重。
 - 仅在网页连接仍挂着时接收消息，不注册关闭网页后的推送服务；不改变普通账号的入口、工位、私聊权限及通知界面。
+
+## 本机网络恢复
+
+- 管理员在「全局设置 → 本机网络恢复」查看主网卡、IPv4 地址、网关、外网探测、连续断网时长及上次恢复动作，可暂停或启用自动恢复。设置存放在根 `settings.json` 的 `network_recovery` 区段，默认启用，系统授权后方可执行恢复动作。
+- `GET /api/network-recovery` 返回 `enabled` 和 `monitor`。未巡检时 `monitor` 为 `null`，否则包含网卡、授权状态、最近检查时间、本地与外网状态、地址、网关、连续断网秒数和最近重连、重启结果。
+- `PUT /api/network-recovery` 接收 JSON `{"enabled": true}` 或 `{"enabled": false}` 并返回同一状态结构。接口需要管理员会话，写请求沿用同源校验。切换开关后重新计算连续断网时长。
+- 独立的用户级 `hannishub-network.timer` 每分钟运行一次巡检，Hub 停止时也能工作。检查指定有线网卡的物理链路、IPv4、默认路由和网关。网关的 ICMP 无响应且邻居解析明确失败时才算故障。NetworkManager 的外网探测状态仅供诊断。
+- 连续确认本机断网 5 分钟且物理链路存在时，重新激活指定的 NetworkManager 连接以重新获取 IPv4 配置，同一故障期间最多每 15 分钟尝试一次。连续确认断网满 5 小时则申请重启整机，无固定时段或跨重启的间隔要求。恢复、状态无法确认、巡检中断超过 3 分钟或系统重启，均重新计算连续时长。
+- 部署时，以 Hub 运行用户执行 `bash scripts/install_network_recovery.sh enp3s0`，网卡名按本机调整。需要用户级 systemd 在退出登录后继续运行时，先启用该账号的 linger。本机已启用。巡检初始为只读，按安装脚本最后输出的命令执行一次 `sudo` 授权，部署固定连接的系统级重连服务和仅允许执行该服务及重启的 sudoers 规则，同时停用已有的 `scheduled-reboot.timer`。安装过程没有重启动作。
+- 巡检状态位于 `~/.local/state/hannishub-network/status.json`。诊断日志可通过 `journalctl --user -u hannishub-network.service` 查看。自动整机重启会结束网页终端会话及其中的任务。

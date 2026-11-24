@@ -1,0 +1,9 @@
+[Unit]
+Description=每分钟执行 HannisHub 本机网络巡检
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
