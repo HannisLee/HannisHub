@@ -1472,6 +1472,8 @@ html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; us
 
 /* 网页终端：顶部横向标签栏 + 填满剩余高度的终端区 */
 .content-container.terminal-page { width: min(100% - 64px, 1700px); padding: var(--space-5) 0 var(--space-6); }
+.content-container.remote-browser-page { width: 100%; padding: 0; }
+.remote-browser-frame { display: block; width: 100%; height: calc(100dvh - 70px); border: 0; background: var(--color-bg); }
 .terminal-workspace { display: flex; height: calc(100vh - 120px); min-height: 420px; flex-direction: column; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .terminal-commandbar { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); min-height: 34px; padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--color-divider); background: var(--color-surface-soft); }
 .terminal-command-list { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: var(--space-2); overflow-x: auto; scrollbar-width: none; }
@@ -1627,6 +1629,7 @@ html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; us
   .shell-overlay.is-visible { pointer-events: auto; opacity: 0.72; }
   .shell-content { width: 100%; margin-left: 0; }
   .topbar { min-height: 64px; padding: 0 var(--space-5); }
+  .remote-browser-frame { height: calc(100dvh - 64px); }
   .topbar-context { overflow: hidden; white-space: nowrap; }
   .topbar-user .user-name { display: none; }
   .content-container { width: min(100% - 40px, 640px); padding: var(--space-8) 0 var(--space-16); }

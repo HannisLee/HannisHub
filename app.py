@@ -43,7 +43,7 @@ from core import network_recovery
 from model_manager import ai_settings
 from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lobby_linkup, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
-from server import terminal_commands, terminal_client
+from server import remote_browser, terminal_commands, terminal_client
 from core.compression import SelectiveGZipMiddleware
 from core.frontend import FrontendCacheMiddleware, FrontendStaticFiles
 import model_manager.app as model_manager_app
@@ -319,6 +319,30 @@ async def todo_page():
 @app.get("/terminal/", include_in_schema=False)
 async def terminal_page():
     return await _new_frontend_route("terminal")
+
+
+@app.get("/browser", include_in_schema=False)
+@app.get("/browser/", include_in_schema=False)
+async def browser_page():
+    return await _new_frontend_route("browser")
+
+
+@app.api_route(remote_browser.PREFIX + "{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def browser_resource(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(403, "远程浏览器仅对管理员开放")
+    if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
+        raise HTTPException(403, "请求来源不受信任")
+    return await remote_browser.resource(request)
+
+
+@app.websocket(remote_browser.PREFIX + "api/websockets")
+async def browser_socket(websocket: WebSocket):
+    if (not is_terminal_admin(current_username(websocket.session))
+            or not websocket.headers.get("origin") or not _websocket_origin_allowed(websocket)):
+        await websocket.close(code=4403)
+        return
+    await remote_browser.stream(websocket)
 
 
 @app.get("/point-clouds", include_in_schema=False)

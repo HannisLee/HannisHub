@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "lobby" | "users" | "smile" | "attach" | "download" | "file" | "terminal" | "plus" | "close" | "chevronDown" | "grip";
+export type IconName = "overview" | "models" | "processes" | "gpu" | "downloads" | "asr" | "settings" | "connections" | "tasks" | "prompts" | "files" | "documents" | "pointcloud" | "panelCollapse" | "panelExpand" | "chat" | "lobby" | "users" | "smile" | "attach" | "download" | "file" | "terminal" | "browser" | "plus" | "close" | "chevronDown" | "grip";
 
 const paths: Record<IconName, ReactNode> = {
   overview: <><path d="M3 11.5 12 4l9 7.5v8.25a.75.75 0 0 1-.75.75H15v-5.25H9v5.25H3.75a.75.75 0 0 1-.75-.75Z" /></>,
@@ -25,6 +25,7 @@ const paths: Record<IconName, ReactNode> = {
   download: <><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" /></>,
   file: <><path d="M6.5 3.5h7l4 4v13h-11a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1Z" /><path d="M13.5 3.5v4h4" /></>,
   terminal: <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="m7 9.5 3 2.5-3 2.5M12.5 15h4.5" /></>,
+  browser: <><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="M3 9h18M6.5 6.75h.01M9.25 6.75h.01" /></>,
   plus: <><path d="M12 5v14M5 12h14" /></>,
   chevronDown: <><path d="m6 9 6 6 6-6" /></>,
   grip: <><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></>,

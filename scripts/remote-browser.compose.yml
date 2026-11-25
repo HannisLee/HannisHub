@@ -1,0 +1,25 @@
+services:
+  chrome:
+    image: lscr.io/linuxserver/chrome@sha256:e1fd857c81d4443448d61e32bfe26cd5d731487cdeb82c025ea3c0ba73b0523c
+    ports:
+      - "127.0.0.1:${HANNISHUB_BROWSER_PORT:-18083}:3000"
+    environment:
+      SUBFOLDER: /browser/session/
+      CHROME_CLI: about:blank
+      DISABLE_SUDO: "true"
+      DISABLE_TERMINALS: "true"
+      DISABLE_OPEN_TOOLS: "true"
+      SELKIES_COMMAND_ENABLED: "false"
+      SELKIES_ENABLE_SHARING: "false|locked"
+      SELKIES_ENABLE_SHARED: "false|locked"
+      SELKIES_FILE_TRANSFERS: none
+      SELKIES_PRINTING_ENABLED: "false"
+      SELKIES_UI_SIDEBAR_SHOW_APPS: "false|locked"
+      SELKIES_UI_SIDEBAR_SHOW_FILES: "false|locked"
+    volumes:
+      - chrome-profile:/config
+    shm_size: 1gb
+    restart: unless-stopped
+
+volumes:
+  chrome-profile:

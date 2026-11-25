@@ -59,6 +59,7 @@ export const navigation: NavGroup[] = [
     label: "设置",
     items: [
       { href: "/settings/global", label: "全局设置", icon: "settings", adminOnly: true },
+      { href: "/browser", label: "远程浏览器", icon: "browser", adminOnly: true },
       { href: "/settings", label: "AI 能力", icon: "settings" },
       { href: "/settings/big-label", label: "大Label", icon: "settings" },
       { href: "/settings/users", label: "用户管理", icon: "users" },

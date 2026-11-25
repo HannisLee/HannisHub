@@ -210,6 +210,12 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - 端到端测试：`scripts/e2e/launch_test_hub.py` 以临时 settings、临时数据库、关闭 lifespan 启动测试 Hub，`scripts/e2e/terminal_paste.test.cjs` 用 Playwright 模拟 Windows 浏览器（`navigator.platform = Win32`）验证上述快捷键、多行 CRLF / 中文 / emoji 粘贴逐字一致、bracketed paste、2 MB 大段粘贴完整且 Hub 保持响应，以及非安全上下文下的粘贴
 - 配置（根 `settings.json`，均可省略）：`"terminal": {"idle_timeout_hours": 15, "max_sessions": 10, "shell": null, "scrollback_kb": 512}`；`shell` 支持 `~`。测试时可用环境变量 `HANNISHUB_TERMINAL_IDLE_SECONDS` 覆盖空闲时限（同时回收检查改为每秒一次）。
 
+### 远程浏览器
+
+- 管理员可从侧栏「设置 → 远程浏览器」进入 `/browser`，在 Hub 页面中直接操作服务器上的 Google Chrome。网站访问从服务器发出，浏览器配置、登录状态和下载文件保存在容器卷 `chrome-profile`。
+- `GET` / `HEAD /browser/session/{path}` 转发 Selkies 页面和资源，WebSocket `/browser/session/api/websockets` 转发画面及键鼠。Hub 校验管理员会话，WebSocket 额外校验来源。容器仅绑定本机回环地址，远程客户端使用现有 Hub HTTPS 入口。
+- 在仓库根目录运行 `docker compose -p hannishub-browser -f scripts/remote-browser.compose.yml up -d`，独立维护浏览器容器。默认端口为 `18083`，改端口时同时设定 Compose 变量 `HANNISHUB_BROWSER_PORT` 与根 `settings.json` 的 `remote_browser.backend_port`。重启 Hub 时 Chrome 继续运行。
+
 ### Hub API
 
 | 方法 | 路径 | 功能 |
