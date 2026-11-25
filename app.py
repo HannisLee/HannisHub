@@ -1046,6 +1046,28 @@ async def chat_lobby_note_delete(note_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+class LinkupSettings(BaseModel):
+    enabled: StrictBool
+
+
+@app.get("/api/chat-lobby/linkup/settings")
+def read_linkup_settings(request: Request):
+    """读取所有账号共用的连连看开关，旧配置默认开启。"""
+    _require_user(request)
+    config = get_settings_section("linkup")
+    enabled = not isinstance(config, dict) or config.get("enabled") is not False
+    return JSONResponse({"enabled": enabled}, headers={"Cache-Control": "no-store"})
+
+
+@app.put("/api/chat-lobby/linkup/settings")
+def update_linkup_settings(request: Request, settings: LinkupSettings):
+    """仅管理员可以修改连连看开关。"""
+    if not is_terminal_admin(_require_user(request)):
+        raise HTTPException(status_code=403, detail="仅管理员可以修改连连看设置")
+    update_settings_section("linkup", settings.model_dump())
+    return JSONResponse(settings.model_dump(), headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/chat-lobby/linkup")
 async def chat_lobby_linkup_board(request: Request):
     """大厅街机连连看排行榜：闯关总榜、今日挑战榜与自己的最好成绩；day 为服务器今天的日期。"""

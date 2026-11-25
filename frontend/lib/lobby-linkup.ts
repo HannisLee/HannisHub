@@ -1,8 +1,16 @@
 import { API_PATHS, apiFetch, jsonBody } from "./api";
 
-/** 大厅街机连连看：排行榜接口与「关闭前确认」状态 */
+/** 大厅街机连连看：开关、排行榜接口与「关闭前确认」状态 */
 
 const BASE = `${API_PATHS.chatLobby}/linkup`;
+
+export function fetchLinkupSettings(signal: AbortSignal) {
+  return apiFetch<{ enabled: boolean }>(`${BASE}/settings`, { cache: "no-store", signal });
+}
+
+export function saveLinkupSettings(enabled: boolean) {
+  return apiFetch<{ enabled: boolean }>(`${BASE}/settings`, { method: "PUT", body: jsonBody({ enabled }) });
+}
 
 export type RankedMode = "campaign" | "daily";
 

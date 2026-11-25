@@ -145,6 +145,7 @@ HannisHub/
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
 - `/settings/global`：仅管理员可访问的全局设置。「重新申请权限」在用户点击时申请当前站点的浏览器通知权限，获准后同步开启顶栏的新消息桌面提醒。「发送测试通知」使用与私聊相同的浏览器通知入口，在页面聚焦时也可测试，且不发送聊天消息或修改提醒开关。浏览器授权需要 HTTPS 或 localhost，系统负责横幅显示与位置。
 - 全局设置的「向所有在线会话发送测试通知」向已登录并保持连接的浏览器标签页广播固定测试文案，覆盖管理员和普通账号的所有在线页面。各页面显示可关闭的网页通知，支持且已授权的浏览器也请求显示系统通知。未授权的用户可从网页通知主动申请权限。广播实时发送，离线后重新连接不补发。
+- 管理员可在「全局设置 → 大厅游戏」切换「允许玩连连看」。开关保存在根 `settings.json` 的 `linkup.enabled`，默认开启。关闭后，任何账号下次打开大厅街机时会看到「孙倩茹禁止玩连连看」，已打开的游戏可继续。
 - `WS /api/notifications/ws`：登录后建立在线广播连接，校验同源与会话；测试广播发送 `{"id":"…"}`，前端复验当前登录账号后展示固定文案。私聊和公共聊天室发送 `{"type":"private-chat"}` 或 `{"type":"chat-room"}` 来触发认证接口立即刷新，继续保留轮询兜底。大厅公开房间的说话气泡向同房间其他玩家发送 `{"type":"lobby-say","id":"…","name":"…","text":"…"}`，页面失焦时可显示系统通知。
 - `POST /api/notifications/broadcast-test`：仅管理员同源请求可用，无请求体。返回 `accounts`（成功写入连接所属的不同账号数）和 `connections`（成功写入的连接数，以标签页计）。系统是否显示通知取决于浏览器授权及系统设置。
 - `/files`：文件游览页，浏览已开放目录；点击可预览的点云文件会打开点云预览页
@@ -272,6 +273,8 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 | POST | `/api/chat-lobby/notes` | 接收 `text`（去控制字符、保留换行、最多 140 字，空内容 400）与 `color`（`yellow`/`pink`/`blue`/`green`/`orange`/`purple`，无效值按 `yellow`）贴一张便签；每人最多同时 20 张（超出 400）、10 秒内只能贴一张（429）；成功后广播 `{"type":"notes"}` 并返回新便签 |
 | DELETE | `/api/chat-lobby/notes/{note_id}` | 撕掉自己的便签，管理员可撕掉任何一张；不存在或不是自己的返回 404；成功后广播 `{"type":"notes"}` |
 | GET | `/api/chat-lobby/linkup` | 街机连连看排行榜 `{day, campaign, daily, mine: {campaign, daily}}`：`day` 为服务器今天的日期（前端以此生成每日挑战盘面），`campaign` / `daily` 为闯关总榜与今日挑战榜前 10 名 `[{name, score, level, cleared, plays, mine}]`（按分数降序，同分先达成者在前；`name` 为提交时的大厅名字，不暴露登录用户名），`mine` 为自己的 `{score, level, cleared, plays, rank}` 或 `null`；所有登录账号可用 |
+| GET | `/api/chat-lobby/linkup/settings` | 所有登录账号可以读取全局连连看开关，返回 `{enabled}` |
+| PUT | `/api/chat-lobby/linkup/settings` | 仅管理员可修改全局连连看开关，接受并返回 `{enabled}`，值必须为布尔值 |
 | POST | `/api/chat-lobby/linkup/scores` | 提交一局连连看成绩：`mode`（`campaign` / `daily`）、`score`（整数，0 至 `关卡数 × 5570`）、`level`（1–999，每日挑战固定为 1）、`cleared`、`day`（每日挑战必填，只接受服务器的今天或昨天）；每人每模式（每日挑战为每天）只保留最高分，`plays` 每次加一；同一账号 3 秒内只能提交一次（429）；返回 `{record, previous, rank, board}` |
 | DELETE | `/api/chat-lobby/desks/mine` | 退还自己的工位（没有工位时不报错），广播 `{"type":"desks"}` 并返回最新归属 |
 | GET | `/api/todos` | 当前账号的分区与全部工位待办 `{spaces: [{id, name, sort, created_at}], todos: [{id, title, note, list, priority, due_date, my_day, done, done_at, status, subtasks, progress, sort, space, created_at, updated_at}]}`，分区按 `sort` 排列，待办按 `sort`、创建时间排列；账号没有分区时自动创建「工作」，没有分区或分区已失效的待办归入第一个分区；按分区筛选与分组在前端完成 |

@@ -3,10 +3,10 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { DeskComputer, PrivatePanel } from "./private-panel";
-import { useCallback, useEffect, useRef, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setChatEmbedded } from "../../../lib/chat-notify";
-import { linkupCloseWarning } from "../../../lib/lobby-linkup";
+import { fetchLinkupSettings, linkupCloseWarning } from "../../../lib/lobby-linkup";
 import { poolCloseWarning } from "../../../lib/lobby-pool";
 import { useShell } from "../../layout/shell-context";
 import type { MachineInfo } from "./game/layout";
@@ -87,6 +87,9 @@ interface MachineDialogProps {
  *  面板内部已处理的 Esc（如关闭表情面板、大图预览）不会连带关闭对话框。 */
 export function MachineDialog({ machine, onClose: close, actions }: MachineDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [linkupAccess, setLinkupAccess] = useState<"loading" | "allowed" | "denied" | "error">("loading");
+  const isLinkup = machine.id === "linkup";
+  const notice = isLinkup && (linkupAccess === "denied" || linkupAccess === "error");
   const entry = MACHINES[machine.id];
   const confirmClose = entry?.confirmClose;
   const onClose = useCallback(() => {
@@ -96,6 +99,17 @@ export function MachineDialog({ machine, onClose: close, actions }: MachineDialo
   }, [close, confirmClose]);
   // 整页模式（普通账号）不提供跳出游戏的独立页面入口
   const immersive = useShell()?.immersive ?? false;
+
+  useEffect(() => {
+    if (!isLinkup) return;
+    const controller = new AbortController();
+    void fetchLinkupSettings(controller.signal).then(settings => {
+      if (!controller.signal.aborted) setLinkupAccess(settings.enabled ? "allowed" : "denied");
+    }).catch(() => {
+      if (!controller.signal.aborted) setLinkupAccess("error");
+    });
+    return () => controller.abort();
+  }, [isLinkup]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -109,33 +123,44 @@ export function MachineDialog({ machine, onClose: close, actions }: MachineDialo
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
     };
-  }, [onClose]);
+  }, [notice, onClose]);
 
   if (!entry) return null;
   const { Panel, href, fill, compact, hint } = entry;
 
   return createPortal(
     <div className="lobby-machine-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className={`lobby-machine${compact ? " is-compact" : ""}`} role="dialog" aria-modal="true" aria-labelledby="lobby-machine-title">
-        <header className="lobby-machine-bar">
-          <div className="lobby-machine-name">
-            <span className="lobby-dot" aria-hidden="true" />
-            <span id="lobby-machine-title">{machine.title}</span>
-            <span className="lobby-machine-hint">{hint ?? machine.hint}</span>
+      {notice ? (
+        <section className="lobby-claim" role="alertdialog" aria-modal="true" aria-labelledby="lobby-machine-title">
+          <h2 id="lobby-machine-title" className="lobby-claim-title">
+            {linkupAccess === "denied" ? "孙倩茹禁止玩连连看" : "无法读取连连看设置，请稍后再试。"}
+          </h2>
+          <div className="lobby-claim-actions">
+            <button ref={closeRef} type="button" className="button button-primary button-md" onClick={onClose}>确定</button>
           </div>
-          <div className="lobby-machine-actions">
-            {actions}
-            {immersive || !href ? null : <Link href={href} className="lobby-machine-link">在独立页面打开</Link>}
-            <button ref={closeRef} type="button" className="lobby-machine-close" onClick={onClose} aria-label="关闭面板，回到大厅">
-              <kbd>Esc</kbd>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-            </button>
+        </section>
+      ) : (
+        <section className={`lobby-machine${compact ? " is-compact" : ""}`} role="dialog" aria-modal="true" aria-labelledby="lobby-machine-title">
+          <header className="lobby-machine-bar">
+            <div className="lobby-machine-name">
+              <span className="lobby-dot" aria-hidden="true" />
+              <span id="lobby-machine-title">{machine.title}</span>
+              <span className="lobby-machine-hint">{hint ?? machine.hint}</span>
+            </div>
+            <div className="lobby-machine-actions">
+              {actions}
+              {immersive || !href ? null : <Link href={href} className="lobby-machine-link">在独立页面打开</Link>}
+              <button ref={closeRef} type="button" className="lobby-machine-close" onClick={onClose} aria-label="关闭面板，回到大厅">
+                <kbd>Esc</kbd>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              </button>
+            </div>
+          </header>
+          <div className={`lobby-machine-body${fill ? " is-fill" : ""}`}>
+            {isLinkup && linkupAccess !== "allowed" ? <PanelLoading /> : <Panel machine={machine} onClose={onClose} />}
           </div>
-        </header>
-        <div className={`lobby-machine-body${fill ? " is-fill" : ""}`}>
-          <Panel machine={machine} onClose={onClose} />
-        </div>
-      </section>
+        </section>
+      )}
     </div>,
     document.body,
   );

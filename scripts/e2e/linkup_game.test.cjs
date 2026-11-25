@@ -1,5 +1,5 @@
 // 在隔离测试 Hub 中验证大厅街机连连看：走到街机前按 E 打开、闯关消除（真实鼠标点击）、道具、暂停、过关、超时结算、
-// 排行榜、每日挑战、休闲模式、计分局中途关闭的确认与结算、窄屏布局。
+// 全局开关、排行榜、每日挑战、休闲模式、计分局中途关闭的确认与结算、窄屏布局。
 // 测试钩子：页面加载前设置 window.__LINKUP_E2E__，引擎把自己挂到画布的 __linkup 上，提供「一对可消除方块的点击坐标」。
 // 环境变量：PW_CORE（playwright-core 路径）、CHROME（浏览器可执行文件）、HUB_PORT、SHOT_DIR（可选，保存截图）。
 const {chromium}=require(process.env.PW_CORE);
@@ -82,6 +82,42 @@ const shot=async(page,name)=>{if(shotDir)await page.screenshot({path:`${shotDir}
   await walk('hall',[zx+8,zy+zh+8,zw-16,10]);
   await walk('hall',machine.zone);
   await shot(page,'linkup-lobby');
+
+  // 管理员关闭街机后，已打开的大厅下次交互立即显示提示。
+  const settings=await ctx.newPage();
+  const settingsPath='/api/chat-lobby/linkup/settings';
+  await settings.goto(origin+'/settings/global');
+  const toggle=settings.getByRole('switch',{name:'允许玩连连看'});
+  await toggle.and(settings.locator(':enabled')).waitFor();
+  assert.equal(await toggle.isChecked(),true,'旧配置默认开启');
+  const off=await Promise.all([
+   settings.waitForResponse(response=>response.url().endsWith(settingsPath)&&response.request().method()==='PUT'),
+   toggle.click(),
+  ]);
+  assert.equal(off[0].status(),200);
+  await settings.reload();
+  await toggle.and(settings.locator(':enabled')).waitFor();
+  assert.equal(await toggle.isChecked(),false,'刷新后保持关闭');
+  assert.deepEqual(await obsCtx.request.get(origin+settingsPath).then(response=>response.json()),{enabled:false});
+  assert.equal((await obsCtx.request.put(origin+settingsPath,{
+   data:{enabled:true},headers:{Origin:origin},
+  })).status(),403,'普通账号不能修改全局开关');
+
+  await page.bringToFront();
+  await page.keyboard.press('e');
+  const blocked=page.getByRole('alertdialog',{name:'孙倩茹禁止玩连连看'});
+  await blocked.waitFor();
+  assert.equal(await page.locator('.linkup-canvas').count(),0);
+  await blocked.getByRole('button',{name:'确定'}).click();
+  await blocked.waitFor({state:'detached'});
+
+  const on=await Promise.all([
+   settings.waitForResponse(response=>response.url().endsWith(settingsPath)&&response.request().method()==='PUT'),
+   toggle.click(),
+  ]);
+  assert.equal(on[0].status(),200);
+  await settings.close();
+  await page.bringToFront();
   await page.keyboard.press('e');
   const dialog=page.getByRole('dialog');
   await dialog.waitFor();

@@ -1,15 +1,57 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { requestAdminDesktopPermission } from "../../lib/admin-notify";
 import { apiFetch } from "../../lib/api";
 import { canUseDesktopNotifications, showDesktopNotification } from "../../lib/desktop-notify";
+import { fetchLinkupSettings, saveLinkupSettings } from "../../lib/lobby-linkup";
 import { useShell } from "../layout/shell-context";
 import { Button, Card, CardHeader } from "../ui/primitives";
 import { NetworkRecoveryPanel } from "./network-recovery-panel";
 
 const NOTIFICATION_ERROR = "浏览器未能显示通知，请检查系统通知设置后重试。";
 const PERMISSION_DENIED = "通知权限已被阻止，请在地址栏的站点设置中允许通知后重试。";
+
+function LinkupSettings() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchLinkupSettings(controller.signal).then(settings => {
+      if (!controller.signal.aborted) setEnabled(settings.enabled);
+    }).catch(() => {
+      if (!controller.signal.aborted) setError("读取连连看设置失败，请刷新页面重试。");
+    });
+    return () => controller.abort();
+  }, []);
+
+  async function toggle(checked: boolean) {
+    setSaving(true);
+    setError("");
+    try {
+      const settings = await saveLinkupSettings(checked);
+      setEnabled(settings.enabled);
+    } catch {
+      setError("保存连连看设置失败，请重试。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader title="大厅游戏" />
+      <label className="check-choice">
+        <input type="checkbox" role="switch" checked={enabled ?? false} disabled={enabled === null || saving}
+          onChange={event => void toggle(event.currentTarget.checked)} />
+        允许玩连连看
+      </label>
+      {error && <p role="alert" className="card-footer-note">{error}</p>}
+    </Card>
+  );
+}
 
 export function GlobalSettingsPanel() {
   const shell = useShell();
@@ -73,6 +115,7 @@ export function GlobalSettingsPanel() {
     <>
       <header className="page-header"><h1 className="page-title">全局设置</h1></header>
       <div className="stack-grid">
+        <LinkupSettings />
         <NetworkRecoveryPanel />
         <Card>
           <CardHeader title="桌面通知" description="可测试当前浏览器，或向所有在线会话发送测试广播。在线会话会显示网页提示，已授权的浏览器也会收到系统通知。" />

@@ -484,6 +484,7 @@ export function ChatLobby() {
       ) : null}
       {active && active.id !== AVATAR_MACHINE ? (
         <MachineDialog
+          key={active.id === "linkup" ? "linkup" : undefined}
           machine={active}
           onClose={closeMachine}
           actions={active.id === TODO_MACHINE.id && desks.mine ? (
