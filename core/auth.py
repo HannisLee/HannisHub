@@ -207,6 +207,11 @@ def session_version(username: str) -> int | None:
     return int(user.get("session_version") or 1) if user else None
 
 
+def account_created_at(username: str) -> float | None:
+    user = _user_map().get(username)
+    return float(user.get("created_at") or 0) if user else None
+
+
 def list_users() -> list[dict[str, Any]]:
     """返回用户公开信息，不含密码哈希。"""
     return [
@@ -230,7 +235,7 @@ def create_user(username: str, password: str) -> dict[str, Any]:
             "username": username,
             "password_hash": _PASSWORD_HASHER.hash(password),
             "created_at": time.time(),
-            "session_version": 1,
+            "session_version": secrets.randbelow(2**52) + 2,
         }
         users.append(user)
         _write_settings_unlocked(data)
@@ -279,6 +284,7 @@ def login_session(session: dict[str, Any], username: str) -> None:
     session.clear()
     session["user"] = username
     session["ver"] = session_version(username) or 1
+    session["desk_browser_session"] = secrets.token_hex(16)
 
 
 def get_settings_section(name: str) -> Any:
@@ -376,6 +382,8 @@ REGULAR_HOME = "/chat-lobby"
 
 def _regular_user_allowed(path: str, method: str) -> bool:
     """普通账号默认拒绝管理接口，只放行页面所需接口。"""
+    if path.startswith("/desk-browser/session/"):
+        return method in {"GET", "HEAD"}
     # Next.js 静态导出的导航数据与所属页面使用同一权限，不能放行任意 .txt。
     page_path, _, filename = path.rpartition("/")
     if filename == "index.txt" or (filename.startswith("__next.") and filename.endswith(".txt")):
@@ -439,7 +447,9 @@ class AuthMiddleware:
         if scope.get("type") == "websocket":
             # WebSocket 同样需要有效会话，普通账号仅能连接显式开放的通道
             username = current_username(scope.get("session") or {})
-            if username == "lihan" or (username and scope.get("path") in REGULAR_WEBSOCKET_PATHS):
+            path = scope.get("path", "")
+            desk_browser_socket = path.startswith("/desk-browser/session/") and path.endswith("/api/websockets")
+            if username == "lihan" or (username and (path in REGULAR_WEBSOCKET_PATHS or desk_browser_socket)):
                 await self.app(scope, receive, send)
             else:
                 await send({"type": "websocket.close", "code": 4401})

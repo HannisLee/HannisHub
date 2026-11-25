@@ -11,6 +11,7 @@ import { ChatEmojiPicker } from "../room/emoji-picker";
 import { ChatAttachmentCard, ChatLightbox, INLINE_IMAGE_TYPES, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MB, uploadChatAttachment, type LightboxImage } from "../shared/chat-attachment";
 import { Avatar, formatChatTime } from "../shared/chat-avatar";
 import { TodoPanel } from "../todo/todo-panel";
+import { DeskBrowserPanel } from "./desk-browser-panel";
 import { ADMIN_PRIVATE_VIEW_EVENT } from "../../../lib/admin-notify";
 import { PRIVATE_MESSAGE_EVENT } from "../../../lib/online-notice-events";
 
@@ -465,9 +466,9 @@ export function PrivatePanel({ mode, sceneId, contactId, onClose }: PrivatePanel
   );
 }
 
-/** 自己工位上的电脑：待办与私聊两个标签，私聊可向任何人发起。 */
+/** 自己工位上的电脑：待办、私聊与个人浏览器。 */
 export function DeskComputer({ onClose }: { onClose?: () => void }) {
-  const [tab, setTab] = useState<"todo" | "private">("todo");
+  const [tab, setTab] = useState<"todo" | "private" | "browser">("todo");
   const { contacts } = usePrivateContacts();
   const unread = (contacts ?? []).reduce((n, c) => n + c.unread, 0);
   return (
@@ -477,8 +478,11 @@ export function DeskComputer({ onClose }: { onClose?: () => void }) {
         <button type="button" role="tab" aria-selected={tab === "private"} className={`lobby-avatar-tab${tab === "private" ? " is-active" : ""}`} onClick={() => setTab("private")}>
           私聊{unread ? <span className="private-unread">{unread > 99 ? "99+" : unread}</span> : null}
         </button>
+        <button type="button" role="tab" aria-selected={tab === "browser"} className={`lobby-avatar-tab${tab === "browser" ? " is-active" : ""}`} onClick={() => setTab("browser")}>浏览器</button>
       </nav>
-      {tab === "todo" ? <div className="private-desk-scroll"><TodoPanel /></div> : <PrivatePanel mode="desk" onClose={onClose} />}
+      {tab === "todo" ? <div className="private-desk-scroll"><TodoPanel /></div> : null}
+      {tab === "private" ? <PrivatePanel mode="desk" onClose={onClose} /> : null}
+      {tab === "browser" ? <DeskBrowserPanel /> : null}
     </div>
   );
 }

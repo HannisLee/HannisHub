@@ -1827,6 +1827,8 @@ html.todo-is-dragging, html.todo-is-dragging * { cursor: grabbing !important; us
 .private-tabs .lobby-avatar-tab { display: inline-flex; align-items: center; gap: var(--space-2); }
 .private-desk-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-10) var(--space-10); overscroll-behavior: contain; }
 .private-desk > .private-panel { flex: 1 1 auto; }
+.desk-browser-frame { display: block; flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--color-bg); }
+.desk-browser-status { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; gap: var(--space-4); color: var(--color-text-secondary); }
 .private-panel { display: flex; min-width: 0; min-height: 0; }
 .private-contacts { display: flex; flex: 0 0 280px; flex-direction: column; gap: var(--space-3); min-height: 0; padding: var(--space-4); border-right: 1px solid var(--color-divider); background: var(--color-surface-soft); }
 .private-search { width: 100%; min-height: 36px; font-size: 13px; }

@@ -216,6 +216,13 @@ ASR 页面在服务未运行时显示“默认启动”按钮，会从注册服�
 - `GET` / `HEAD /browser/session/{path}` 转发 Selkies 页面和资源，WebSocket `/browser/session/api/websockets` 转发画面及键鼠。Hub 校验管理员会话，WebSocket 额外校验来源。容器仅绑定本机回环地址，远程客户端使用现有 Hub HTTPS 入口。
 - 在仓库根目录运行 `docker compose -p hannishub-browser -f scripts/remote-browser.compose.yml up -d`，独立维护浏览器容器。默认端口为 `18083`，改端口时同时设定 Compose 变量 `HANNISHUB_BROWSER_PORT` 与根 `settings.json` 的 `remote_browser.backend_port`。重启 Hub 时 Chrome 继续运行。
 
+#### 工位个人浏览器
+
+- 已认领工位的账号在「工位电脑 → 浏览器」按需启动个人 Chrome。`POST /api/chat-lobby/desk-browser/start` 校验所属工位并返回当前账号的嵌入地址。`GET` / `HEAD /desk-browser/session/{profile}/{path}` 提供客户端资源，WebSocket `/desk-browser/session/{profile}/api/websockets` 按登录会话匹配账号后转发画面和键鼠。退出、账号切换、密码重置或退还工位后，已有连接最多 5 秒内关闭。
+- 每账号有独立的 Chrome 容器和 Docker 卷，账号标识包含创建时间。登录状态、历史、书签、设置及下载文件保存在个人卷，退还工位或回收容器时继续保留。删除账号时清理其容器和个人卷。原有管理员 `/browser` 使用既有容器和卷。
+- 工位 Chrome 无外部网络接口，经同账号网关连接公网 IPv4 的 TCP 80 和 443 端口，DNS 在网关解析，阻止私网、回环、链路本地及宿主机接口地址。画面网关绑定宿主回环，连接使用 Hub 派生密钥。Hub 从固定镜像提取嵌入客户端，浏览器容器不向 Hub 提供网页脚本。个人容器不挂载宿主文件、Docker 套接字或其他用户数据。
+- Hub 运行用户需要操作 Docker 容器和卷的权限。工位浏览器首次使用时自动启动，最近一次画面连接断开后默认保留 30 分钟，最多同时运行 6 个个人 Chrome。根 `settings.json` 可配置 `"desk_browser": {"max_active": 6, "idle_minutes": 30}`。现有 Hub HTTPS 入口承担全部外部访问。
+
 ### Hub API
 
 | 方法 | 路径 | 功能 |
@@ -996,7 +1003,7 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 发起与接收规则：**发起**私聊需要面对面或坐在自己的工位电脑前；**接收**不限位置——对方在 24 小时（`REPLY_WINDOW_SECONDS`）内发来过消息时，可在任意位置查看并回复（每次来信重新计时）。历史消息的阅读始终不限位置。
 - 公共房间面向另一玩家（前方 90°、脚底距离不超过 32px）按 E 或触屏「使用」打开一对一私聊，不要求对方转身；符合条件的玩家优先于家具互动。双方距离超过 48px、换房间或对方离线时，若对方近期没有发来消息，面对面窗口在下一次检查时关闭；对方回复过则继续保留。打开期间本机角色冻结，但多人同步继续。
 - 私聊提醒：有未读时，游戏画面右上角（整页模式在账号胶囊下方）显示带感叹号的提醒胶囊（最近来信人的头像与「某某发来 N 条私聊」，窄屏只显示感叹号与头像）；点击直接以收件箱模式（inbox）打开私聊窗口并选中最近来信的联系人，无需靠近对方。收件箱中选中近期没有来信的联系人时只读，并提示前往面对面或工位发起。
-- 自己认领的工位打开「工位电脑」，包括原有待办及私聊标签。私聊支持全部其他账号联系人、搜索、历史分页、未读数和离线留言；借坐他人工位不会打开电脑。每条文字最多 1000 字，可附带一份图片或文件，Enter 发送、Shift+Enter 换行。
+- 自己认领的工位打开「工位电脑」，包括待办、私聊和个人浏览器标签。私聊支持全部其他账号联系人、搜索、历史分页、未读数和离线留言；借坐他人工位不会打开电脑。每条文字最多 1000 字，可附带一份图片或文件，Enter 发送、Shift+Enter 换行。
 - 消息持久化于 SQLite v5 迁移：`lobby_contacts`（owner、稳定随机 id）、`lobby_messages`（owner 隔离的双方副本、peer、seq、request_id、outgoing、text、created_at，v11 新增 attachment_id）、`lobby_reads`（owner、peer、单调递增 seq）。客户端请求编号使重复发送幂等；同账号发送间隔至少 0.8 秒。删除账号清理双方有关消息、已读及联系人编号。私聊附件另存于数据库同级的 `<数据库文件名去掉后缀>_private_chat_files/`，上传后绑定发送者和目标会话，双方消息引用同一文件。未被消息引用的附件按聊天室的保留期限在后续上传时清理。
 - 以下接口均需登录，前缀 `/api/chat-lobby/private-chat`；联系人只返回随机编号、场景编号及显示名字，不返回认证账号。数据查询始终按当前会话 owner 过滤。
 

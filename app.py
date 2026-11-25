@@ -3,7 +3,7 @@
 import asyncio
 import os
 import secrets
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote
@@ -43,7 +43,7 @@ from core import network_recovery
 from model_manager import ai_settings
 from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lobby_linkup, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
-from server import remote_browser, terminal_commands, terminal_client
+from server import desk_browser, remote_browser, terminal_commands, terminal_client
 from core.compression import SelectiveGZipMiddleware
 from core.frontend import FrontendCacheMiddleware, FrontendStaticFiles
 import model_manager.app as model_manager_app
@@ -137,11 +137,15 @@ async def lifespan(_: FastAPI):
     await model_manager_app.recover_interrupted_asr_tasks()
     ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(model_manager_app.auto_start_watchdog())
+    browser_reaper = asyncio.create_task(desk_browser.browsers.reap())
     try:
         yield
     finally:
         remote_files.close_all()
         auto_start_task.cancel()
+        browser_reaper.cancel()
+        with suppress(asyncio.CancelledError):
+            await browser_reaper
         await prompt_service_app.audio_service.stop()
         await server_manager_app.stop_scheduler()
 
@@ -343,6 +347,57 @@ async def browser_socket(websocket: WebSocket):
         await websocket.close(code=4403)
         return
     await remote_browser.stream(websocket)
+
+
+@app.post("/api/chat-lobby/desk-browser/start")
+async def start_desk_browser(request: Request):
+    owner = _require_user(request)
+    desk_browser.browsers.bind_session(request.session)
+    if not desk_browser.browsers.session_allowed(request.session):
+        raise HTTPException(403, "浏览器会话已退出，请重新登录")
+    if not await run_in_threadpool(lobby_desks.owned_desk, owner):
+        raise HTTPException(403, "请先认领自己的工位")
+    profile = await desk_browser.browsers.start(owner)
+    return {"url": f"{desk_browser.PREFIX}{profile}/"}
+
+
+@app.api_route(desk_browser.PREFIX + "{profile}/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def desk_browser_resource(profile: str, path: str, request: Request):
+    if (desk_browser.profile_id(_require_user(request)) != profile
+            or not desk_browser.browsers.session_allowed(request.session)):
+        raise HTTPException(404, "浏览器会话不存在")
+    if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
+        raise HTTPException(403, "请求来源不受信任")
+    headers = {"Cache-Control": "no-store", "X-Frame-Options": "SAMEORIGIN",
+               "Cross-Origin-Resource-Policy": "same-origin", "X-Content-Type-Options": "nosniff"}
+    if path == "api/status":
+        return JSONResponse({"current_mode": "websockets", "available_modes": ["websockets"],
+                             "enable_dual_mode": False, "ui_layout": "default", "ui_layout_allowed": ["default"]},
+                            headers=headers)
+    root = desk_browser.assets_dir().resolve()
+    target = (root / (path or "index.html")).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(404, "浏览器客户端资源不存在")
+    return FileResponse(target, headers=headers)
+
+
+@app.websocket(desk_browser.PREFIX + "{profile}/api/websockets")
+async def desk_browser_socket(profile: str, websocket: WebSocket):
+    owner = current_username(websocket.session)
+
+    async def authorized() -> bool:
+        return bool(owner and current_username(websocket.session) == owner and desk_browser.profile_id(owner) == profile
+                    and desk_browser.browsers.session_allowed(websocket.session)
+                    and await run_in_threadpool(lobby_desks.owned_desk, owner))
+
+    if not owner or not websocket.headers.get("origin") or not _websocket_origin_allowed(websocket) or not await authorized():
+        await websocket.close(code=4403)
+        return
+    async with desk_browser.browsers.connection(owner) as backend:
+        if backend is None:
+            await websocket.close(code=4404)
+            return
+        await remote_browser.stream(websocket, backend, authorized)
 
 
 @app.get("/point-clouds", include_in_schema=False)
@@ -1356,6 +1411,7 @@ async def login(request: Request):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     clear_login_failures(client_ip)
     clear_login_failures(account_key)
+    desk_browser.browsers.revoke_session(request.session)
     login_session(request.session, username)
     return JSONResponse({"ok": True, "username": username})
 
@@ -1381,6 +1437,7 @@ async def setup(request: Request):
 @app.post("/api/auth/logout")
 async def logout(request: Request):
     """退出登录并清空会话。"""
+    desk_browser.browsers.revoke_session(request.session)
     request.session.clear()
     return JSONResponse({"ok": True})
 
@@ -1437,6 +1494,7 @@ async def users_reset_password(username: str, request: Request, payload: dict[st
 @app.delete("/api/users/{username}")
 async def users_delete(username: str, request: Request):
     """删除用户；不能删除自己或最后一个用户，被删用户的会话立即失效。"""
+    browser_profile = desk_browser.profile_id(username)
     try:
         delete_user(username, current_username(request.session) or "")
     except ValueError as exc:
@@ -1453,6 +1511,11 @@ async def users_delete(username: str, request: Request):
     await run_in_threadpool(feature_requests.purge_user, username)
     await run_in_threadpool(lobby_linkup.purge_user, username)
     await run_in_threadpool(private_chat.purge_user, username)
+    if browser_profile is not None:
+        try:
+            await desk_browser.browsers.purge(browser_profile)
+        except (desk_browser.DockerError, TimeoutError) as error:
+            desk_browser.LOG.error("清理已删除账号的浏览器失败：%s", error)
     lobby_presence.presence.notify_desks()
     lobby_presence.presence.notify_all("notes")
     return JSONResponse({"ok": True})

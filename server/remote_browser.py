@@ -1,6 +1,7 @@
 """把管理员页面和画面流转发给本机独立的 Chrome 容器。"""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from urllib.parse import quote, urljoin, urlsplit
 
@@ -73,18 +74,25 @@ async def resource(request: Request) -> StreamingResponse:
     return StreamingResponse(body(), status_code=upstream.status_code, headers=result_headers)
 
 
-async def stream(websocket: WebSocket) -> None:
-    try:
-        url = _upstream(websocket, "ws")
-    except HTTPException:
-        await websocket.close(code=4404)
-        return
+async def stream(
+    websocket: WebSocket,
+    backend: tuple[str, dict[str, str]] | None = None,
+    authorized: Callable[[], Awaitable[bool]] | None = None,
+) -> None:
+    if backend is None:
+        try:
+            backend = (_upstream(websocket, "ws"), {})
+        except HTTPException:
+            await websocket.close(code=4404)
+            return
+    url, headers = backend
 
     tasks = []
     accepted = False
     try:
         subprotocols = websocket.scope.get("subprotocols") or None
-        async with connect(url, proxy=None, subprotocols=subprotocols, max_size=16 * 1024 * 1024) as upstream:
+        async with connect(url, proxy=None, subprotocols=subprotocols, additional_headers=headers,
+                           max_size=16 * 1024 * 1024) as upstream:
             await websocket.accept(subprotocol=upstream.subprotocol)
             accepted = True
 
@@ -103,7 +111,16 @@ async def stream(websocket: WebSocket) -> None:
                     else:
                         await websocket.send_text(message)
 
+            async def check_authorization():
+                while True:
+                    await asyncio.sleep(5)
+                    if not await authorized():
+                        await websocket.close(code=4403)
+                        return
+
             tasks = [asyncio.create_task(to_backend()), asyncio.create_task(to_browser())]
+            if authorized is not None:
+                tasks.append(asyncio.create_task(check_authorization()))
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
