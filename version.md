@@ -1672,3 +1672,8 @@
 ### v0.3.44 — 2026-11-26
 - 文件浏览列表改为按容器宽度自适应，优先保证文件名与下载操作按钮的显示空间：窗口变窄时按「类型 → 修改时间 → 大小」依次隐藏右侧元数据列，更窄时文件名自动换行显示（最多两行）。
 - 同步优化远端文件列表与点云目录列表的窄容器表现，优先隐藏辅助元信息与徽章，保留文件名和操作按钮。
+
+### v0.3.45 — 2026-11-27
+- 侧栏「设置」分组新增管理员专用「代理服务」（`/settings/proxy`），内置基于标准库 `asyncio` 的轻量 HTTP/HTTPS 正向代理（`core/http_proxy.py`），支持一键启停、端口与监听地址配置、强制 Basic 认证、一键重置随机密码、流量与认证失败统计，并禁止代理访问本机回环地址。
+- 新增代理管理接口 `GET /api/http-proxy`、`PUT /api/http-proxy`、`POST /api/http-proxy/rotate-password`，配置持久化在根 `settings.json` 的 `http_proxy` 区段。
+- 页面内置 Windows 浏览器插件（ZeroOmega）与 FRP TCP 映射（含 Cloudflare Tunnel 备选）的配置指引和一键复制功能；新增单元测试 `tests/test_http_proxy.py` 并同步更新 `spec.md`。

@@ -39,7 +39,7 @@ from core.auth import (
     validate_password,
     validate_username,
 )
-from core import network_recovery
+from core import http_proxy, network_recovery
 from model_manager import ai_settings
 from chatworld import private_chat, chat_room, feature_requests, lobby_desks, lobby_linkup, lobby_notes, lobby_presence, lobby_profile, todos
 from model_manager import ocr_records
@@ -138,9 +138,11 @@ async def lifespan(_: FastAPI):
     ocr_records.recover_interrupted()
     auto_start_task = asyncio.create_task(model_manager_app.auto_start_watchdog())
     browser_reaper = asyncio.create_task(desk_browser.browsers.reap())
+    await http_proxy.proxy_service.start_if_enabled()
     try:
         yield
     finally:
+        await http_proxy.proxy_service.stop()
         remote_files.close_all()
         auto_start_task.cancel()
         browser_reaper.cancel()
@@ -269,6 +271,12 @@ async def ai_settings_page():
 @app.get("/settings/global/", include_in_schema=False)
 async def global_settings_page():
     return await _new_frontend_route("settings/global")
+
+
+@app.get("/settings/proxy", include_in_schema=False)
+@app.get("/settings/proxy/", include_in_schema=False)
+async def proxy_settings_page():
+    return await _new_frontend_route("settings/proxy")
 
 
 @app.get("/files", include_in_schema=False)
@@ -1270,6 +1278,45 @@ def update_network_recovery(request: Request, settings: NetworkRecoverySettings)
             "revision": secrets.token_hex(8),
         })
     return JSONResponse(_network_recovery_status(), headers={"Cache-Control": "no-store"})
+
+
+# ---------- 轻量 HTTP 正向代理 ----------
+
+
+class HttpProxySettingsPayload(BaseModel):
+    enabled: Optional[StrictBool] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    public_host: Optional[str] = None
+    public_port: Optional[int] = None
+
+
+@app.get("/api/http-proxy")
+def read_http_proxy(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="代理服务仅对管理员开放")
+    return JSONResponse(http_proxy.proxy_service.status_snapshot(), headers={"Cache-Control": "no-store"})
+
+
+@app.put("/api/http-proxy")
+async def update_http_proxy(request: Request, payload: HttpProxySettingsPayload):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="代理服务仅对管理员开放")
+    try:
+        snapshot = await http_proxy.proxy_service.apply_config(payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(snapshot, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/http-proxy/rotate-password")
+async def rotate_http_proxy_password(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="代理服务仅对管理员开放")
+    snapshot = await http_proxy.proxy_service.rotate_password()
+    return JSONResponse(snapshot, headers={"Cache-Control": "no-store"})
 
 
 # ---------- 在线广播通知 ----------

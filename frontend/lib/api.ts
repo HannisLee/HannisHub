@@ -6,6 +6,7 @@ export const API_PATHS = {
   ocr: "/api/ocr",
   aiSettings: "/api/ai-settings",
   networkRecovery: "/api/network-recovery",
+  httpProxy: "/api/http-proxy",
   chatRoom: "/api/chat-room",
   chatLobby: "/api/chat-lobby",
   users: "/api/users",

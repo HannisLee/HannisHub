@@ -144,6 +144,7 @@ HannisHub/
 - `/prompts`：提示词
 - `/settings`：统一 AI 设置模块，配置 OpenAI 兼容 API 与模型；ASR 提炼提示词在 ASR 页面单独配置
 - `/settings/global`：仅管理员可访问的全局设置。「重新申请权限」在用户点击时申请当前站点的浏览器通知权限，获准后同步开启顶栏的新消息桌面提醒。「发送测试通知」使用与私聊相同的浏览器通知入口，在页面聚焦时也可测试，且不发送聊天消息或修改提醒开关。浏览器授权需要 HTTPS 或 localhost，系统负责横幅显示与位置。
+- `/settings/proxy`：仅管理员可访问的轻量 HTTP/HTTPS 正向代理设置页（位于侧栏「设置」分组）。支持一键启停代理、配置监听地址（`127.0.0.1` 或 `0.0.0.0`）、端口（默认 `18088`）、用户名/密码与外网 FRP 映射地址备注，实时展示连接数、上下行流量与认证失败次数，并提供 Windows 浏览器插件（ZeroOmega）与备选 Cloudflare Tunnel 的配置指引。
 - 全局设置的「向所有在线会话发送测试通知」向已登录并保持连接的浏览器标签页广播固定测试文案，覆盖管理员和普通账号的所有在线页面。各页面显示可关闭的网页通知，支持且已授权的浏览器也请求显示系统通知。未授权的用户可从网页通知主动申请权限。广播实时发送，离线后重新连接不补发。
 - 管理员可在「全局设置 → 大厅游戏」切换「允许玩连连看」。开关保存在根 `settings.json` 的 `linkup.enabled`，默认开启。关闭后，任何账号下次打开大厅街机时会看到「孙倩茹禁止玩连连看」，已打开的游戏可继续。
 - `WS /api/notifications/ws`：登录后建立在线广播连接，校验同源与会话；测试广播发送 `{"id":"…"}`，前端复验当前登录账号后展示固定文案。私聊和公共聊天室发送 `{"type":"private-chat"}` 或 `{"type":"chat-room"}` 来触发认证接口立即刷新，继续保留轮询兜底。大厅公开房间的说话气泡向同房间其他玩家发送 `{"type":"lobby-say","id":"…","name":"…","text":"…"}`，页面失焦时可显示系统通知。
@@ -1071,3 +1072,12 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 - 连续确认本机断网 5 分钟且物理链路存在时，重新激活指定的 NetworkManager 连接以重新获取 IPv4 配置，同一故障期间最多每 15 分钟尝试一次。连续确认断网满 5 小时则申请重启整机，无固定时段或跨重启的间隔要求。恢复、状态无法确认、巡检中断超过 3 分钟或系统重启，均重新计算连续时长。
 - 部署时，以 Hub 运行用户执行 `bash scripts/install_network_recovery.sh enp3s0`，网卡名按本机调整。需要用户级 systemd 在退出登录后继续运行时，先启用该账号的 linger。本机已启用。巡检初始为只读，按安装脚本最后输出的命令执行一次 `sudo` 授权，部署固定连接的系统级重连服务和仅允许执行该服务及重启的 sudoers 规则，同时停用已有的 `scheduled-reboot.timer`。安装过程没有重启动作。
 - 巡检状态位于 `~/.local/state/hannishub-network/status.json`。诊断日志可通过 `journalctl --user -u hannishub-network.service` 查看。自动整机重启会结束网页终端会话及其中的任务。
+
+## 轻量 HTTP 正向代理
+
+- 后端模块为 `core/http_proxy.py`，基于 Python 标准库 `asyncio` 实现 HTTP 请求与 HTTPS `CONNECT` 隧道转发，配置持久化在根 `settings.json` 的 `http_proxy` 区段，默认关闭（`enabled: false`），首次初始化自动生成随机强密码。
+- 安全策略：强制校验 `Proxy-Authorization` Basic 凭据（恒定时间比对，失败返回 `407` 并累计失败次数）；禁止代理访问本机回环地址（`127.0.0.0/8`、`::1`、`localhost`、`0.0.0.0`，返回 `403`）；限制监听地址为 `127.0.0.1` 或 `0.0.0.0`，端口需在 `1024–65535` 且避开系统保留端口（`22`、`8081`、`18082`、`18083`）。
+- 生命周期由 `app.py` 的 `lifespan` 统一管理，配置变更时热启停或重绑端口，无需重启 Hub。
+- `GET /api/http-proxy`：仅管理员可用，返回当前配置与运行状态（`running`、`bound_port`、`started_at`、`last_error`、`active_connections`、`total_connections`、`auth_failures`、`bytes_up`、`bytes_down`）。
+- `PUT /api/http-proxy`：仅管理员可用，更新并持久化配置（`enabled`、`host`、`port`、`username`、`password`、`public_host`、`public_port`），立即生效并返回最新状态。
+- `POST /api/http-proxy/rotate-password`：仅管理员可用，重置随机强密码并立即对新连接生效，返回最新状态。
