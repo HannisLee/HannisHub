@@ -8,6 +8,7 @@ import hmac
 import ipaddress
 import secrets
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -603,7 +604,7 @@ class HttpProxyService:
                     return
                 try:
                     remote_reader, remote_writer = await asyncio.wait_for(
-                        asyncio.open_connection(host, port, happy_eyeballs_delay=0.2),
+                        asyncio.open_connection(host, port, family=socket.AF_INET),
                         timeout=CONNECT_TIMEOUT_SECONDS,
                     )
                 except Exception:

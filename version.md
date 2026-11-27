@@ -1684,3 +1684,6 @@
 
 ### v0.3.47 — 2026-11-27
 - 修复 HTTPS 代理（TLS 模式）在远端关闭连接时因 SSL 传输层不支持半关闭（`write_eof`）导致的双向转发互相死等、浏览器一直转圈的问题，并增加空闲超时与 `happy_eyeballs_delay` 快速回退 IPv4。
+
+### v0.3.48 — 2026-11-27
+- 修复代理上游连接在 uvicorn/uvloop 事件循环下传入 `happy_eyeballs_delay` 触发 502 的兼容问题，改用 `family=socket.AF_INET` 直连 IPv4。
