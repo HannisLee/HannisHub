@@ -1677,3 +1677,7 @@
 - 侧栏「设置」分组新增管理员专用「代理服务」（`/settings/proxy`），内置基于标准库 `asyncio` 的轻量 HTTP/HTTPS 正向代理（`core/http_proxy.py`），支持一键启停、端口与监听地址配置、强制 Basic 认证、一键重置随机密码、流量与认证失败统计，并禁止代理访问本机回环地址。
 - 新增代理管理接口 `GET /api/http-proxy`、`PUT /api/http-proxy`、`POST /api/http-proxy/rotate-password`，配置持久化在根 `settings.json` 的 `http_proxy` 区段。
 - 页面内置 Windows 浏览器插件（ZeroOmega）与 FRP TCP 映射（含 Cloudflare Tunnel 备选）的配置指引和一键复制功能；新增单元测试 `tests/test_http_proxy.py` 并同步更新 `spec.md`。
+
+### v0.3.46 — 2026-11-27
+- 轻量正向代理新增 TLS 加密（HTTPS 代理）模式：通过 `openssl` 自动生成本机自签根证书 CA 及针对 `public_host` 的 365 天服务器证书（含 SAN），防止跨境明文 HTTP 代理连接触发 `ERR_CONNECTION_RESET`。
+- 新增根证书下载接口 `GET /api/http-proxy/ca-cert`，代理设置页新增「启用 TLS 加密」开关、证书覆盖域名展示、一键下载 `.crt` 根证书以及 Windows 信任安装与 ZeroOmega HTTPS 代理配置指引；补充 TLS 握手与转发单元测试并同步更新 `spec.md`。

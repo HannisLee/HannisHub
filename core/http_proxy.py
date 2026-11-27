@@ -7,15 +7,22 @@ import base64
 import hmac
 import ipaddress
 import secrets
+import shutil
+import ssl
+import subprocess
+import sys
+import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from core.auth import get_settings_section, update_settings_section
+from core.auth import ROOT_DIR, get_settings_section, update_settings_section
 
 SETTINGS_SECTION = "http_proxy"
+TLS_DIR = ROOT_DIR / "data" / "http_proxy_tls"
 ALLOWED_HOSTS = ("127.0.0.1", "0.0.0.0")
 RESERVED_PORTS = frozenset({22, 8081, 18082, 18083})
 DEFAULT_PORT = 18088
@@ -34,6 +41,7 @@ def generate_password() -> str:
 def _default_config() -> dict[str, Any]:
     return {
         "enabled": False,
+        "tls_enabled": False,
         "host": "127.0.0.1",
         "port": DEFAULT_PORT,
         "username": DEFAULT_USERNAME,
@@ -50,6 +58,7 @@ def normalize_config(raw: Any, fallback: dict[str, Any] | None = None) -> dict[s
         return base
 
     enabled = bool(raw.get("enabled", base["enabled"]))
+    tls_enabled = bool(raw.get("tls_enabled", base.get("tls_enabled", False)))
     host = str(raw.get("host", base["host"])).strip()
     if host not in ALLOWED_HOSTS:
         raise ValueError("监听地址仅支持 127.0.0.1 或 0.0.0.0")
@@ -87,6 +96,7 @@ def normalize_config(raw: Any, fallback: dict[str, Any] | None = None) -> dict[s
 
     return {
         "enabled": enabled,
+        "tls_enabled": tls_enabled,
         "host": host,
         "port": port,
         "username": username,
@@ -94,6 +104,133 @@ def normalize_config(raw: Any, fallback: dict[str, Any] | None = None) -> dict[s
         "public_host": public_host,
         "public_port": public_port,
     }
+
+
+def _find_openssl() -> str:
+    """优先使用当前 Python 环境同目录下的 openssl，再回退到 PATH。"""
+    candidate = Path(sys.executable).resolve().parent / "openssl"
+    if candidate.is_file():
+        return str(candidate)
+    found = shutil.which("openssl")
+    if found:
+        return found
+    raise RuntimeError("未找到 openssl 命令，无法生成 TLS 证书")
+
+
+def _build_san_entries(public_host: str) -> list[str]:
+    entries = ["IP:127.0.0.1", "DNS:localhost"]
+    cleaned = public_host.strip().strip("[]")
+    if cleaned:
+        try:
+            ipaddress.ip_address(cleaned)
+            entry = f"IP:{cleaned}"
+        except ValueError:
+            entry = f"DNS:{cleaned}"
+        if entry not in entries:
+            entries.insert(0, entry)
+    return entries
+
+
+def _run_openssl(args: list[str]) -> None:
+    cmd = [_find_openssl(), *args]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"openssl 执行失败：{detail[:240]}")
+
+
+def ensure_tls_certificates(public_host: str = "") -> tuple[Path, Path, Path, str]:
+    """确保自签 CA 与针对 public_host 的服务器证书就绪，返回 (ca_crt, server_crt, server_key, san_text)。"""
+    TLS_DIR.mkdir(parents=True, exist_ok=True)
+    ca_key = TLS_DIR / "ca.key"
+    ca_crt = TLS_DIR / "ca.crt"
+    srv_key = TLS_DIR / "server.key"
+    srv_crt = TLS_DIR / "server.crt"
+    san_file = TLS_DIR / "san.txt"
+
+    if not ca_key.is_file() or not ca_crt.is_file():
+        with tempfile.NamedTemporaryFile("w", suffix=".cnf", delete=False) as fp:
+            fp.write(
+                "[req]\n"
+                "distinguished_name = dn\n"
+                "x509_extensions = v3_ca\n"
+                "prompt = no\n"
+                "[dn]\n"
+                "CN = HannisHub Proxy Root CA\n"
+                "O = HannisHub\n"
+                "[v3_ca]\n"
+                "subjectKeyIdentifier = hash\n"
+                "authorityKeyIdentifier = keyid:always,issuer\n"
+                "basicConstraints = critical, CA:true\n"
+                "keyUsage = critical, digitalSignature, cRLSign, keyCertSign\n"
+            )
+            ca_cnf = Path(fp.name)
+        try:
+            _run_openssl([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", str(ca_key),
+                "-out", str(ca_crt),
+                "-days", "3650",
+                "-sha256",
+                "-config", str(ca_cnf),
+            ])
+            ca_key.chmod(0o600)
+        finally:
+            ca_cnf.unlink(missing_ok=True)
+
+    san_entries = _build_san_entries(public_host)
+    san_text = ", ".join(san_entries)
+    existing_san = san_file.read_text(encoding="utf-8").strip() if san_file.is_file() else ""
+
+    if not srv_key.is_file() or not srv_crt.is_file() or existing_san != san_text:
+        cn = public_host.strip() or "localhost"
+        with tempfile.NamedTemporaryFile("w", suffix=".cnf", delete=False) as fp:
+            fp.write(
+                "[req]\n"
+                "distinguished_name = dn\n"
+                "prompt = no\n"
+                "[dn]\n"
+                f"CN = {cn}\n"
+                "[v3_ext]\n"
+                "basicConstraints = CA:FALSE\n"
+                "keyUsage = critical, digitalSignature, keyEncipherment\n"
+                "extendedKeyUsage = serverAuth\n"
+                f"subjectAltName = {san_text}\n"
+            )
+            ext_cnf = Path(fp.name)
+        csr_path = TLS_DIR / "server.csr"
+        try:
+            _run_openssl([
+                "req", "-new", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", str(srv_key),
+                "-out", str(csr_path),
+                "-config", str(ext_cnf),
+            ])
+            _run_openssl([
+                "x509", "-req",
+                "-in", str(csr_path),
+                "-CA", str(ca_crt),
+                "-CAkey", str(ca_key),
+                "-CAcreateserial",
+                "-out", str(srv_crt),
+                "-days", "365",
+                "-sha256",
+                "-extfile", str(ext_cnf),
+                "-extensions", "v3_ext",
+            ])
+            srv_key.chmod(0o600)
+            san_file.write_text(san_text, encoding="utf-8")
+        finally:
+            ext_cnf.unlink(missing_ok=True)
+            csr_path.unlink(missing_ok=True)
+
+    return ca_crt, srv_crt, srv_key, san_text
+
+
+def get_ca_cert_bytes(public_host: str = "") -> bytes:
+    """获取 CA 根证书 PEM 字节，供 Windows 浏览器信任安装。"""
+    ca_crt, _, _, _ = ensure_tls_certificates(public_host)
+    return ca_crt.read_bytes()
 
 
 def load_config() -> dict[str, Any]:
@@ -204,12 +341,16 @@ class HttpProxyService:
 
     def status_snapshot(self) -> dict[str, Any]:
         cfg = self._ensure_config()
+        san_file = TLS_DIR / "san.txt"
+        tls_san = san_file.read_text(encoding="utf-8").strip() if san_file.is_file() else ""
         return {
             "config": dict(cfg),
             "running": self.is_running,
             "bound_port": self.bound_port,
             "started_at": self._started_at,
             "last_error": self._last_error,
+            "tls_ready": (TLS_DIR / "ca.crt").is_file(),
+            "tls_san": tls_san,
             "active_connections": self._metrics.active_connections,
             "total_connections": self._metrics.total_connections,
             "auth_failures": self._metrics.auth_failures,
@@ -240,6 +381,8 @@ class HttpProxyService:
                 not self.is_running
                 or new_cfg["host"] != current["host"]
                 or new_cfg["port"] != current["port"]
+                or new_cfg["tls_enabled"] != current.get("tls_enabled", False)
+                or (new_cfg["tls_enabled"] and new_cfg["public_host"] != current.get("public_host", ""))
             )
 
             self._config = new_cfg
@@ -261,12 +404,28 @@ class HttpProxyService:
         return await self.apply_config({"password": generate_password()})
 
     async def _start_unlocked(self, cfg: dict[str, Any]) -> None:
+        ssl_ctx: ssl.SSLContext | None = None
+        if cfg.get("tls_enabled"):
+            try:
+                _, srv_crt, srv_key, _ = await asyncio.to_thread(
+                    ensure_tls_certificates,
+                    cfg.get("public_host", ""),
+                )
+                ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                ssl_ctx.load_cert_chain(certfile=str(srv_crt), keyfile=str(srv_key))
+            except Exception as exc:
+                self._server = None
+                self._started_at = None
+                self._last_error = f"初始化 TLS 证书失败：{exc}"
+                return
         try:
             self._server = await asyncio.start_server(
                 self._on_client,
                 host=cfg["host"],
                 port=cfg["port"],
                 reuse_address=True,
+                ssl=ssl_ctx,
             )
             self._started_at = datetime.now(timezone.utc).isoformat()
             self._last_error = None

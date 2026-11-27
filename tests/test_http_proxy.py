@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,12 +56,15 @@ class HttpProxyAsyncTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self._orig_settings = auth.SETTINGS_PATH
+        self._orig_tls_dir = http_proxy.TLS_DIR
         auth.SETTINGS_PATH = Path(self._tmpdir.name) / "settings.json"
+        http_proxy.TLS_DIR = Path(self._tmpdir.name) / "tls"
         self.service = http_proxy.HttpProxyService()
 
     async def asyncTearDown(self):
         await self.service.stop()
         auth.SETTINGS_PATH = self._orig_settings
+        http_proxy.TLS_DIR = self._orig_tls_dir
         self._tmpdir.cleanup()
 
     async def _send_raw(self, port: int, payload: bytes) -> bytes:
@@ -186,6 +190,72 @@ class HttpProxyAsyncTest(unittest.IsolatedAsyncioTestCase):
             snap = self.service.status_snapshot()
             self.assertGreater(snap["bytes_up"], 0)
             self.assertGreater(snap["bytes_down"], 0)
+        finally:
+            upstream.close()
+            await upstream.wait_closed()
+
+    async def test_tls_https_proxy_handshake_and_connect(self):
+        async def handle_upstream(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+            try:
+                data = await reader.read(64)
+                if data == b"HELLO_TLS":
+                    writer.write(b"OK_TLS")
+                    await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        upstream = await asyncio.start_server(handle_upstream, "127.0.0.1", 0)
+        upstream_port = upstream.sockets[0].getsockname()[1]
+
+        probe = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+        proxy_port = probe.sockets[0].getsockname()[1]
+        probe.close()
+        await probe.wait_closed()
+
+        try:
+            snap = await self.service.apply_config({
+                "enabled": True,
+                "tls_enabled": True,
+                "host": "127.0.0.1",
+                "port": proxy_port,
+                "username": "tester",
+                "password": "secret-password-99",
+                "public_host": "frp-cup.com",
+            })
+            self.assertTrue(snap["running"])
+            self.assertTrue(snap["tls_ready"])
+            self.assertIn("DNS:frp-cup.com", snap["tls_san"])
+
+            client_ssl = ssl.create_default_context(cafile=str(http_proxy.TLS_DIR / "ca.crt"))
+            auth_val = _basic_header("tester", "secret-password-99")
+
+            with patch.object(http_proxy, "is_forbidden_target", return_value=False):
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1",
+                    proxy_port,
+                    ssl=client_ssl,
+                    server_hostname="frp-cup.com",
+                )
+                try:
+                    writer.write(
+                        (
+                            f"CONNECT 127.0.0.1:{upstream_port} HTTP/1.1\r\n"
+                            f"Host: 127.0.0.1:{upstream_port}\r\n"
+                            f"Proxy-Authorization: {auth_val}\r\n\r\n"
+                        ).encode("ascii")
+                    )
+                    await writer.drain()
+                    established = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5.0)
+                    self.assertTrue(established.startswith(b"HTTP/1.1 200"))
+
+                    writer.write(b"HELLO_TLS")
+                    await writer.drain()
+                    reply = await asyncio.wait_for(reader.read(16), timeout=5.0)
+                    self.assertEqual(reply, b"OK_TLS")
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
         finally:
             upstream.close()
             await upstream.wait_closed()

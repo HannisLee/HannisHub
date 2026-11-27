@@ -1076,8 +1076,10 @@ ASR 设置紧接润色提示词设置，仅展示地址、明文 Key、模型和
 ## 轻量 HTTP 正向代理
 
 - 后端模块为 `core/http_proxy.py`，基于 Python 标准库 `asyncio` 实现 HTTP 请求与 HTTPS `CONNECT` 隧道转发，配置持久化在根 `settings.json` 的 `http_proxy` 区段，默认关闭（`enabled: false`），首次初始化自动生成随机强密码。
+- 支持可选 TLS 加密（`tls_enabled: true`，HTTPS 代理模式），通过 `openssl` 自动在 `data/http_proxy_tls/` 生成自签根证书 CA 及针对 `public_host` 的 365 天服务器证书（带 SAN 扩展），防止跨境明文代理触发 `ERR_CONNECTION_RESET`。
 - 安全策略：强制校验 `Proxy-Authorization` Basic 凭据（恒定时间比对，失败返回 `407` 并累计失败次数）；禁止代理访问本机回环地址（`127.0.0.0/8`、`::1`、`localhost`、`0.0.0.0`，返回 `403`）；限制监听地址为 `127.0.0.1` 或 `0.0.0.0`，端口需在 `1024–65535` 且避开系统保留端口（`22`、`8081`、`18082`、`18083`）。
 - 生命周期由 `app.py` 的 `lifespan` 统一管理，配置变更时热启停或重绑端口，无需重启 Hub。
-- `GET /api/http-proxy`：仅管理员可用，返回当前配置与运行状态（`running`、`bound_port`、`started_at`、`last_error`、`active_connections`、`total_connections`、`auth_failures`、`bytes_up`、`bytes_down`）。
-- `PUT /api/http-proxy`：仅管理员可用，更新并持久化配置（`enabled`、`host`、`port`、`username`、`password`、`public_host`、`public_port`），立即生效并返回最新状态。
+- `GET /api/http-proxy`：仅管理员可用，返回当前配置与运行状态（`running`、`bound_port`、`started_at`、`last_error`、`tls_ready`、`tls_san`、`active_connections`、`total_connections`、`auth_failures`、`bytes_up`、`bytes_down`）。
+- `PUT /api/http-proxy`：仅管理员可用，更新并持久化配置（`enabled`、`tls_enabled`、`host`、`port`、`username`、`password`、`public_host`、`public_port`），立即生效并返回最新状态。
 - `POST /api/http-proxy/rotate-password`：仅管理员可用，重置随机强密码并立即对新连接生效，返回最新状态。
+- `GET /api/http-proxy/ca-cert`：仅管理员可用，下载自签根证书 `hannishub-proxy-ca.crt` 供浏览器系统信任安装。

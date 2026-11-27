@@ -9,7 +9,7 @@ from typing import Any, Optional
 from urllib.parse import unquote
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictBool
 from starlette.concurrency import run_in_threadpool
@@ -1285,6 +1285,7 @@ def update_network_recovery(request: Request, settings: NetworkRecoverySettings)
 
 class HttpProxySettingsPayload(BaseModel):
     enabled: Optional[StrictBool] = None
+    tls_enabled: Optional[StrictBool] = None
     host: Optional[str] = None
     port: Optional[int] = None
     username: Optional[str] = None
@@ -1317,6 +1318,25 @@ async def rotate_http_proxy_password(request: Request):
         raise HTTPException(status_code=403, detail="代理服务仅对管理员开放")
     snapshot = await http_proxy.proxy_service.rotate_password()
     return JSONResponse(snapshot, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/http-proxy/ca-cert")
+async def download_http_proxy_ca_cert(request: Request):
+    if not is_terminal_admin(current_username(request.session)):
+        raise HTTPException(status_code=403, detail="代理服务仅对管理员开放")
+    cfg = http_proxy.proxy_service.status_snapshot()["config"]
+    try:
+        cert_bytes = await run_in_threadpool(http_proxy.get_ca_cert_bytes, cfg.get("public_host", ""))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"生成根证书失败：{exc}") from exc
+    return Response(
+        content=cert_bytes,
+        media_type="application/x-x509-ca-cert",
+        headers={
+            "Content-Disposition": 'attachment; filename="hannishub-proxy-ca.crt"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # ---------- 在线广播通知 ----------
