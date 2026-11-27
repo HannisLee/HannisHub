@@ -29,6 +29,7 @@ DEFAULT_PORT = 18088
 DEFAULT_USERNAME = "hannishub"
 CONNECT_TIMEOUT_SECONDS = 15.0
 HEADER_READ_TIMEOUT_SECONDS = 15.0
+IDLE_TIMEOUT_SECONDS = 180.0
 MAX_HEADER_BYTES = 64 * 1024
 COPY_CHUNK_SIZE = 65536
 
@@ -502,7 +503,7 @@ class HttpProxyService:
     ) -> None:
         try:
             while True:
-                data = await src.read(COPY_CHUNK_SIZE)
+                data = await asyncio.wait_for(src.read(COPY_CHUNK_SIZE), timeout=IDLE_TIMEOUT_SECONDS)
                 if not data:
                     break
                 dst.write(data)
@@ -511,12 +512,42 @@ class HttpProxyService:
                     self._metrics.bytes_up += len(data)
                 else:
                     self._metrics.bytes_down += len(data)
-        except (ConnectionError, OSError, asyncio.CancelledError):
+        except (ConnectionError, OSError, asyncio.TimeoutError, asyncio.CancelledError):
             pass
         finally:
             with suppress(Exception):
                 if dst.can_write_eof():
                     dst.write_eof()
+
+    async def _relay_bidirectional(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+        remote_reader: asyncio.StreamReader,
+        remote_writer: asyncio.StreamWriter,
+    ) -> None:
+        """双向转发；TLS 连接不支持半关闭，单向结束后及时收敛避免浏览器死等转圈。"""
+        up_task = asyncio.create_task(self._pipe(client_reader, remote_writer, True))
+        down_task = asyncio.create_task(self._pipe(remote_reader, client_writer, False))
+        try:
+            done, pending = await asyncio.wait(
+                (up_task, down_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if pending:
+                # 若客户端为 TLS（不支持 write_eof），下行结束后立即收敛；明文 TCP 给短暂时间完成残余传输
+                client_is_tls = not client_writer.can_write_eof()
+                grace = 0.2 if (down_task in done and client_is_tls) else 3.0
+                _, still_pending = await asyncio.wait(pending, timeout=grace)
+                for task in still_pending:
+                    task.cancel()
+                if still_pending:
+                    await asyncio.gather(*still_pending, return_exceptions=True)
+        finally:
+            for task in (up_task, down_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(up_task, down_task, return_exceptions=True)
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self._metrics.active_connections += 1
@@ -554,7 +585,10 @@ class HttpProxyService:
                     writer,
                     "407 Proxy Authentication Required",
                     "需要代理认证",
-                    extra_headers=['Proxy-Authenticate: Basic realm="HannisHub Proxy"'],
+                    extra_headers=[
+                        'Proxy-Authenticate: Basic realm="HannisHub Proxy"',
+                        "Proxy-Connection: close",
+                    ],
                 )
                 return
 
@@ -569,7 +603,7 @@ class HttpProxyService:
                     return
                 try:
                     remote_reader, remote_writer = await asyncio.wait_for(
-                        asyncio.open_connection(host, port),
+                        asyncio.open_connection(host, port, happy_eyeballs_delay=0.2),
                         timeout=CONNECT_TIMEOUT_SECONDS,
                     )
                 except Exception:
@@ -582,10 +616,7 @@ class HttpProxyService:
                     remote_writer.write(leftover)
                     await remote_writer.drain()
                     self._metrics.bytes_up += len(leftover)
-                await asyncio.gather(
-                    self._pipe(reader, remote_writer, True),
-                    self._pipe(remote_reader, writer, False),
-                )
+                await self._relay_bidirectional(reader, writer, remote_reader, remote_writer)
                 return
 
             # 普通 HTTP 正向代理请求
@@ -611,7 +642,7 @@ class HttpProxyService:
 
             try:
                 remote_reader, remote_writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port),
+                    asyncio.open_connection(host, port, happy_eyeballs_delay=0.2),
                     timeout=CONNECT_TIMEOUT_SECONDS,
                 )
             except Exception:
@@ -635,10 +666,7 @@ class HttpProxyService:
             await remote_writer.drain()
             self._metrics.bytes_up += len(outbound)
 
-            await asyncio.gather(
-                self._pipe(reader, remote_writer, True),
-                self._pipe(remote_reader, writer, False),
-            )
+            await self._relay_bidirectional(reader, writer, remote_reader, remote_writer)
         except (asyncio.TimeoutError, ValueError, ConnectionError, OSError):
             pass
         finally:

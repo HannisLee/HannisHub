@@ -1681,3 +1681,6 @@
 ### v0.3.46 — 2026-11-27
 - 轻量正向代理新增 TLS 加密（HTTPS 代理）模式：通过 `openssl` 自动生成本机自签根证书 CA 及针对 `public_host` 的 365 天服务器证书（含 SAN），防止跨境明文 HTTP 代理连接触发 `ERR_CONNECTION_RESET`。
 - 新增根证书下载接口 `GET /api/http-proxy/ca-cert`，代理设置页新增「启用 TLS 加密」开关、证书覆盖域名展示、一键下载 `.crt` 根证书以及 Windows 信任安装与 ZeroOmega HTTPS 代理配置指引；补充 TLS 握手与转发单元测试并同步更新 `spec.md`。
+
+### v0.3.47 — 2026-11-27
+- 修复 HTTPS 代理（TLS 模式）在远端关闭连接时因 SSL 传输层不支持半关闭（`write_eof`）导致的双向转发互相死等、浏览器一直转圈的问题，并增加空闲超时与 `happy_eyeballs_delay` 快速回退 IPv4。
